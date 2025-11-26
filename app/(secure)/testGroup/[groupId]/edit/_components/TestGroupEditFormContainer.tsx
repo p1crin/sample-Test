@@ -3,7 +3,8 @@ import { useState, useEffect } from 'react';
 import clientLogger from '@/utils/client-logger';
 import { testGroupEditSchema } from './schemas/testGroup-edit-schema';
 import { TestGroupEditForm } from './TestGroupEditForm';
-import type { TestGroupEditChangeData, TestGroupEditFormState } from './TestGroupEditForm';
+import type { TestGroupEditChangeData } from './TestGroupEditForm';
+import { TestGroupFormData } from '@/app/(secure)/_components/types/testGroup-list-row';
 import { getData, saveData } from '../action';
 
 type TestGroupEditFormContainerProps = {
@@ -11,13 +12,20 @@ type TestGroupEditFormContainerProps = {
 };
 
 export function TestGroupEditFormContainer({ groupId }: TestGroupEditFormContainerProps) {
+  // Diagnostic: Verify client-side logging is working
+  clientLogger.info('TestGroupEditFormContainer', 'Component mounted - client-side logging diagnostic', {
+    groupId,
+    env: process.env.NEXT_PUBLIC_ENABLE_CLIENT_LOGGING
+  });
+
   const [toastOpen, setToastOpen] = useState(false);
   const [errors, setErrors] = useState<Record<string, string[]>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isDataLoaded, setIsDataLoaded] = useState(false);
 
   // 初期データ
-  const initialForm: TestGroupEditFormState = {
+  const initialForm: TestGroupFormData = {
     oem: '',
     model: '',
     destination: '',
@@ -25,12 +33,16 @@ export function TestGroupEditFormContainer({ groupId }: TestGroupEditFormContain
     variation: '',
     ngPlanCount: '',
     specs: '',
-    testDatespan: '',
+    test_startdate: '',
+    test_enddate: '',
+    designerTag: [],
+    executerTag: [],
+    viewerTag: [],
     created_at: '',
     updated_at: ''
   };
 
-  const [form, setForm] = useState<TestGroupEditFormState>(initialForm);
+  const [form, setForm] = useState<TestGroupFormData>(initialForm);
 
   const handleClear = () => {
     setForm(initialForm);
@@ -38,10 +50,20 @@ export function TestGroupEditFormContainer({ groupId }: TestGroupEditFormContain
 
   const handleChange = (e: TestGroupEditChangeData) => {
     const { name, value, type } = e.target;
-    setForm((prev) => ({
-      ...prev,
-      [name]: type === 'checkbox' ? value === 'true' : value,
-    }));
+
+    if (type === 'tag') {
+      // タグフィールドの場合は配列として処理
+      setForm((prev) => ({
+        ...prev,
+        [name]: Array.isArray(value) ? value : [],
+      }));
+    } else {
+      // その他のフィールド
+      setForm((prev) => ({
+        ...prev,
+        [name]: value,
+      }));
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -82,40 +104,68 @@ export function TestGroupEditFormContainer({ groupId }: TestGroupEditFormContain
   useEffect(() => {
     const getDataFunc = async () => {
       try {
+        clientLogger.info('TestGroupEditFormContainer', 'データ取得開始', { groupId });
         const testGroupData = await getData({ groupId: groupId });
-        if (!testGroupData.success || !testGroupData.data) {
-          throw new Error(testGroupData.error || 'データの取得に失敗しました');
-        }
-        setForm(testGroupData.data);
-        clientLogger.info('TestGroupEditFormContainer', 'データ取得成功');
-      } catch (err) {
-        clientLogger.error('TestGroupEditFormContainer', 'データ取得失敗', {
-          error: err instanceof Error ? err.message : String(err),
+
+        clientLogger.info('TestGroupEditFormContainer', 'API レスポンス', {
+          success: testGroupData.success,
+          data: testGroupData.data,
+          error: testGroupData.error
         });
-        setLoadError(err instanceof Error ? err.message : 'データの取得に失敗しました');
+
+        if (!testGroupData.success || !testGroupData.data) {
+          const errorMsg = testGroupData.error || 'データの取得に失敗しました';
+          throw new Error(errorMsg);
+        }
+
+        clientLogger.info('TestGroupEditFormContainer', 'フォームデータ設定', testGroupData.data);
+        setForm(testGroupData.data);
+        setLoadError(null);
+        setIsDataLoaded(true);
+        clientLogger.info('TestGroupEditFormContainer', 'データ取得完了');
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : 'データの取得に失敗しました';
+        clientLogger.error('TestGroupEditFormContainer', 'データ取得失敗', { error: errorMsg });
+        setLoadError(errorMsg);
+        setIsDataLoaded(true);
       }
     };
+
     if (groupId > 0) {
       getDataFunc();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId]);
 
+  if (!isDataLoaded) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="text-gray-500">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mb-4"></div>
+          データを読み込み中...
+        </div>
+      </div>
+    );
+  }
+
   return (
     <>
-      <TestGroupEditForm
-        form={form}
-        errors={errors}
-        toastOpen={toastOpen}
-        onChange={handleChange}
-        onClear={handleClear}
-        onSubmit={handleSubmit}
-        onToastClose={() => setToastOpen(false)}
-      />
       {loadError && (
-        <div className="text-red-500 mt-4" role="alert">
-          {loadError}
+        <div className="bg-red-50 border border-red-200 rounded p-4 mb-4" role="alert">
+          <p className="text-red-800 font-semibold">エラーが発生しました</p>
+          <p className="text-red-600 text-sm mt-1">{loadError}</p>
         </div>
+      )}
+      {!loadError && (
+        <TestGroupEditForm
+          form={form}
+          errors={errors}
+          toastOpen={toastOpen}
+          onChange={handleChange}
+          onClear={handleClear}
+          onSubmit={handleSubmit}
+          onToastClose={() => setToastOpen(false)}
+        />
       )}
     </>
   );

@@ -1,17 +1,19 @@
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 class ClientLogger {
-  private isEnabled: boolean;
   private level: LogLevel;
 
   constructor() {
     // 本番環境での有効/無効を環境変数で制御
-    this.isEnabled = process.env.NEXT_PUBLIC_ENABLE_CLIENT_LOGGING === 'true';
     this.level = process.env.NODE_ENV === 'production' ? 'info' : 'debug';
   }
 
+  private isEnabled(): boolean {
+    return process.env.NEXT_PUBLIC_ENABLE_CLIENT_LOGGING === 'true';
+  }
+
   private shouldLog(level: LogLevel): boolean {
-    if (!this.isEnabled) return false;
+    if (!this.isEnabled()) return false;
     const levels: LogLevel[] = ['debug', 'info', 'warn', 'error'];
     return levels.indexOf(level) >= levels.indexOf(this.level);
   }

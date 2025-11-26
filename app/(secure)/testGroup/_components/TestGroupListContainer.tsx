@@ -32,14 +32,26 @@ export function TestGroupListContainer() {
   useEffect(() => {
     const getDataCountFunc = async () => {
       try {
+        clientLogger.info('TestGroupListContainer', 'テスト数取得開始');
         const result = await getDataCount();
-        if (!result.success || !result.data) {
+        clientLogger.info('TestGroupListContainer', 'テスト数取得レスポンス', {
+          resultExists: !!result,
+          resultType: typeof result,
+          hasSuccess: result && typeof result === 'object' && 'success' in result,
+        });
+
+        if (!result || typeof result !== 'object' || !('success' in result)) {
+          throw new Error('Invalid response from getDataCount: ' + JSON.stringify(result));
+        }
+
+        if (!result.success || result.data === undefined) {
           throw new Error('データの取得に失敗しました' + ` (error: ${result.error})`);
         }
         setTotalCount(result.data);
-        setPageCount(result.success && result.data ? Math.ceil(result.data / pageSize) : 0);
+        setPageCount(Math.ceil(result.data / pageSize));
+        clientLogger.info('TestGroupListContainer', 'テスト数取得成功', { count: result.data });
       } catch (err) {
-        clientLogger.error('TestGroupListContainer', 'データ取得失敗', {
+        clientLogger.error('TestGroupListContainer', 'テスト数取得失敗', {
           error: err instanceof Error ? err.message : String(err),
         });
       }
@@ -53,10 +65,23 @@ export function TestGroupListContainer() {
 
     const getDataListFunc = async () => {
       try {
+        clientLogger.info('TestGroupListContainer', 'リスト取得開始', { page });
         const testGroupData = await getDataList({ page: page });
-        if (!testGroupData.success || !testGroupData.data) {
+        clientLogger.info('TestGroupListContainer', 'リスト取得レスポンス', {
+          page,
+          dataExists: !!testGroupData,
+          dataType: typeof testGroupData,
+          hasSuccess: testGroupData && typeof testGroupData === 'object' && 'success' in testGroupData,
+        });
+
+        if (!testGroupData || typeof testGroupData !== 'object' || !('success' in testGroupData)) {
+          throw new Error('Invalid response from getDataList: ' + JSON.stringify(testGroupData));
+        }
+
+        if (!testGroupData.success || !Array.isArray(testGroupData.data)) {
           throw new Error('データの取得に失敗しました' + ` (error: ${testGroupData.error})`);
         }
+
         if (!ignore) {
           setMenuItems(testGroupData.data);
           // TODO:IDの最大値＋１は事故る気がするので将来的にはシーケンス管理しているID表から発行したい。
@@ -64,13 +89,13 @@ export function TestGroupListContainer() {
           const latestId = Math.max(...testGroupData.data.map((item: { id: unknown }) => item.id as number));
           setNewid(latestId + 1);
         }
-        clientLogger.info('TestGroupListContainer', 'データ取得成功', {
+        clientLogger.info('TestGroupListContainer', 'リスト取得成功', {
           page,
           count: testGroupData.data?.length,
         });
       } catch (err) {
         if (!ignore) setMenuItems([]);
-        clientLogger.error('TestGroupListContainer', 'データ取得失敗', {
+        clientLogger.error('TestGroupListContainer', 'リスト取得失敗', {
           page,
           error: err instanceof Error ? err.message : String(err),
         });

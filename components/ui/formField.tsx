@@ -46,16 +46,22 @@ export default function FormField({ label, type, name, value, onChange, placehol
 
   const controlledValue = value ?? '';
 
-  if (!isClient) {
-    return null;
-  }
-
   const customCreateLabel = (inputValue: string) => `新しいタグ"${inputValue}" を作成`;
 
   // valueを{label:"XXXXX",value:"XXXXX"}の形式に変換
   const formattedValue = Array.isArray(value)
     ? value.map(v => ({ label: v, value: v }))
     : null;
+
+  // react-select を使う場合、クライアント側でのみレンダリング
+  if (!isClient && (type === 'select' || type === 'tag' || type === 'addableTag')) {
+    return (
+      <div className={FORM_FIELD_STYLE}>
+        <label className={LABLE_STYLE}>{label}</label>
+        <div className={INPUT_SLECT_FORM_STYLE} />
+      </div>
+    );
+  }
 
   return (
     <div className={FORM_FIELD_STYLE}>
