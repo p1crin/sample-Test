@@ -44,7 +44,7 @@ export async function getDataCount(): Promise<Result<number>> {
     }
 
     const result = await response.json();
-    const count = result.data ? (Array.isArray(result.data) ? result.data.length : 0) : 0;
+    const count = result.totalCount || (result.data ? (Array.isArray(result.data) ? result.data.length : 0) : 0);
     return { success: true, data: count };
   } catch (error) {
     serverLogger.error('getDataCount error', error);
@@ -54,14 +54,20 @@ export async function getDataCount(): Promise<Result<number>> {
 
 export async function getDataList(params: GetDataListParams): Promise<Result<TestGroupListRow[]>> {
   try {
-    serverLogger.info(`getDataList Request`, { page: params.page });
+    const page = params.page || 1;
+    const pageSize = 10;
+
+    serverLogger.info(`getDataList Request`, { page, pageSize });
 
     const cookieStore = await cookies();
-    const response = await fetch(`${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/test-groups`, {
-      headers: {
-        'Cookie': cookieStore.toString(),
-      },
-    });
+    const response = await fetch(
+      `${process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/test-groups?page=${page}&limit=${pageSize}`,
+      {
+        headers: {
+          'Cookie': cookieStore.toString(),
+        },
+      }
+    );
 
     if (!response.ok) {
       throw new Error(`API error: ${response.status}`);
@@ -72,13 +78,7 @@ export async function getDataList(params: GetDataListParams): Promise<Result<Tes
       throw new Error('Invalid API response');
     }
 
-    const page = params.page || 1;
-    const pageSize = 10;
-    const startIndex = (page - 1) * pageSize;
-    const endIndex = startIndex + pageSize;
-
     const testGroups: TestGroupListRow[] = result.data
-      .slice(startIndex, endIndex)
       .map((group: ApiTestGroupResponse) => ({
         id: group.id,
         oem: group.oem,
