@@ -1,0 +1,55 @@
+@startuml Login Flow
+title ログイン画面のシーケンス図
+
+actor "ユーザー" as user
+participant "ブラウザ" as browser
+participant "ログイン画面\n(Next.js)" as login_screen
+participant "NextAuth\n認証エンジン" as nextauth
+database "AWS RDS\n(PostgreSQL)" as db
+
+user ->> browser: メールアドレス・パスワードを入力
+activate browser
+note over browser: {email, password}
+
+browser ->> login_screen: フォーム送受信
+activate login_screen
+
+note over login_screen: バリデーション\n- メール形式チェック\n- 空値チェック
+
+alt バリデーション失敗
+  login_screen -->> browser: エラーメッセージ表示
+  deactivate login_screen
+else バリデーション成功
+  login_screen ->> nextauth: signIn('credentials',\n{email, password})
+  activate nextauth
+
+  nextauth ->> db: ユーザー取得
+  note over db: SELECT id, email, password, user_role\nFROM mt_users WHERE email = $1\nAND is_deleted = FALSE
+
+  activate db
+  db -->> nextauth: ユーザーレコード
+  deactivate db
+
+  note over nextauth: パスワード検証\nbcrypt.compare(入力PW, 保存PW)
+
+  alt パスワード一致
+    nextauth ->> nextauth: セッション生成
+    note over nextauth: {id, email, user_role}を\nセッション情報として保存
+
+    nextauth -->> login_screen: セッション成功
+    deactivate nextauth
+
+    login_screen ->> browser: Cookie設定\n(next-auth.session-token)
+    login_screen -->> user: ダッシュボードへリダイレクト\n(/secure/dashboard)
+    deactivate login_screen
+  else パスワード不一致
+    nextauth -->> login_screen: null (認証失敗)
+    deactivate nextauth
+
+    login_screen -->> browser: エラーメッセージ\n「メールまたはパスワードが正しくありません」
+    deactivate login_screen
+  end
+end
+
+deactivate browser
+@enduml

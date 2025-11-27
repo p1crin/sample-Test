@@ -1,0 +1,115 @@
+@startuml Test Group Create Flow
+title テストグループ新規作成画面のシーケンス図
+
+actor "ユーザー" as user
+participant "ブラウザ" as browser
+participant "テストグループ\n新規作成画面\n(Next.js)" as create_screen
+participant "API Route\nPOST /api/test-groups" as api
+participant "API Route\nGET /api/tags" as tags_api
+database "AWS RDS\n(PostgreSQL)" as db
+
+user ->> browser: テストグループ作成ページをロード
+activate browser
+browser ->> create_screen: ページアクセス
+activate create_screen
+
+note over create_screen: 認証確認\n- Cookie確認\n- セッション有効性確認
+
+alt セッション無効
+  create_screen -->> user: ログイン画面へリダイレクト
+  deactivate create_screen
+else セッション有効
+  create_screen ->> tags_api: タグ一覧取得
+  activate tags_api
+
+  tags_api ->> db: タグ取得
+  note over db: SELECT id, name FROM mt_tags\nWHERE is_deleted = FALSE
+
+  activate db
+  db -->> tags_api: 6件のタグ\n- テスト設計者\n- テスト実施者\n- テスト閲覧者\n- モバイルチーム\n- Webチーム\n- APIチーム
+  deactivate db
+
+  tags_api -->> create_screen: {success: true, data: [タグ]}
+  deactivate tags_api
+
+  create_screen -->> browser: フォーム表示\n(タグセレクタ含む)
+  deactivate create_screen
+end
+
+browser -->> user: 新規作成フォームを表示
+
+user ->> browser: フォーム入力\n- OEM: OEM1 (必須)\n- モデル: Model A (必須)\n- イベント: Battery Test\n- 変数: VAR-001\n- 宛先: Japan\n- 仕様: テスト仕様書\n- 開始日: 2025-01-01\n- 終了日: 2025-01-31\n- NG計画数: 50
+activate browser
+
+user ->> browser: タグ選択\n- デザイナー: テスト設計者\n- 実行者: テスト実施者\n- 閲覧者: テスト閲覧者
+
+user ->> browser: 送信ボタンをクリック
+activate create_screen
+browser ->> create_screen: onSubmit(formData)
+
+note over create_screen: クライアント側バリデーション\n- Zod検証\n- OEM: 必須かつ空でない\n- モデル: 必須かつ空でない\n- 日付形式チェック
+
+alt バリデーション失敗
+  create_screen -->> browser: エラーメッセージ\n(該当フィールド下に表示)
+  deactivate create_screen
+else バリデーション成功
+  create_screen ->> api: POST /api/test-groups
+  activate api
+
+  note over api: サーバー側バリデーション & 権限チェック\n- requireAuth()で認証確認\n- isAdmin() || isTestManager()\nで権限確認\n- 入力値の再検証
+
+  alt 認証失敗
+    api -->> create_screen: {error: '401 Unauthorized'}
+    deactivate api
+    create_screen -->> user: ログイン画面へリダイレクト
+  else 権限なし
+    api -->> create_screen: {error: '403 Forbidden'}
+    deactivate api
+    create_screen -->> browser: エラーメッセージ\n「作成権限がありません」
+  else 権限あり & バリデーション失敗
+    api -->> create_screen: {error: 'メッセージ'}
+    deactivate api
+    create_screen -->> browser: エラーメッセージ表示
+  else 権限あり & バリデーション成功
+    api ->> db: トランザクション開始
+    activate db
+
+    note over db: INSERT テストグループ\nINSERT INTO tt_test_groups\n(oem, model, event, variation,\n destination, specs,\n test_startdate, test_enddate,\n ng_plan_count, created_by,\n updated_by, is_deleted)\nVALUES (...)\nRETURNING id
+
+    db -->> api: 新規グループID: 55
+    deactivate db
+
+    loop tag_names内の各タグ
+      api ->> db: タグID取得
+      note over db: SELECT id FROM mt_tags\nWHERE name = $1
+
+      activate db
+      db -->> api: タグID
+      deactivate db
+
+      api ->> db: タグ関連付け
+      note over db: INSERT INTO tt_test_group_tags\n(test_group_id, tag_id, test_role)\nVALUES (55, $1, $2)
+
+      activate db
+      db -->> api: 関連付け完了
+      deactivate db
+    end
+
+    api ->> db: COMMIT
+
+    api -->> create_screen: {success: true, data: {id: 55}}
+    deactivate api
+
+    note over create_screen: 成功メッセージ表示\n「テストグループを作成しました」\n3秒後に詳細画面へリダイレクト
+
+    create_screen -->> browser: リダイレクト\n/secure/testGroup/55
+    deactivate create_screen
+
+    browser -->> user: 詳細画面表示\n(新規作成されたテストグループ)
+
+    note over user: テストグループ作成完了！
+  end
+end
+
+deactivate browser
+@enduml

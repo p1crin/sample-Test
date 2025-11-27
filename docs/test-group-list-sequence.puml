@@ -1,0 +1,88 @@
+@startuml Test Group List Flow
+title テストグループ一覧画面のシーケンス図
+
+actor "ユーザー" as user
+participant "ブラウザ" as browser
+participant "テストグループ一覧画面\n(Next.js)" as list_screen
+participant "API Route\n/api/test-groups" as api
+database "AWS RDS\n(PostgreSQL)" as db
+
+user ->> browser: テストグループ一覧ページをロード
+activate browser
+browser ->> list_screen: ページアクセス
+activate list_screen
+
+note over list_screen: 認証確認\n- Cookie確認\n- セッション有効性確認
+
+alt セッション無効
+  list_screen -->> user: ログイン画面へリダイレクト
+  deactivate list_screen
+else セッション有効
+  list_screen ->> api: GET /api/test-groups
+  activate api
+
+  note over api: 権限チェック\n- requireAuth()で認証確認\n- getAccessibleTestGroups()で\nユーザー権限に基づいた\nアクセス可能グループIDを取得
+
+  alt 権限なし
+    api -->> list_screen: {error: '403 Forbidden'}
+    deactivate api
+    list_screen -->> user: エラーメッセージ表示
+  else 権限あり
+    api ->> db: 権限に基づいたグループ取得
+    note over db: SELECT COUNT(*) as count\nFROM tt_test_groups\nWHERE id = ANY(accessibleIds)\nAND is_deleted = FALSE
+
+    activate db
+    db -->> api: count: 18件
+    deactivate db
+
+    api ->> db: ページング対応でデータ取得
+    note over db: SELECT * FROM tt_test_groups\nWHERE id = ANY(accessibleIds)\nAND is_deleted = FALSE\nLIMIT 10 OFFSET 0\nORDER BY created_at DESC
+
+    activate db
+    db -->> api: テストグループ10件\n(ユーザーがアクセス可能なもののみ)
+    deactivate db
+
+    api -->> list_screen: {success: true, data: [...], totalCount: 18}
+    deactivate api
+
+    note over list_screen: データ処理\n- totalCount: 18\n- pageCount: 2ページ\n- 現在ページ: 1
+
+    list_screen -->> browser: テストグループ一覧表示\n+ ページネーション表示
+    deactivate list_screen
+  end
+
+  browser -->> user: 一覧画面を表示\n(10件 + ページボタン)
+end
+
+note over user: ページ2をクリック
+
+user ->> browser: ページ2ボタンをクリック
+activate browser
+browser ->> list_screen: ページ変更イベント
+activate list_screen
+
+list_screen ->> api: GET /api/test-groups?page=2&limit=10
+activate api
+
+note over api: 権限チェック（再度実施）
+
+api ->> db: 次ページデータ取得
+note over db: SELECT * FROM tt_test_groups\nWHERE id = ANY(accessibleIds)\nAND is_deleted = FALSE\nLIMIT 10 OFFSET 10
+
+activate db
+db -->> api: テストグループ8件
+deactivate db
+
+api -->> list_screen: {success: true, data: [...], totalCount: 18}
+deactivate api
+
+note over list_screen: ページ状態更新\nページ2を表示
+
+list_screen -->> browser: テストグループ一覧更新\n(次の8件表示)
+deactivate list_screen
+
+browser -->> user: ページ2を表示
+deactivate browser
+
+note over user: 権限別表示例\n- Admin: すべてのテストグループ\n- TestManager: 自分が作成したグループ\n- 一般ユーザー: アクセス許可があるグループのみ
+@enduml
