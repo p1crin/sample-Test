@@ -4,7 +4,7 @@ import { query, getAllRows, transaction } from '@/app/lib/db';
 import { TestGroup, UserRole } from '@/types';
 import serverLogger from '@/utils/server-logger';
 import { logDatabaseQuery, logAPIEndpoint, QueryTimer } from '@/utils/database-logger';
-import { formatDateTimeJST } from '@/utils/date-formatter';
+import { formatDate } from '@/utils/date-formatter';
 
 // GET /api/test-groups - Get all accessible test groups
 export async function GET(req: NextRequest) {
@@ -122,10 +122,10 @@ export async function GET(req: NextRequest) {
     });
 
     // 日付をフォーマット（日本時間）
-    const formattedTestGroups = testGroups.map((group: any) => ({
+    const formattedTestGroups = testGroups.map((group: TestGroup) => ({
       ...group,
-      created_at: formatDateTimeJST(group.created_at),
-      updated_at: formatDateTimeJST(group.updated_at),
+      created_at: formatDate(group.created_at, 'YYYY/MM/DD HH:mm:ss'),
+      updated_at: formatDate(group.updated_at, 'YYYY/MM/DD HH:mm:ss'),
     }));
 
     statusCode = 200;

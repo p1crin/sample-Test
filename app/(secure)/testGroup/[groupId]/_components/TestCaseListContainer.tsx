@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Modal } from '@/components/ui/modal';
 import ImportButton from '@/components/ui/importButton';
 import SeachForm from '@/components/ui/searchForm';
+import type { TestCase } from '@/types';
 
 export function TestCaseListContainer() {
   const [menuItems, setMenuItems] = useState<TestCaseListRow[]>([]);
@@ -75,7 +76,7 @@ export function TestCaseListContainer() {
         const endIndex = startIndex + pageSize;
 
         if (!ignore) {
-          setMenuItems(result.testCases.slice(startIndex, endIndex).map((testCase: any) => ({
+          setMenuItems(result.testCases.slice(startIndex, endIndex).map((testCase: TestCase) => ({
             tid: testCase.tid,
             firstLayer: testCase.first_layer,
             secondLayer: testCase.second_layer,
@@ -84,8 +85,8 @@ export function TestCaseListContainer() {
             purpose: testCase.purpose,
             requestId: testCase.request_id,
             checkItems: testCase.test_procedure,
-            createdAt: testCase.created_at.split('T')[0],
-            updatedAt: testCase.updated_at.split('T')[0],
+            createdAt: testCase.created_at ? testCase.created_at.toString().split('T')[0] : '',
+            updatedAt: testCase.updated_at ? testCase.updated_at.toString().split('T')[0] : '',
             chartData: {
               okCount: 0,
               ngCount: 0,

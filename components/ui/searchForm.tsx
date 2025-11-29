@@ -13,6 +13,8 @@ interface SearchFormProps {
   values?: Record<string, string>;
   /** 検索ボタンがクリックされたときに呼び出される関数 */
   onClick: () => void;
+  /** 検索フォームの値が変更されたときに呼び出される関数 */
+  onFormDataChange?: (formData: Record<string, string>) => void;
 }
 
 const SEARCH_FORM_STYLE = "flex";
@@ -24,7 +26,7 @@ const SEARCH_BUTTON_STYLE = "text-right pb-2 ml-4";
  * @param {SearchFormProps} props - 検索フォームのプロパティ
  * @returns {JSX.Element} 検索フォームのJSX要素
  */
-export default function SeachForm({ fields, values, onClick }: SearchFormProps) {
+export default function SeachForm({ fields, values, onClick, onFormDataChange }: SearchFormProps) {
   const [formData, setFormData] = React.useState<Record<string, string>>(
     values || fields.reduce((acc, field) => ({ ...acc, [field.name]: field.value ?? '' }), {})
   );
@@ -38,10 +40,15 @@ export default function SeachForm({ fields, values, onClick }: SearchFormProps) 
     const target = e.target as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | { name: string; value: string | string[] };
     const { name, value } = target;
     const stringValue = typeof value === 'string' ? value : Array.isArray(value) ? value.join(',') : '';
-    setFormData({
+    const updatedFormData = {
       ...formData,
       [name]: stringValue
-    });
+    };
+    setFormData(updatedFormData);
+    // フォーム値が変更されたときに親コンポーネントに通知
+    if (onFormDataChange) {
+      onFormDataChange(updatedFormData);
+    }
   };
 
   return (

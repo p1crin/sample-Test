@@ -7,11 +7,14 @@ import { Column } from '@/components/datagrid/DataGrid';
 import { TestGroupListRow } from '../../_components/types/testGroup-list-row';
 import { TestGroupList } from './TestGroupList';
 import { Button } from '@/components/ui/button';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Modal } from '@/components/ui/modal';
 import SeachForm from '@/components/ui/searchForm';
 
 export function TestGroupListContainer() {
+  const router = useRouter();
+  const searchParamsQuery = useSearchParams();
+
   const [menuItems, setMenuItems] = useState<TestGroupListRow[]>([]);
   const [page, setPage] = useState(1);
   const [pageCount, setPageCount] = useState(0);
@@ -20,19 +23,97 @@ export function TestGroupListContainer() {
     key: keyof TestGroupListRow;
     direction: 'asc' | 'desc';
   } | null>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
   const pageSize = 10;
-  const router = useRouter();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedTestGroup, setSelectedTestGroup] = useState<TestGroupListRow | null>(null);
   const [newid, setNewid] = useState<number | null>(null);
   const [modalContent, setModalContent] = useState<'initial' | 'confirm'>('initial');
 
+  // フォーム入力値（リアルタイムで変更）
+  const [formValues, setFormValues] = useState<Record<string, string>>({
+    oem: '',
+    model: '',
+    event: '',
+    variation: '',
+    destination: '',
+  });
+
+  // 検索パラメータ（検索ボタン押下時に更新）
+  const [searchParams, setSearchParams] = useState<Record<string, string>>({
+    oem: '',
+    model: '',
+    event: '',
+    variation: '',
+    destination: '',
+  });
+
+  // 検索パラメータを含むクエリ文字列を構築（API用、limitを含む）
+  const buildQueryString = (params: Record<string, string>, pageNum: number = 1) => {
+    const queryParams = new URLSearchParams();
+    queryParams.append('page', String(pageNum));
+    queryParams.append('limit', String(pageSize));
+
+    // 空でない検索パラメータのみ追加
+    Object.entries(params).forEach(([key, value]) => {
+      if (value.trim()) {
+        queryParams.append(key, value);
+      }
+    });
+
+    return queryParams.toString();
+  };
+
+  // URLパラメータを更新する関数（limitは含めない）
+  const updateUrlParams = (newSearchParams: Record<string, string>, pageNum: number = 1) => {
+    const queryParams = new URLSearchParams();
+    queryParams.append('page', String(pageNum));
+
+    // 空でない検索パラメータのみ追加
+    Object.entries(newSearchParams).forEach(([key, value]) => {
+      if (value.trim()) {
+        queryParams.append(key, value);
+      }
+    });
+
+    const queryString = queryParams.toString();
+    router.push(`/testGroup?${queryString}`);
+    clientLogger.info('TestGroupListContainer', 'URL更新', { pageNum, searchParams: newSearchParams });
+  };
+
+  // URLパラメータをコンポーネント状態に同期する
+  useEffect(() => {
+    const params: Record<string, string> = {
+      oem: searchParamsQuery.get('oem') || '',
+      model: searchParamsQuery.get('model') || '',
+      event: searchParamsQuery.get('event') || '',
+      variation: searchParamsQuery.get('variation') || '',
+      destination: searchParamsQuery.get('destination') || '',
+    };
+
+    const pageNum = parseInt(searchParamsQuery.get('page') || '1', 10);
+    const hasPageInUrl = searchParamsQuery.get('page') !== null;
+
+    setFormValues(params);
+    setSearchParams(params);
+    setPage(pageNum);
+    setIsInitialized(true);
+
+    // URLにpageパラメータがない場合は、URLを更新（初期表示やサイドバーからの遷移時）
+    if (!hasPageInUrl) {
+      updateUrlParams(params, pageNum);
+    }
+
+    clientLogger.info('TestGroupListContainer', 'URLパラメータ同期完了', { params, pageNum, hasPageInUrl });
+  }, [searchParamsQuery]);
+
   useEffect(() => {
     const getDataCountFunc = async () => {
       try {
         clientLogger.info('TestGroupListContainer', 'テスト数取得開始');
-        const response = await fetch('/api/test-groups');
+        const queryString = buildQueryString(searchParams, 1);
+        const response = await fetch(`/api/test-groups?${queryString}`);
 
         if (!response.ok) {
           throw new Error(`API error: ${response.status}`);
@@ -51,16 +132,17 @@ export function TestGroupListContainer() {
       }
     };
     getDataCountFunc();
-  }, []);
+  }, [searchParams, pageSize]);
 
   useEffect(() => {
     let ignore = false;
-    clientLogger.info('TestGroupListContainer', 'データ取得開始', { page });
+    clientLogger.info('TestGroupListContainer', 'データ取得開始', { page, searchParams });
 
     const getDataListFunc = async () => {
       try {
         clientLogger.info('TestGroupListContainer', 'リスト取得開始', { page });
-        const response = await fetch(`/api/test-groups?page=${page}&limit=${pageSize}`);
+        const queryString = buildQueryString(searchParams, page);
+        const response = await fetch(`/api/test-groups?${queryString}`);
 
         if (!response.ok) {
           throw new Error(`API error: ${response.status}`);
@@ -95,7 +177,7 @@ export function TestGroupListContainer() {
     return () => {
       ignore = true;
     };
-  }, [page, pageSize]);
+  }, [page, pageSize, searchParams]);
 
   const handleSort = (key: keyof TestGroupListRow) => {
     setSortConfig((prev) => {
@@ -224,9 +306,23 @@ export function TestGroupListContainer() {
     },
   ];
 
+  // 検索フォームのデータが更新されたときに呼び出される
+  const handleFormDataChange = (formData: Record<string, string>) => {
+    setFormValues(formData);
+  };
+
   const handleSearch = () => {
-    // 検索処理をここに記述
-    console.log('検索クエリ:', FormData);
+    // 検索ボタン押下時、フォーム値を検索パラメータに設定してURLを更新
+    setSearchParams(formValues);
+    setPage(1); // ページを1にリセット
+    updateUrlParams(formValues, 1);
+    clientLogger.info('TestGroupListContainer', '検索実行', { formValues });
+  };
+
+  // ページ変更時にURLも更新
+  const handlePageChange = (pageNum: number) => {
+    setPage(pageNum);
+    updateUrlParams(searchParams, pageNum);
   };
 
   const handleAddTestGroup = () => {
@@ -236,7 +332,7 @@ export function TestGroupListContainer() {
 
   return (
     <div>
-      <SeachForm fields={fields} onClick={handleSearch} />
+      <SeachForm fields={fields} onClick={handleSearch} onFormDataChange={handleFormDataChange} />
       <div className="text-right pb-2">
         <Button onClick={handleAddTestGroup} variant="default">
           <Link href="/testGroup/regist">
@@ -251,7 +347,7 @@ export function TestGroupListContainer() {
         page={page}
         pageCount={pageCount}
         onSort={handleSort}
-        onPageChange={setPage}
+        onPageChange={handlePageChange}
         renderActions={renderActions}
       />
       <Modal open={isModalOpen} onClose={() => setIsModalOpen(false)}>
