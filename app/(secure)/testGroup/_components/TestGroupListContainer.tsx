@@ -10,7 +10,6 @@ import { Button } from '@/components/ui/button';
 import { useRouter } from 'next/navigation';
 import { Modal } from '@/components/ui/modal';
 import SeachForm from '@/components/ui/searchForm';
-import { getDataCount, getDataList } from '../action';
 
 export function TestGroupListContainer() {
   const [menuItems, setMenuItems] = useState<TestGroupListRow[]>([]);
@@ -33,23 +32,18 @@ export function TestGroupListContainer() {
     const getDataCountFunc = async () => {
       try {
         clientLogger.info('TestGroupListContainer', 'テスト数取得開始');
-        const result = await getDataCount();
-        clientLogger.info('TestGroupListContainer', 'テスト数取得レスポンス', {
-          resultExists: !!result,
-          resultType: typeof result,
-          hasSuccess: result && typeof result === 'object' && 'success' in result,
-        });
+        const response = await fetch('/api/test-groups');
 
-        if (!result || typeof result !== 'object' || !('success' in result)) {
-          throw new Error('Invalid response from getDataCount: ' + JSON.stringify(result));
+        if (!response.ok) {
+          throw new Error(`API error: ${response.status}`);
         }
 
-        if (!result.success || result.data === undefined) {
-          throw new Error('データの取得に失敗しました' + ` (error: ${result.error})`);
-        }
-        setTotalCount(result.data);
-        setPageCount(Math.ceil(result.data / pageSize));
-        clientLogger.info('TestGroupListContainer', 'テスト数取得成功', { count: result.data });
+        const result = await response.json();
+        const count = result.totalCount || (result.data ? result.data.length : 0);
+
+        setTotalCount(count);
+        setPageCount(Math.ceil(count / pageSize));
+        clientLogger.info('TestGroupListContainer', 'テスト数取得成功', { count });
       } catch (err) {
         clientLogger.error('TestGroupListContainer', 'テスト数取得失敗', {
           error: err instanceof Error ? err.message : String(err),
@@ -66,32 +60,28 @@ export function TestGroupListContainer() {
     const getDataListFunc = async () => {
       try {
         clientLogger.info('TestGroupListContainer', 'リスト取得開始', { page });
-        const testGroupData = await getDataList({ page: page });
-        clientLogger.info('TestGroupListContainer', 'リスト取得レスポンス', {
-          page,
-          dataExists: !!testGroupData,
-          dataType: typeof testGroupData,
-          hasSuccess: testGroupData && typeof testGroupData === 'object' && 'success' in testGroupData,
-        });
+        const response = await fetch(`/api/test-groups?page=${page}&limit=${pageSize}`);
 
-        if (!testGroupData || typeof testGroupData !== 'object' || !('success' in testGroupData)) {
-          throw new Error('Invalid response from getDataList: ' + JSON.stringify(testGroupData));
+        if (!response.ok) {
+          throw new Error(`API error: ${response.status}`);
         }
 
-        if (!testGroupData.success || !Array.isArray(testGroupData.data)) {
-          throw new Error('データの取得に失敗しました' + ` (error: ${testGroupData.error})`);
+        const result = await response.json();
+
+        if (!Array.isArray(result.data)) {
+          throw new Error('Invalid API response');
         }
 
         if (!ignore) {
-          setMenuItems(testGroupData.data);
+          setMenuItems(result.data);
           // TODO:IDの最大値＋１は事故る気がするので将来的にはシーケンス管理しているID表から発行したい。
           // ID発酵処理はテストグループ複製画面で実行する想定。
-          const latestId = Math.max(...testGroupData.data.map((item: { id: unknown }) => item.id as number));
+          const latestId = Math.max(...result.data.map((item: { id: unknown }) => item.id as number));
           setNewid(latestId + 1);
         }
         clientLogger.info('TestGroupListContainer', 'リスト取得成功', {
           page,
-          count: testGroupData.data?.length,
+          count: result.data?.length,
         });
       } catch (err) {
         if (!ignore) setMenuItems([]);
@@ -105,7 +95,7 @@ export function TestGroupListContainer() {
     return () => {
       ignore = true;
     };
-  }, [page]);
+  }, [page, pageSize]);
 
   const handleSort = (key: keyof TestGroupListRow) => {
     setSortConfig((prev) => {

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, hasTestRole } from '@/app/lib/auth';
 import { query } from '@/app/lib/db';
 import { deleteFileFromS3 } from '@/app/lib/s3';
-import { TestRole } from '@/app/types/database';
+import { TestRole } from '@/types';
 
 // DELETE /api/test-groups/[groupId]/cases/[tid]/evidences/[testCaseNo]/[historyCount]/[evidenceNo]
 export async function DELETE(

@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { getToken } from 'next-auth/jwt';
-import { UserRole, TestRole } from '@/app/types/database';
+import { UserRole, TestRole } from '@/types';
 import { query, getSingleRow } from '@/app/lib/db';
 
 // Session user interface

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/app/lib/auth';
 import { query, getAllRows, transaction } from '@/app/lib/db';
 import { hash } from 'bcryptjs';
-import { User } from '@/app/types/database';
+import { User } from '@/types/database';
 
 // GET /api/users - Get all users (Admin only)
 export async function GET(req: NextRequest) {

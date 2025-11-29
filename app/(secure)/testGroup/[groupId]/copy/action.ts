@@ -35,10 +35,12 @@ export async function getData(params: GetDataParams): Promise<Result<TestGroupCo
       event: '',
       variation: '',
       specs: '',
-      testDatespan: '',
+      test_startdate: '',
+      test_enddate: '',
       ngPlanCount: '',
-      created_at: '',
-      updated_at: ''
+      designerTag: [],
+      executerTag: [],
+      viewerTag: [],
     };
 
     return { success: true, data: data };

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, canViewTestGroup, canModifyTestGroup } from '@/app/lib/auth';
 import { query, getSingleRow, transaction } from '@/app/lib/db';
-import { TestGroup } from '@/app/types/database';
+import { TestGroup } from '@/types';
 
 interface RouteParams {
   params: Promise<{ groupId: string }>;

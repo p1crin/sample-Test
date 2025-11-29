@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { query, transaction } from './db';
 import { parseCSV, csvToObjects, validateCSVData, CSVParseResult } from './csv-parser';
-import { UserRole } from '../types/database';
+import { UserRole } from '@/types';
 
 interface UserCSVRow {
   email: string;

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, canViewTestGroup, canEditTestCases } from '@/app/lib/auth';
 import { query, getAllRows, transaction } from '@/app/lib/db';
+import { logDatabaseQuery, logAPIEndpoint, QueryTimer } from '@/utils/database-logger';
+import serverLogger from '@/utils/server-logger';
 
 interface RouteParams {
   params: Promise<{ groupId: string }>;
@@ -8,6 +10,9 @@ interface RouteParams {
 
 // GET /api/test-groups/[groupId]/cases - Get test cases
 export async function GET(req: NextRequest, { params }: RouteParams) {
+  const apiTimer = new QueryTimer();
+  let statusCode = 200;
+
   try {
     const { groupId } = await params;
     const user = await requireAuth(req);
@@ -16,6 +21,15 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     const canView = await canViewTestGroup(user.id, user.user_role, parseInt(groupId));
 
     if (!canView) {
+      statusCode = 403;
+      logAPIEndpoint({
+        method: 'GET',
+        endpoint: `/api/test-groups/${groupId}/cases`,
+        userId: user.id,
+        statusCode,
+        executionTime: apiTimer.elapsed(),
+        error: 'Permission denied',
+      });
       return NextResponse.json(
         { error: 'このテストグループを表示する権限がありません' },
         { status: 403 }
@@ -23,8 +37,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     }
 
     // Fetch test cases with contents
-    const result = await query(
-      `SELECT
+    const testCaseQuery = `SELECT
         tc.test_group_id,
         tc.tid,
         tc.first_layer,
@@ -39,31 +52,59 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
         tc.updated_at
        FROM tt_test_cases tc
        WHERE tc.test_group_id = $1 AND tc.is_deleted = FALSE
-       ORDER BY tc.tid`,
-      [groupId]
-    );
+       ORDER BY tc.tid`;
 
+    const testCaseTimer = new QueryTimer();
+    const result = await query(testCaseQuery, [groupId]);
     const testCases = getAllRows(result);
+
+    logDatabaseQuery({
+      operation: 'SELECT',
+      table: 'tt_test_cases',
+      executionTime: testCaseTimer.elapsed(),
+      rowsReturned: testCases.length,
+      query: testCaseQuery,
+      params: [groupId],
+    });
 
     // Fetch test contents for each test case
     const casesWithContents = await Promise.all(
       testCases.map(async (testCase: unknown) => {
         const tc = testCase as Record<string, unknown>;
-        const contentsResult = await query(
-          `SELECT test_case_no, test_case, expected_value, is_target
+
+        const contentsQuery = `SELECT test_case_no, test_case, expected_value, is_target
            FROM tt_test_contents
            WHERE test_group_id = $1 AND tid = $2 AND is_deleted = FALSE
-           ORDER BY test_case_no`,
-          [groupId, tc.tid]
-        );
+           ORDER BY test_case_no`;
 
-        const filesResult = await query(
-          `SELECT file_type, file_no, file_name, file_path
+        const contentsTimer = new QueryTimer();
+        const contentsResult = await query(contentsQuery, [groupId, tc.tid]);
+
+        logDatabaseQuery({
+          operation: 'SELECT',
+          table: 'tt_test_contents',
+          executionTime: contentsTimer.elapsed(),
+          rowsReturned: contentsResult.rows.length,
+          query: contentsQuery,
+          params: [groupId, tc.tid],
+        });
+
+        const filesQuery = `SELECT file_type, file_no, file_name, file_path
            FROM tt_test_case_files
            WHERE test_group_id = $1 AND tid = $2 AND is_deleted = FALSE
-           ORDER BY file_type, file_no`,
-          [groupId, tc.tid]
-        );
+           ORDER BY file_type, file_no`;
+
+        const filesTimer = new QueryTimer();
+        const filesResult = await query(filesQuery, [groupId, tc.tid]);
+
+        logDatabaseQuery({
+          operation: 'SELECT',
+          table: 'tt_test_case_files',
+          executionTime: filesTimer.elapsed(),
+          rowsReturned: filesResult.rows.length,
+          query: filesQuery,
+          params: [groupId, tc.tid],
+        });
 
         return {
           ...tc,
@@ -73,9 +114,27 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
       })
     );
 
+    statusCode = 200;
+    logAPIEndpoint({
+      method: 'GET',
+      endpoint: `/api/test-groups/${groupId}/cases`,
+      userId: user.id,
+      statusCode,
+      executionTime: apiTimer.elapsed(),
+      dataSize: casesWithContents.length,
+    });
+
     return NextResponse.json({ testCases: casesWithContents });
   } catch (error) {
-    console.error(`GET /api/test-groups/${(await params).groupId}/cases error:`, error);
+    statusCode = error instanceof Error && error.message === 'Unauthorized' ? 401 : 500;
+
+    logAPIEndpoint({
+      method: 'GET',
+      endpoint: `/api/test-groups/${(await params).groupId}/cases`,
+      statusCode,
+      executionTime: apiTimer.elapsed(),
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
 
     if (error instanceof Error && error.message === 'Unauthorized') {
       return NextResponse.json(

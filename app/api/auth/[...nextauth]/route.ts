@@ -2,7 +2,7 @@ import NextAuth, { NextAuthOptions, User as NextAuthUser } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import { compare } from 'bcryptjs';
 import { query, getSingleRow } from '@/app/lib/db';
-import { User, UserRole } from '@/app/types/database';
+import { User, UserRole } from '@/types/database';
 
 // Extend NextAuth types
 declare module 'next-auth' {

@@ -7,7 +7,6 @@ import clientLogger from '@/utils/client-logger';
 import { Column } from '@/components/datagrid/DataGrid';
 import { TestCaseListRow } from './types/testCase-list-row';
 import { TestCaseList } from './TestCaseList';
-import { getDataList, getDataCount } from '../testCase/action';
 import { Button } from '@/components/ui/button';
 import { Modal } from '@/components/ui/modal';
 import ImportButton from '@/components/ui/importButton';
@@ -34,11 +33,15 @@ export function TestCaseListContainer() {
   useEffect(() => {
     const getDataCountFunc = async () => {
       try {
-        const result = await getDataCount(groupId);
-        if (!result.success || !result.data) {
-          throw new Error('データの取得に失敗しました' + ` (error: ${result.error})`);
+        const response = await fetch(`/api/test-groups/${groupId}/cases`);
+
+        if (!response.ok) {
+          throw new Error(`API error: ${response.status}`);
         }
-        setPageCount(result.success && result.data ? Math.ceil(result.data / pageSize) : 0);
+
+        const result = await response.json();
+        const count = result.testCases ? (Array.isArray(result.testCases) ? result.testCases.length : 0) : 0;
+        setPageCount(Math.ceil(count / pageSize));
       } catch (err) {
         clientLogger.error('TestCaseListContainer', 'データ取得失敗', {
           page,
@@ -49,7 +52,7 @@ export function TestCaseListContainer() {
     if (groupId > 0) {
       getDataCountFunc();
     }
-  }, [groupId]);
+  }, [groupId, pageSize]);
 
   useEffect(() => {
     let ignore = false;
@@ -57,14 +60,43 @@ export function TestCaseListContainer() {
 
     const getDataListFunc = async () => {
       try {
-        const testCaseData = await getDataList({ page: page, groupId });
-        if (!testCaseData.success || !testCaseData.data) {
-          throw new Error('データの取得に失敗しました' + ` (error: ${testCaseData.error})`);
+        const response = await fetch(`/api/test-groups/${groupId}/cases?page=${page}&limit=${pageSize}`);
+
+        if (!response.ok) {
+          throw new Error(`API error: ${response.status}`);
         }
-        if (!ignore) setMenuItems(testCaseData.data);
+
+        const result = await response.json();
+        if (!Array.isArray(result.testCases)) {
+          throw new Error('Invalid API response');
+        }
+
+        const startIndex = (page - 1) * pageSize;
+        const endIndex = startIndex + pageSize;
+
+        if (!ignore) {
+          setMenuItems(result.testCases.slice(startIndex, endIndex).map((testCase: any) => ({
+            tid: testCase.tid,
+            firstLayer: testCase.first_layer,
+            secondLayer: testCase.second_layer,
+            thirdLayer: testCase.third_layer,
+            fourthLayer: testCase.fourth_layer,
+            purpose: testCase.purpose,
+            requestId: testCase.request_id,
+            checkItems: testCase.test_procedure,
+            createdAt: testCase.created_at.split('T')[0],
+            updatedAt: testCase.updated_at.split('T')[0],
+            chartData: {
+              okCount: 0,
+              ngCount: 0,
+              notStartCount: 0,
+              excludedCount: 0,
+            },
+          })));
+        }
         clientLogger.info('TestCaseListContainer', 'データ取得成功', {
           page,
-          count: testCaseData.data?.length,
+          count: result.testCases?.length,
         });
       } catch (err) {
         if (!ignore) setMenuItems([]);
@@ -80,7 +112,7 @@ export function TestCaseListContainer() {
     return () => {
       ignore = true;
     };
-  }, [page, groupId]);
+  }, [page, groupId, pageSize]);
 
   const handleSort = (key: keyof TestCaseListRow) => {
     setSortConfig((prev) => {

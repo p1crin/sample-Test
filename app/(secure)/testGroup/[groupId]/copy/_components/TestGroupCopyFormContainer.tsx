@@ -23,10 +23,12 @@ export function TestGroupCopyFormContainer({ groupId }: TestGroupCopyFormContain
     event: '',
     variation: '',
     specs: '',
-    testDatespan: '',
+    test_startdate: '',
+    test_enddate: '',
     ngPlanCount: '',
-    created_at: '',
-    updated_at: ''
+    designerTag: [],
+    executerTag: [],
+    viewerTag: [],
   };
 
   const [form, setForm] = useState<TestGroupCopyFormState>(initialForm);

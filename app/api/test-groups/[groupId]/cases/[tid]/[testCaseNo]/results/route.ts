@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, hasTestRole } from '@/app/lib/auth';
 import { transaction } from '@/app/lib/db';
-import { TestRole } from '@/app/types/database';
+import { TestRole } from '@/types';
 
 // POST /api/test-groups/[groupId]/cases/[tid]/[testCaseNo]/results - Register test result
 export async function POST(

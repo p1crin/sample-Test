@@ -1,4 +1,4 @@
-// User Types
+// ユーザー関連の型
 export enum UserRole {
   ADMIN = 0,
   TEST_MANAGER = 1,
@@ -34,7 +34,7 @@ export interface UserTag {
   is_deleted?: boolean;
 }
 
-// Test Group Types
+// テストグループ関連の型
 export enum TestRole {
   DESIGNER = 0,
   EXECUTOR = 1,
@@ -68,7 +68,7 @@ export interface TestGroupTag {
   is_deleted?: boolean;
 }
 
-// Test Case Types
+// テストケース関連の型
 export interface TestCase {
   test_group_id: number;
   tid: string;
@@ -114,7 +114,7 @@ export interface TestContent {
   is_deleted?: boolean;
 }
 
-// Test Result Types
+// テスト結果関連の型
 export enum Judgment {
   OK = 'OK',
   NG = 'NG',
@@ -171,7 +171,7 @@ export interface TestEvidence {
   is_deleted?: boolean;
 }
 
-// Import Types
+// インポート関連の型
 export enum ImportStatus {
   ERROR = 0,
   IN_PROGRESS = 1,
