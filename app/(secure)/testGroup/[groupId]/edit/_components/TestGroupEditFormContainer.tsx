@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import clientLogger from '@/utils/client-logger';
+import Loading from '@/components/ui/loading';
 import { testGroupEditSchema } from './schemas/testGroup-edit-schema';
 import { TestGroupEditForm } from './TestGroupEditForm';
 import type { TestGroupEditChangeData } from './TestGroupEditForm';
@@ -137,14 +138,14 @@ export function TestGroupEditFormContainer({ groupId }: TestGroupEditFormContain
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [groupId]);
 
+  // ローディング中の表示
   if (!isDataLoaded) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="text-gray-500">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mb-4"></div>
-          データを読み込み中...
-        </div>
-      </div>
+      <Loading
+        isLoading={true}
+        message="データを読み込み中..."
+        size="md"
+      />
     );
   }
 

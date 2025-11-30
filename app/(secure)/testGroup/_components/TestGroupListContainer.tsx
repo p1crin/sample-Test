@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Modal } from '@/components/ui/modal';
 import SeachForm from '@/components/ui/searchForm';
+import React from 'react';
 
 export function TestGroupListContainer() {
   const router = useRouter();
@@ -189,7 +190,15 @@ export function TestGroupListContainer() {
   };
 
   const columns: Column<TestGroupListRow>[] = [
-    { key: 'id', header: 'ID', isLink: true, linkPrefix: '/testCase' },
+    {
+      key: 'id',
+      header: 'ID',
+      render: (value: number) => (
+        <Link href={`/testGroup/${value}/testCase`} style={{ color: 'blue', textDecoration: 'underline' }}>
+          {value}
+        </Link>
+      ),
+    },
     { key: 'oem', header: 'OEM' },
     { key: 'model', header: '機種' },
     { key: 'event', header: 'イベント' },

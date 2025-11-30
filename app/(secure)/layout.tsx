@@ -5,6 +5,7 @@ import { HeaderContainer } from '@/components/header/HeaderContainer';
 import { SidebarContainer } from '@/components/sidebar/SidebarContainer';
 import { useSelector } from 'react-redux';
 import Breadcrumb from '@/components/ui/breadcrumb';
+import Loading from '@/components/ui/loading';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 
@@ -24,11 +25,15 @@ export default function Layout({ children }: { children: ReactNode }) {
     }
   }, [status, router]);
 
+  // セッション読み込み中の表示
   if (status === 'loading') {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-lg">読み込み中...</div>
-      </div>
+      <Loading
+        isLoading={true}
+        message="セッションを読み込み中..."
+        fullScreen={true}
+        size="lg"
+      />
     );
   }
 

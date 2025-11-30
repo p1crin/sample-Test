@@ -5,6 +5,7 @@ import { VerticalForm } from '@/components/ui/verticalForm';
 import ButtonGroup from '@/components/ui/buttonGroup';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
+import Loading from '@/components/ui/loading';
 import { getTagOptions, createTestGroup } from '../action';
 import clientLogger from '@/utils/client-logger';
 import { testGroupRegistSchema } from './schemas/testGroup-regist-schema';
@@ -283,19 +284,30 @@ const Resist: React.FC = () => {
 
   return (
     <div>
+      {/* タグ読み込みエラー表示 */}
       {tagError && (
         <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
           <p className="font-bold">タグの読み込みに失敗しました</p>
           <p className="text-sm">{tagError}</p>
         </div>
       )}
-      {tagLoading && (
-        <div className="mb-4 p-4 bg-blue-100 border border-blue-400 text-blue-700 rounded">
-          <p>タグを読み込み中...</p>
-        </div>
+
+      {/* タグ読み込み中の表示 */}
+      <Loading
+        isLoading={tagLoading}
+        message="タグを読み込み中..."
+        size="md"
+      />
+
+      {/* フォームの表示 */}
+      {!tagLoading && (
+        <>
+          <VerticalForm fields={fields} />
+          <ButtonGroup buttons={buttons} />
+        </>
       )}
-      <VerticalForm fields={fields} />
-      <ButtonGroup buttons={buttons} />
+
+      {/* 登録結果モーダル */}
       <Modal open={isModalOpen} onClose={() => setIsModalOpen(false)}>
         <p className="mb-8">{modalMessage}</p>
         <div className="flex justify-center">

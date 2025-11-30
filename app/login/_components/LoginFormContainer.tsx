@@ -4,6 +4,7 @@ import { loginSchema } from '@/app/login/_components/schemas/login-schema';
 import { useRouter } from 'next/navigation';
 import { useDispatch } from 'react-redux';
 import { login as loginAction } from '@/stores/feature/authSlice';
+import Loading from '@/components/ui/loading';
 import { LoginForm } from './LoginForm';
 import { setAuthSession, generateToken } from '@/stores/feature/auth';
 import { User } from '@/types';
@@ -105,11 +106,15 @@ export function LoginFormContainer() {
     }
   };
 
+  // セッション読み込み中またはログイン済みの場合
   if (status === 'loading' || status === 'authenticated') {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-100">
-        <div className="text-lg">読み込み中...</div>
-      </div>
+      <Loading
+        isLoading={true}
+        message="セッションを読み込み中..."
+        fullScreen={true}
+        size="lg"
+      />
     );
   }
 
