@@ -7,6 +7,7 @@ import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
 import { getTagOptions, createTestGroup } from '../action';
 import clientLogger from '@/utils/client-logger';
+import { testGroupRegistSchema } from './schemas/testGroup-regist-schema';
 
 const Resist: React.FC = () => {
   const [tagOptions, setTagOptions] = useState<{ value: string, label: string }[]>([]);
@@ -27,6 +28,7 @@ const Resist: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const router = useRouter();
 
   useEffect(() => {
@@ -63,7 +65,8 @@ const Resist: React.FC = () => {
       value: formData.oem,
       onChange: handleInputChange,
       placeholder: 'OEM',
-      required: true
+      required: true,
+      error: errors.oem
     },
     {
       label: '機種',
@@ -72,7 +75,8 @@ const Resist: React.FC = () => {
       value: formData.model,
       onChange: handleInputChange,
       placeholder: '機種',
-      required: true
+      required: true,
+      error: errors.model
     },
     {
       label: 'イベント',
@@ -80,7 +84,9 @@ const Resist: React.FC = () => {
       name: 'event',
       value: formData.event,
       onChange: handleInputChange,
-      placeholder: 'イベント'
+      placeholder: 'イベント',
+      required: true,
+      error: errors.event
     },
     {
       label: 'バリエーション',
@@ -88,7 +94,9 @@ const Resist: React.FC = () => {
       name: 'variation',
       value: formData.variation,
       onChange: handleInputChange,
-      placeholder: 'バリエーション'
+      placeholder: 'バリエーション',
+      required: true,
+      error: errors.variation
     },
     {
       label: '仕向',
@@ -96,7 +104,9 @@ const Resist: React.FC = () => {
       name: 'destination',
       value: formData.destination,
       onChange: handleInputChange,
-      placeholder: '仕向'
+      placeholder: '仕向',
+      required: true,
+      error: errors.destination
     },
     {
       label: '制御仕様名',
@@ -104,7 +114,9 @@ const Resist: React.FC = () => {
       name: 'specs',
       value: formData.specs,
       onChange: handleInputChange,
-      placeholder: '制御仕様名'
+      placeholder: '制御仕様名',
+      required: true,
+      error: errors.specs
     },
     {
       label: '試験開始日',
@@ -112,7 +124,9 @@ const Resist: React.FC = () => {
       name: 'test_startdate',
       value: formData.test_startdate,
       onChange: handleInputChange,
-      placeholder: ''
+      placeholder: '',
+      required: true,
+      error: errors.test_startdate
     },
     {
       label: '試験終了日',
@@ -120,7 +134,9 @@ const Resist: React.FC = () => {
       name: 'test_enddate',
       value: formData.test_enddate,
       onChange: handleInputChange,
-      placeholder: ''
+      placeholder: '',
+      required: true,
+      error: errors.test_enddate
     },
     {
       label: '不具合摘出予定数',
@@ -128,7 +144,9 @@ const Resist: React.FC = () => {
       name: 'ngPlanCount',
       value: formData.ngPlanCount,
       onChange: handleInputChange,
-      placeholder: ''
+      placeholder: '',
+      required: true,
+      error: errors.ngPlanCount
     },
     {
       label: 'テスト設計者',
@@ -163,11 +181,19 @@ const Resist: React.FC = () => {
     console.log('handleRegister called with formData:', formData);
 
     // Validation
-    if (!formData.oem?.trim() || !formData.model?.trim()) {
-      setModalMessage('OEM と機種は必須項目です');
-      setIsModalOpen(true);
+    const validationResult = testGroupRegistSchema.safeParse(formData);
+    if (!validationResult.success) {
+      const newErrors: Record<string, string> = {};
+      validationResult.error.errors.forEach(err => {
+        const fieldPath = err.path[0] as string;
+        newErrors[fieldPath] = err.message;
+      });
+      setErrors(newErrors);
       return;
     }
+
+    // Clear errors on successful validation
+    setErrors({});
 
     setIsLoading(true);
     try {

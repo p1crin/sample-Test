@@ -21,6 +21,10 @@ export interface FormFieldProps {
   placeholder?: string;
   /** セレクトボックスのオプション (オプション) */
   options?: { value: string; label: string }[];
+  /** エラーメッセージ (オプション) */
+  error?: string;
+  /** 必須フラグ (オプション) */
+  required?: boolean;
 }
 
 const FORM_FIELD_STYLE = "flex flex-cols space-x-4 justify-end";
@@ -37,7 +41,7 @@ const INPUT_DATE_FORM_STYLE = "h-10 w-67/100 rounded border border-[#cccccc] bg-
  * @param {FormFieldProps} props - フォームフィールドのプロパティ
  * @returns {JSX.Element} フォームフィールドのJSX要素
  */
-export default function FormField({ label, type, name, value, onChange, placeholder, options }: FormFieldProps) {
+export default function FormField({ label, type, name, value, onChange, placeholder, options, error }: FormFieldProps) {
   const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
@@ -64,9 +68,10 @@ export default function FormField({ label, type, name, value, onChange, placehol
   }
 
   return (
-    <div className={FORM_FIELD_STYLE}>
-      <label className={LABLE_STYLE}>{label}</label>
-      {type === 'select' ? (
+    <div>
+      <div className={FORM_FIELD_STYLE}>
+        <label className={LABLE_STYLE}>{label}</label>
+        {type === 'select' ? (
         <Select
           isClearable={true}
           options={options}
@@ -143,6 +148,8 @@ export default function FormField({ label, type, name, value, onChange, placehol
           autoComplete='new-password'
         />
       )}
+      </div>
+      {error && <p className="text-red-600 text-xs mt-1 ml-auto mr-0 w-67/100">{error}</p>}
     </div>
   );
 }

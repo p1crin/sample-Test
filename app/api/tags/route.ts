@@ -13,19 +13,19 @@ export async function GET(req: NextRequest) {
 
     const tags = getAllRows(result);
 
-    return NextResponse.json({ tags });
+    return NextResponse.json({ success: true, data: tags });
   } catch (error) {
     console.error('GET /api/tags error:', error);
 
     if (error instanceof Error && error.message === 'Unauthorized') {
       return NextResponse.json(
-        { error: '認証が必要です' },
+        { success: false, error: '認証が必要です' },
         { status: 401 }
       );
     }
 
     return NextResponse.json(
-      { error: 'タグの取得に失敗しました' },
+      { success: false, error: 'タグの取得に失敗しました' },
       { status: 500 }
     );
   }

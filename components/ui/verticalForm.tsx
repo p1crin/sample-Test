@@ -26,7 +26,7 @@ const VERTICAL_FORM_STYLE = "pb-2 w-4/5 grid gap-4 grid-cols-1";
  * @param {VerticalFormComponentProps} props - バーティカルフォームのプロパティ
  * @returns {JSX.Element} バーティカルフォームのJSX要素
  */
-const VerticalForm: React.FC<VerticalFormComponentProps> = ({ fields, values }) => {
+const VerticalForm: React.FC<VerticalFormComponentProps> = ({ fields }) => {
   return (
     <div className={VERTICAL_FORM_STYLE}>
       {fields.map((field, index) => (
