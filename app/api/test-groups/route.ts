@@ -6,7 +6,7 @@ import serverLogger from '@/utils/server-logger';
 import { logDatabaseQuery, logAPIEndpoint, QueryTimer } from '@/utils/database-logger';
 import { formatDate } from '@/utils/date-formatter';
 
-// GET /api/test-groups - Get all accessible test groups
+// GET /api/test-groups - アクセス可能なテストグループを取得
 export async function GET(req: NextRequest) {
   const apiTimer = new QueryTimer();
   let statusCode = 200;
@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
   try {
     const user = await requireAuth(req);
 
-    // Get accessible test group IDs
+    // アクセス可能なテストグループのIDを取得
     const accessibleIds = await getAccessibleTestGroups(user.id, user.user_role);
 
     if (accessibleIds.length === 0) {
@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: true, data: [], totalCount: 0 });
     }
 
-    // Get search parameters from query string
+    // クエリ文字列から検索パラメータを取得
     const { searchParams } = new URL(req.url);
     const oem = searchParams.get('oem') || '';
     const model = searchParams.get('model') || '';
@@ -37,12 +37,12 @@ export async function GET(req: NextRequest) {
     const variation = searchParams.get('variation') || '';
     const destination = searchParams.get('destination') || '';
 
-    // Get pagination parameters
+    // ページネーションパラメータを取得
     const page = parseInt(searchParams.get('page') || '1', 10);
     const limit = parseInt(searchParams.get('limit') || '10', 10);
     const offset = (page - 1) * limit;
 
-    // Build dynamic WHERE clause
+    // WHERE句を動的に構築
     const whereConditions = ['id = ANY($1)', 'is_deleted = FALSE'];
     const params: unknown[] = [accessibleIds];
     let paramIndex = 2;
@@ -79,7 +79,7 @@ export async function GET(req: NextRequest) {
 
     const whereClause = whereConditions.join(' AND ');
 
-    // Fetch total count for pagination
+    // ページネーション用に合計件数を取得
     const countQuery = `SELECT COUNT(*) as count
        FROM tt_test_groups
        WHERE ${whereClause}`;
@@ -96,7 +96,7 @@ export async function GET(req: NextRequest) {
       params,
     });
 
-    // Fetch test groups with pagination
+    // ページネーション付きでテストグループを取得
     const dataParams = [...params, limit, offset];
     const limitParamIndex = params.length + 1;
     const offsetParamIndex = params.length + 2;
@@ -164,7 +164,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST /api/test-groups - Create new test group
+// POST /api/test-groups - 新しいテストグループを作成
 export async function POST(req: NextRequest) {
   const apiTimer = new QueryTimer();
   let statusCode = 201;
@@ -172,7 +172,7 @@ export async function POST(req: NextRequest) {
   try {
     const user = await requireAuth(req);
 
-    // Check if user is admin or test manager
+    // ユーザーが管理者またはテスト管理者かどうかを確認
     if (!isAdmin(user) && !isTestManager(user)) {
       statusCode = 403;
       logAPIEndpoint({
@@ -200,10 +200,10 @@ export async function POST(req: NextRequest) {
       test_startdate,
       test_enddate,
       ng_plan_count,
-      tag_names, // Array of { tag_name, test_role }
+      tag_names, // { tag_name, test_role } の配列
     } = body;
 
-    serverLogger.debug('POST /api/test-groups Request', {
+    serverLogger.debug('POST /api/test-groups リクエスト', {
       oem,
       model,
       event,
@@ -212,8 +212,8 @@ export async function POST(req: NextRequest) {
       tagCount: tag_names?.length || 0,
     });
 
-    // Validate required fields
-    if (!oem || !model) {
+    // 必須フィールドをバリデーション
+    if (!oem || !model || !event || !variation || !destination || !specs || !test_startdate || !test_enddate || ng_plan_count === undefined || ng_plan_count === null) {
       statusCode = 400;
       logAPIEndpoint({
         method: 'POST',
@@ -221,17 +221,74 @@ export async function POST(req: NextRequest) {
         userId: user.id,
         statusCode,
         executionTime: apiTimer.elapsed(),
-        error: 'Validation error: OEM and model are required',
+        error: 'Validation error: Required fields are missing',
       });
       return NextResponse.json(
-        { success: false, error: { message: 'OEMとモデルは必須です' } },
+        { success: false, error: { message: 'すべての必須フィールドを入力してください' } },
         { status: 400 }
       );
     }
 
-    // Create test group in transaction
+    // フィールドの文字数をバリデーション
+    const maxLength = 255;
+    if (oem.length > maxLength || model.length > maxLength || event.length > maxLength ||
+        variation.length > maxLength || destination.length > maxLength) {
+      statusCode = 400;
+      logAPIEndpoint({
+        method: 'POST',
+        endpoint: '/api/test-groups',
+        userId: user.id,
+        statusCode,
+        executionTime: apiTimer.elapsed(),
+        error: 'Validation error: Field length exceeds maximum',
+      });
+      return NextResponse.json(
+        { success: false, error: { message: `OEM、機種、イベント、バリエーション、仕向は${maxLength}文字以内で入力してください` } },
+        { status: 400 }
+      );
+    }
+
+    // 不具合摘出予定数をバリデーション
+    if (typeof ng_plan_count !== 'number' || ng_plan_count < 0 || ng_plan_count > 9999) {
+      statusCode = 400;
+      logAPIEndpoint({
+        method: 'POST',
+        endpoint: '/api/test-groups',
+        userId: user.id,
+        statusCode,
+        executionTime: apiTimer.elapsed(),
+        error: 'Validation error: ng_plan_count out of range',
+      });
+      return NextResponse.json(
+        { success: false, error: { message: '不具合摘出予定数は最大9999件です' } },
+        { status: 400 }
+      );
+    }
+
+    // 日付の大小関係をバリデーション
+    if (test_startdate && test_enddate) {
+      const startDate = new Date(test_startdate);
+      const endDate = new Date(test_enddate);
+      if (startDate > endDate) {
+        statusCode = 400;
+        logAPIEndpoint({
+          method: 'POST',
+          endpoint: '/api/test-groups',
+          userId: user.id,
+          statusCode,
+          executionTime: apiTimer.elapsed(),
+          error: 'Validation error: test_startdate must be before test_enddate',
+        });
+        return NextResponse.json(
+          { success: false, error: { message: '試験開始日は試験終了日以前である必要があります' } },
+          { status: 400 }
+        );
+      }
+    }
+
+    // トランザクション内でテストグループを作成
     const testGroup = await transaction(async (client) => {
-      // Insert test group
+      // テストグループを新規作成
       const insertQuery = `INSERT INTO tt_test_groups
          (oem, model, event, variation, destination, specs, test_startdate, test_enddate, ng_plan_count, created_by, updated_by)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
@@ -263,10 +320,10 @@ export async function POST(req: NextRequest) {
         params: insertParams,
       });
 
-      // Insert test group tags if provided
+      // タグが指定されている場合はテストグループタグを関連付け
       if (tag_names && Array.isArray(tag_names) && tag_names.length > 0) {
         for (const tag of tag_names) {
-          // Get tag ID from tag name
+          // タグ名からタグIDを取得
           const tagLookupQuery = `SELECT id FROM mt_tags WHERE name = $1 AND is_deleted = FALSE`;
           const tagLookupTimer = new QueryTimer();
           const tagResult = await client.query(tagLookupQuery, [tag.tag_name]);
@@ -316,6 +373,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, data: testGroup }, { status: 201 });
   } catch (error) {
+    // エラーが認証エラーの場合は401、その他は500
     statusCode = error instanceof Error && error.message === 'Unauthorized' ? 401 : 500;
 
     logAPIEndpoint({

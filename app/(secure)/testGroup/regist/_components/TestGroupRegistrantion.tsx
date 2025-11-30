@@ -11,6 +11,8 @@ import { testGroupRegistSchema } from './schemas/testGroup-regist-schema';
 
 const Resist: React.FC = () => {
   const [tagOptions, setTagOptions] = useState<{ value: string, label: string }[]>([]);
+  const [tagLoading, setTagLoading] = useState(true);
+  const [tagError, setTagError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     oem: '',
     model: '',
@@ -33,9 +35,19 @@ const Resist: React.FC = () => {
 
   useEffect(() => {
     async function fetchTagOptions() {
-      const result = await getTagOptions();
-      if (result.success && result.data) {
-        setTagOptions(result.data);
+      try {
+        setTagLoading(true);
+        setTagError(null);
+        const result = await getTagOptions();
+        if (result.success && result.data) {
+          setTagOptions(result.data);
+        } else {
+          setTagError(result.error || 'タグの取得に失敗しました');
+        }
+      } catch (error) {
+        setTagError(error instanceof Error ? error.message : 'タグの取得に失敗しました');
+      } finally {
+        setTagLoading(false);
       }
     }
     fetchTagOptions();
@@ -200,17 +212,17 @@ const Resist: React.FC = () => {
       const tag_names: { tag_name: string; test_role: number; }[] | undefined = [];
       if (formData.designerTag && formData.designerTag.length > 0) {
         formData.designerTag.forEach(tag => {
-          tag_names.push({ tag_name: tag, test_role: 1 });
+          tag_names.push({ tag_name: tag, test_role: 0 });
         });
       }
       if (formData.executerTag && formData.executerTag.length > 0) {
         formData.executerTag.forEach(tag => {
-          tag_names.push({ tag_name: tag, test_role: 2 });
+          tag_names.push({ tag_name: tag, test_role: 1 });
         });
       }
       if (formData.viewerTag && formData.viewerTag.length > 0) {
         formData.viewerTag.forEach(tag => {
-          tag_names.push({ tag_name: tag, test_role: 3 });
+          tag_names.push({ tag_name: tag, test_role: 2 });
         });
       }
 
@@ -271,6 +283,17 @@ const Resist: React.FC = () => {
 
   return (
     <div>
+      {tagError && (
+        <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
+          <p className="font-bold">タグの読み込みに失敗しました</p>
+          <p className="text-sm">{tagError}</p>
+        </div>
+      )}
+      {tagLoading && (
+        <div className="mb-4 p-4 bg-blue-100 border border-blue-400 text-blue-700 rounded">
+          <p>タグを読み込み中...</p>
+        </div>
+      )}
       <VerticalForm fields={fields} />
       <ButtonGroup buttons={buttons} />
       <Modal open={isModalOpen} onClose={() => setIsModalOpen(false)}>
