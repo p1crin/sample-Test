@@ -110,9 +110,14 @@ export function TestGroupListContainer() {
   }, [searchParamsQuery]);
 
   useEffect(() => {
+    // URLパラメータ同期が完了するまで待つ
+    if (!isInitialized) {
+      return;
+    }
+
     const getDataCountFunc = async () => {
       try {
-        clientLogger.info('TestGroupListContainer', 'テスト数取得開始');
+        clientLogger.info('TestGroupListContainer', 'テスト数取得開始', { searchParams, isInitialized });
         const queryString = buildQueryString(searchParams, 1);
         const response = await fetch(`/api/test-groups?${queryString}`);
 
@@ -125,23 +130,29 @@ export function TestGroupListContainer() {
 
         setTotalCount(count);
         setPageCount(Math.ceil(count / pageSize));
-        clientLogger.info('TestGroupListContainer', 'テスト数取得成功', { count });
+        clientLogger.info('TestGroupListContainer', 'テスト数取得成功', { count, searchParams });
       } catch (err) {
         clientLogger.error('TestGroupListContainer', 'テスト数取得失敗', {
           error: err instanceof Error ? err.message : String(err),
+          searchParams,
         });
       }
     };
     getDataCountFunc();
-  }, [searchParams, pageSize]);
+  }, [searchParams, pageSize, isInitialized]);
 
   useEffect(() => {
+    // URLパラメータ同期が完了するまで待つ
+    if (!isInitialized) {
+      return;
+    }
+
     let ignore = false;
-    clientLogger.info('TestGroupListContainer', 'データ取得開始', { page, searchParams });
+    clientLogger.info('TestGroupListContainer', 'データ取得開始', { page, searchParams, isInitialized });
 
     const getDataListFunc = async () => {
       try {
-        clientLogger.info('TestGroupListContainer', 'リスト取得開始', { page });
+        clientLogger.info('TestGroupListContainer', 'リスト取得開始', { page, searchParams });
         const queryString = buildQueryString(searchParams, page);
         const response = await fetch(`/api/test-groups?${queryString}`);
 
@@ -178,7 +189,7 @@ export function TestGroupListContainer() {
     return () => {
       ignore = true;
     };
-  }, [page, pageSize, searchParams]);
+  }, [page, pageSize, searchParams, isInitialized]);
 
   const handleSort = (key: keyof TestGroupListRow) => {
     setSortConfig((prev) => {
@@ -277,7 +288,7 @@ export function TestGroupListContainer() {
       label: 'OEM',
       type: 'text',
       name: 'oem',
-      value: '',
+      value: formValues.oem,
       onChange: () => { },
       placeholder: 'OEM'
     },
@@ -285,7 +296,7 @@ export function TestGroupListContainer() {
       label: '機種',
       type: 'text',
       name: 'model',
-      value: '',
+      value: formValues.model,
       onChange: () => { },
       placeholder: '機種'
     },
@@ -293,7 +304,7 @@ export function TestGroupListContainer() {
       label: 'イベント',
       type: 'text',
       name: 'event',
-      value: '',
+      value: formValues.event,
       onChange: () => { },
       placeholder: 'イベント'
     },
@@ -301,7 +312,7 @@ export function TestGroupListContainer() {
       label: 'バリエーション',
       type: 'text',
       name: 'variation',
-      value: '',
+      value: formValues.variation,
       onChange: () => { },
       placeholder: 'バリエーション'
     },
@@ -309,7 +320,7 @@ export function TestGroupListContainer() {
       label: '仕向',
       type: 'text',
       name: 'destination',
-      value: '',
+      value: formValues.destination,
       onChange: () => { },
       placeholder: '仕向'
     },
@@ -341,7 +352,7 @@ export function TestGroupListContainer() {
 
   return (
     <div>
-      <SeachForm fields={fields} onClick={handleSearch} onFormDataChange={handleFormDataChange} />
+      <SeachForm fields={fields} values={formValues} onClick={handleSearch} onFormDataChange={handleFormDataChange} />
       <div className="text-right pb-2">
         <Button onClick={handleAddTestGroup} variant="default">
           <Link href="/testGroup/regist">

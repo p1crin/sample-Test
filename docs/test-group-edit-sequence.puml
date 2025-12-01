@@ -1,0 +1,145 @@
+@startuml Test Group Edit Flow
+title テストグループ編集画面のシーケンス図（最新版 - REST API パターン）
+skinparam sequenceParticipant underline
+
+actor "ユーザー" as user
+participant "ブラウザ" as browser
+participant "編集画面\n(Next.js Client)" as edit_screen
+participant "API Route\n/api/test-groups/[groupId]" as api
+participant "API Route\n/api/tags" as tags_api
+database "AWS RDS\n(PostgreSQL)" as db
+
+user ->> browser: 編集画面にアクセス\n(/testGroup/[groupId]/edit)
+activate browser
+browser ->> edit_screen: ページロード
+activate edit_screen
+
+note over edit_screen: useEffect で初期処理\n- groupId から データ取得\n- Loading状態を有効化
+
+edit_screen ->> api: GET /api/test-groups/{groupId}
+activate api
+
+note over api: 認証確認\n- requireAuth()
+
+api ->> api: 権限チェック\n- canViewTestGroup()
+
+api ->> db: テストグループ詳細取得
+note over db: SELECT * FROM tt_test_groups\nWHERE id = $1\nAND is_deleted = FALSE
+
+activate db
+db -->> api: テストグループレコード\n(oem, model, event,\nvariation, destination, specs,\ntest_startdate, test_enddate,\nng_plan_count, created_at, updated_at)
+deactivate db
+
+api ->> db: 関連タグ取得\n(test_role付き)
+note over db: SELECT t.id, t.name, tgt.test_role\nFROM tt_test_group_tags tgt\nJOIN mt_tags t ON tgt.tag_id = t.id\nWHERE tgt.test_group_id = $1\nAND t.is_deleted = FALSE
+
+activate db
+db -->> api: タグレコード\n({id, name, test_role: 0|1|2}, ...)
+deactivate db
+
+api -->> edit_screen: {success: true,\ndata: {id, oem, model, ...},\ntags: [{id, name, test_role}, ...]}
+deactivate api
+
+note over edit_screen: データ処理\n\n1. formatDate() で日付をYYYY-MM-DD形式に変換\n   - ISO形式 (2024-12-01T10:30:00Z)\n     -> 2024-12-01\n   - スペース区切り\n     -> 前半部分を抽出\n   - 既にYYYY-MM-DD形式\n     -> そのまま使用
+
+note over edit_screen: 2. タグを test_role で分類\n   switch(tag.test_role) {\n     case 0:\n       designerTag.push(tag.name)\n     case 1:\n       executerTag.push(tag.name)\n     case 2:\n       viewerTag.push(tag.name)\n   }
+
+edit_screen ->> tags_api: GET /api/tags
+activate tags_api
+
+tags_api ->> db: タグ一覧取得
+note over db: SELECT id, name FROM mt_tags\nWHERE is_deleted = FALSE
+
+activate db
+db -->> tags_api: タグレコード一覧
+deactivate db
+
+tags_api -->> edit_screen: {success: true,\ndata: [{id, name}, ...]}
+deactivate tags_api
+
+note over edit_screen: フォーム表示\n- oem, model, event, variation,\n  destination, specs (テキスト)\n- test_startdate, test_enddate (日付)\n- ngPlanCount (数値)\n- designerTag, executerTag, viewerTag\n  (マルチセレクト)\n\nLoading状態: false
+
+edit_screen -->> browser: フォーム表示
+deactivate edit_screen
+
+user ->> browser: フォーム編集\n(例: イベント情報を更新)
+activate browser
+
+user ->> browser: タグを追加/削除\n(マルチセレクト で選択)
+
+user ->> browser: 更新ボタンをクリック
+activate edit_screen
+browser ->> edit_screen: onSubmit()
+
+note over edit_screen: クライアント側バリデーション\n(Zod schema)\n\n- oem, model: 必須\n- その他: オプション\n- 日付フォーマット チェック\n- タグ値 チェック
+
+alt バリデーション失敗
+  note over edit_screen: エラーメッセージを state に保存\n(各フィールドごと)\n\n例: {\n  oem: ['OEMは必須項目です'],\n  model: ['モデルは必須項目です']\n}
+
+  edit_screen -->> browser: エラーメッセージ表示\n(フィールド下部に赤文字)
+  deactivate edit_screen
+
+else バリデーション成功
+  note over edit_screen: tag_names 配列生成\n(test_role値を正確に設定)\n\n[\n  {tag_name: "田中太郎", test_role: 0},\n  {tag_name: "佐藤次郎", test_role: 1},\n  {tag_name: "高橋三郎", test_role: 2}\n]
+
+  edit_screen ->> api: PUT /api/test-groups/{groupId}\n\nBody: {\n  oem: "OEM1",\n  model: "機種1",\n  event: "イベント1",\n  variation: "バリエーション1",\n  destination: "仕向1",\n  specs: "制御仕様名1",\n  test_startdate: "2024-12-01",\n  test_enddate: "2024-12-31",\n  ng_plan_count: 10,\n  tag_names: [\n    {tag_name: "...", test_role: 0|1|2},\n    ...\n  ]\n}
+  activate api
+
+  note over api: 認証確認\n- requireAuth()
+
+  api ->> api: 権限チェック\n- canModifyTestGroup()
+
+  alt 権限不足
+    api -->> edit_screen: {error: '編集する権限がありません'}\n(403)
+    deactivate api
+
+    note over edit_screen: エラー表示
+
+    edit_screen -->> browser: エラーメッセージ表示\n「このテストグループを編集する\n権限がありません」
+    deactivate edit_screen
+
+  else 権限あり
+    note over api: トランザクション処理開始\n(transaction関数)
+
+    api ->> db: テストグループ更新
+    note over db: UPDATE tt_test_groups\nSET oem = $1, model = $2, ...,\n    updated_by = $10\nWHERE id = $11\nAND is_deleted = FALSE\nRETURNING *
+
+    activate db
+    db -->> api: 更新後のレコード
+    deactivate db
+
+    api ->> db: 既存タグ削除
+    note over db: DELETE FROM tt_test_group_tags\nWHERE test_group_id = $1
+
+    activate db
+    db -->> api: 削除完了
+    deactivate db
+
+    api ->> db: 新規タグ挿入\n(複数回 loop)
+    note over db: 各 tag_name について:\nINSERT INTO tt_test_group_tags\n(test_group_id, tag_id, test_role)\nVALUES ($1, (SELECT id FROM mt_tags\n               WHERE name=$2), $3)
+
+    activate db
+    db -->> api: 全タグ挿入完了
+    deactivate db
+
+    note over api: トランザクション COMMIT\n& ロギング\n- logDatabaseQuery()\n- logAPIEndpoint()
+
+    api -->> edit_screen: {success: true,\ndata: {id, oem, model, ...}}
+    deactivate api
+
+    note over edit_screen: 成功処理\n- エラー状態をクリア\n- Loading終了\n- toast表示\n- 自動リダイレクト (1.5秒後)\n  /testGroup へ
+
+    edit_screen -->> browser: 成功メッセージ表示\n「テストグループを更新しました」
+    deactivate edit_screen
+
+    note over browser: 1.5秒待機後\nリダイレクト開始
+
+    browser -->> user: テストグループ一覧へ\n(更新内容が反映される)
+    deactivate browser
+  end
+end
+
+note over user: テスト権限(test_role)の対応\n\n0: テスト設計者\n   - テストケース設計・編集可能\n\n1: テスト実施者\n   - テスト結果入力可能\n\n2: テスト閲覧者\n   - テスト情報閲覧のみ
+
+note over user: 日付フォーマット処理\n\nAPI から返される複数の形式に対応:\n\n1. ISO 8601形式:\n   "2024-12-01T10:30:00Z"\n   -> 「T」前の部分を抽出\n   -> "2024-12-01"\n\n2. スペース区切り形式:\n   "2024-12-01 10:30:00"\n   -> スペース前の部分を抽出\n   -> "2024-12-01"\n\n3. 既に正しい形式:\n   "2024-12-01"\n   -> そのまま使用
+@enduml

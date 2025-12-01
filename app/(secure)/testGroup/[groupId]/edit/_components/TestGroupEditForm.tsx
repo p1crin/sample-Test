@@ -4,7 +4,6 @@ import { VerticalForm } from '@/components/ui/verticalForm';
 import ButtonGroup from '@/components/ui/buttonGroup';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
-import { getTagOptions } from '../action';
 import clientLogger from '@/utils/client-logger';
 import { TestGroupFormData } from '@/app/(secure)/_components/types/testGroup-list-row';
 
@@ -45,7 +44,13 @@ export function TestGroupEditForm({
     async function fetchTagOptions() {
       try {
         clientLogger.info('TestGroupEditForm', 'タグオプション取得開始');
-        const result = await getTagOptions();
+        const response = await fetch('/api/tags');
+
+        if (!response.ok) {
+          throw new Error(`API error: ${response.status}`);
+        }
+
+        const result = await response.json();
 
         clientLogger.info('TestGroupEditForm', 'タグオプション取得レスポンス', {
           success: result.success,
@@ -54,9 +59,13 @@ export function TestGroupEditForm({
         });
 
         if (result.success && result.data && Array.isArray(result.data)) {
-          setTagOptions(result.data);
+          const tagOptions = result.data.map((tag: { id: number; name: string }) => ({
+            value: tag.name,
+            label: tag.name,
+          }));
+          setTagOptions(tagOptions);
           clientLogger.info('TestGroupEditForm', 'タグオプション設定完了', {
-            count: result.data.length,
+            count: tagOptions.length,
           });
         } else {
           clientLogger.warn('TestGroupEditForm', 'タグオプション取得失敗', {

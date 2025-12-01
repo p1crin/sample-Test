@@ -1370,6 +1370,23 @@ paths:
       tags:
         - Test Groups
       summary: テストグループ詳細取得
+      description: |
+        指定されたテストグループの詳細情報と関連タグを取得します。
+        テストグループ編集画面で使用されます。
+
+        ## レスポンス
+        - data: テストグループの基本情報
+        - tags: このテストグループに関連付けられたタグ一覧
+          - id: タグID
+          - name: タグ名
+          - test_role: テスト権限（0=設計者, 1=実施者, 2=閲覧者）
+
+        ## ログ記録
+        このエンドポイントの実行時は以下の情報が自動的に記録されます：
+        - データベースクエリの実行時間（SELECT操作）
+        - API エンドポイントの実行時間と対象ユーザーID
+        - 取得した行数とデータサイズ
+        詳細は database-logger ユーティリティで確認可能です。
       security:
         - bearerAuth: []
       parameters:
@@ -1378,6 +1395,7 @@ paths:
           required: true
           schema:
             type: integer
+          description: テストグループID
       responses:
         "200":
           description: 成功
@@ -1390,7 +1408,26 @@ paths:
                     type: boolean
                     example: true
                   data:
-                    $ref: "#/components/schemas/TestGroupWithTags"
+                    $ref: "#/components/schemas/TestGroup"
+                  tags:
+                    type: array
+                    description: テストグループに関連付けられたタグ一覧
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                          example: 1
+                          description: タグID
+                        name:
+                          type: string
+                          example: "田中太郎"
+                          description: タグ名
+                        test_role:
+                          type: integer
+                          enum: [0, 1, 2]
+                          example: 0
+                          description: "テスト権限: 0=テスト設計者, 1=テスト実施者, 2=テスト閲覧者"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1402,7 +1439,36 @@ paths:
       tags:
         - Test Groups
       summary: テストグループ更新
-      description: テストグループ情報を更新（管理者 or 設計者権限が必要）
+      description: |
+        テストグループ情報を更新（管理者 or テスト設計者権限が必要）
+
+        ## 更新可能な項目
+        - oem: OEM名（必須）
+        - model: 機種名（必須）
+        - event: イベント（オプション）
+        - variation: バリエーション（オプション）
+        - destination: 仕向（オプション）
+        - specs: 制御仕様名（オプション）
+        - test_startdate: 試験開始日（オプション、YYYY-MM-DD形式）
+        - test_enddate: 試験終了日（オプション、YYYY-MM-DD形式）
+        - ng_plan_count: 不具合摘出予定数（オプション）
+        - tag_names: 関連タグ（オプション）
+
+        ## tag_names の仕様
+        各タグに test_role を指定して、テストグループ内でのロールを定義します。
+        同じタグが複数のロールに割り当てられることもあります。
+        tag_names を指定した場合、既存の全タグが削除され、新規に指定されたタグのみが関連付けられます。
+
+        - test_role: 0 = テスト設計者（テストケース設計・編集可能）
+        - test_role: 1 = テスト実施者（テスト結果入力可能）
+        - test_role: 2 = テスト閲覧者（閲覧のみ）
+
+        ## ログ記録
+        このエンドポイントの実行時は以下の情報が自動的に記録されます：
+        - データベースクエリの実行時間（UPDATE, DELETE, INSERT操作）
+        - API エンドポイントの実行時間と対象ユーザーID
+        - クエリ行数とデータサイズ
+        詳細は database-logger ユーティリティで確認可能です。
       security:
         - bearerAuth: []
       parameters:
@@ -1440,22 +1506,35 @@ paths:
                   type: string
                   format: date
                   example: "2024-12-01"
+                  description: "試験開始日（YYYY-MM-DD形式）"
                 test_enddate:
                   type: string
                   format: date
                   example: "2024-12-31"
+                  description: "試験終了日（YYYY-MM-DD形式）"
                 ng_plan_count:
                   type: integer
                   example: 10
                 tag_names:
                   type: array
+                  description: |
+                    テストグループに関連付けるタグ一覧。
+                    既存のタグは全て削除されて、ここで指定されたタグのみが関連付けられます。
                   items:
                     type: object
+                    required:
+                      - tag_name
+                      - test_role
                     properties:
                       tag_name:
                         type: string
+                        example: "田中太郎"
+                        description: "タグ名（mt_tagsテーブルに存在するもの）"
                       test_role:
                         type: integer
+                        enum: [0, 1, 2]
+                        example: 0
+                        description: "テスト権限: 0=テスト設計者, 1=テスト実施者, 2=テスト閲覧者"
       responses:
         "200":
           description: 更新成功
@@ -1472,12 +1551,67 @@ paths:
                   message:
                     type: string
                     example: "テストグループを更新しました"
+              example:
+                success: true
+                data:
+                  id: 123
+                  oem: "OEM1"
+                  model: "機種1"
+                  event: "イベント1"
+                  variation: "バリエーション1"
+                  destination: "仕向1"
+                  specs: "制御仕様名1"
+                  test_startdate: "2024-12-01"
+                  test_enddate: "2024-12-31"
+                  ng_plan_count: 10
+                  created_by: 1
+                  updated_by: 1
+                  created_at: "2024-12-01T10:00:00Z"
+                  updated_at: "2024-12-02T15:30:00Z"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: バリデーションエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                validation_error:
+                  summary: 必須フィールド不足
+                  value:
+                    success: false
+                    error:
+                      code: "VALIDATION_ERROR"
+                      message: "OEM名と機種名は必須項目です"
+                invalid_tag:
+                  summary: タグが見つからない
+                  value:
+                    success: false
+                    error:
+                      code: "INVALID_TAG"
+                      message: "指定されたタグが存在しません"
+                invalid_test_role:
+                  summary: test_role値が不正
+                  value:
+                    success: false
+                    error:
+                      code: "INVALID_TEST_ROLE"
+                      message: "test_roleの値が不正です（0, 1, 2 のみ許可）"
+                      details:
+                        allowed_values: [0, 1, 2]
+                        received_value: 5
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          description: 権限不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                success: false
+                error:
+                  code: "FORBIDDEN"
+                  message: "このテストグループを編集する権限がありません"
         "404":
           $ref: "#/components/responses/NotFound"
 

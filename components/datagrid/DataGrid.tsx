@@ -106,7 +106,7 @@ export function DataGrid<T extends ItemType>({
           </Table>
         </div>
       </div>
-      {pageCount > 1 && (
+      {items.length > 0 && pageCount > 1 && (
         <div className="mt-4 flex justify-center">
           <Pagination page={page} pageCount={pageCount} onPageChange={onPageChange} />
         </div>

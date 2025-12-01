@@ -6,7 +6,6 @@ import ButtonGroup from '@/components/ui/buttonGroup';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
 import Loading from '@/components/ui/loading';
-import { getTagOptions, createTestGroup } from '../action';
 import clientLogger from '@/utils/client-logger';
 import { testGroupRegistSchema } from './schemas/testGroup-regist-schema';
 
@@ -35,23 +34,34 @@ const Resist: React.FC = () => {
   const router = useRouter();
 
   useEffect(() => {
-    async function fetchTagOptions() {
+    const fetchTags = async () => {
       try {
         setTagLoading(true);
         setTagError(null);
-        const result = await getTagOptions();
-        if (result.success && result.data) {
-          setTagOptions(result.data);
+        const response = await fetch('/api/tags');
+
+        if (!response.ok) {
+          throw new Error(`API error: ${response.status}`);
+        }
+
+        const result = await response.json();
+        if (result.success && Array.isArray(result.data)) {
+          const tagOptions = result.data.map((tag: { id: number; name: string }) => ({
+            value: tag.name,
+            label: tag.name,
+          }));
+          setTagOptions(tagOptions);
         } else {
-          setTagError(result.error || 'タグの取得に失敗しました');
+          setTagError('タグの取得に失敗しました');
         }
       } catch (error) {
+        clientLogger.error('TestGroupRegistration', 'タグ取得エラー', { error });
         setTagError(error instanceof Error ? error.message : 'タグの取得に失敗しました');
       } finally {
         setTagLoading(false);
       }
-    }
-    fetchTagOptions();
+    };
+    fetchTags();
   }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement> | { target: { name: string; value: string | string[] } }) => {
@@ -191,9 +201,7 @@ const Resist: React.FC = () => {
   ];
 
   const handleRegister = async () => {
-    console.log('handleRegister called with formData:', formData);
-
-    // Validation
+    // クライアント側バリデーション
     const validationResult = testGroupRegistSchema.safeParse(formData);
     if (!validationResult.success) {
       const newErrors: Record<string, string> = {};
@@ -205,12 +213,14 @@ const Resist: React.FC = () => {
       return;
     }
 
-    // Clear errors on successful validation
+    // バリデーション成功時はエラーをクリア
     setErrors({});
 
     setIsLoading(true);
     try {
-      const tag_names: { tag_name: string; test_role: number; }[] | undefined = [];
+      // タグ名の配列を生成
+      const tag_names: { tag_name: string; test_role: number }[] = [];
+
       if (formData.designerTag && formData.designerTag.length > 0) {
         formData.designerTag.forEach(tag => {
           tag_names.push({ tag_name: tag, test_role: 0 });
@@ -227,18 +237,34 @@ const Resist: React.FC = () => {
         });
       }
 
-      const result = await createTestGroup({
-        oem: formData.oem,
-        model: formData.model,
-        event: formData.event || undefined,
-        variation: formData.variation || undefined,
-        destination: formData.destination || undefined,
-        specs: formData.specs || undefined,
-        test_startdate: formData.test_startdate || undefined,
-        test_enddate: formData.test_enddate || undefined,
-        ng_plan_count: formData.ngPlanCount ? parseInt(formData.ngPlanCount) : undefined,
-        tag_names: tag_names.length > 0 ? tag_names : undefined,
+      // API呼び出し (REST API風)
+      const response = await fetch('/api/test-groups', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          oem: formData.oem,
+          model: formData.model,
+          event: formData.event,
+          variation: formData.variation,
+          destination: formData.destination,
+          specs: formData.specs,
+          test_startdate: formData.test_startdate,
+          test_enddate: formData.test_enddate,
+          ng_plan_count: formData.ngPlanCount ? parseInt(formData.ngPlanCount) : 0,
+          tag_names: tag_names.length > 0 ? tag_names : undefined,
+        }),
       });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(
+          errorData.error?.message || `API error: ${response.status}`
+        );
+      }
+
+      const result = await response.json();
 
       if (result.success) {
         clientLogger.info('TestGroupRegistration', 'テストグループ作成成功', { groupId: result.data?.id });
@@ -249,11 +275,11 @@ const Resist: React.FC = () => {
         }, 1500);
       } else {
         clientLogger.error('TestGroupRegistration', 'テストグループ作成失敗', { error: result.error });
-        setModalMessage(result.error || 'テストグループの作成に失敗しました');
+        setModalMessage(result.error?.message || 'テストグループの作成に失敗しました');
         setIsModalOpen(true);
       }
     } catch (error) {
-      clientLogger.error('TestGroupRegistration', '例外エラー', { error });
+      clientLogger.error('TestGroupRegistration', 'テストグループ作成エラー', { error });
       setModalMessage(error instanceof Error ? error.message : 'エラーが発生しました');
       setIsModalOpen(true);
     } finally {

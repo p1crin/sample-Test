@@ -31,6 +31,13 @@ export default function SeachForm({ fields, values, onClick, onFormDataChange }:
     values || fields.reduce((acc, field) => ({ ...acc, [field.name]: field.value ?? '' }), {})
   );
 
+  // values プロップが変更されたときに formData を更新
+  React.useEffect(() => {
+    if (values) {
+      setFormData(values);
+    }
+  }, [values]);
+
   /**
    * 入力フィールドの値が変更されたときに呼び出される関数
    * @param {FormFieldProps} field - フォームフィールドのプロパティ
