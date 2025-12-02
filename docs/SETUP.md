@@ -70,6 +70,8 @@ npm run dev
 | `npm run dev` | 開発サーバー起動 |
 | `npm run build` | ビルド |
 | `npm run lint` | Lintチェック |
+| `npm test` | テスト実行 |
+| `npm run test:ui` | テストUI実行 |
 | `npx prisma migrate dev --name <名前>` | マイグレーション作成 |
 
 ## トラブルシューティング
@@ -92,6 +94,7 @@ npx prisma generate
 
 ## 詳細ドキュメント
 
+- [TEST_GUIDE.md](./TEST_GUIDE.md) - テスト実施方法（推奨読み順序: 1）
 - [PRISMA_GUIDE.md](./PRISMA_GUIDE.md) - Prisma ORM操作
 - [API_DEVELOPMENT_GUIDE.md](./API_DEVELOPMENT_GUIDE.md) - API開発パターン
 - [MIGRATION_GUIDE.md](./MIGRATION_GUIDE.md) - マイグレーション手順
