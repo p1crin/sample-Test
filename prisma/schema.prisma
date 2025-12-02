@@ -12,7 +12,7 @@ model mt_tags {
   id                 Int                  @id @default(autoincrement())
   name               String               @unique @db.VarChar(255)
   created_at         DateTime             @default(now()) @db.Timestamp(6)
-  updated_at         DateTime             @default(now()) @db.Timestamp(6)
+  updated_at         DateTime             @updatedAt @db.Timestamp(6)
   is_deleted         Boolean              @default(false)
   mt_user_tags       mt_user_tags[]
   tt_test_group_tags tt_test_group_tags[]
@@ -35,9 +35,12 @@ model mt_users {
   company      String?        @db.VarChar(255)
   password     String         @db.VarChar(255)
   created_at   DateTime       @default(now()) @db.Timestamp(6)
-  updated_at   DateTime       @default(now()) @db.Timestamp(6)
+  updated_at   DateTime       @updatedAt @db.Timestamp(6)
   is_deleted   Boolean        @default(false)
   mt_user_tags mt_user_tags[]
+
+  @@index([email], map: "idx_users_email")
+  @@index([user_role], map: "idx_users_role")
 }
 
 model tt_import_result_errors {
@@ -46,7 +49,7 @@ model tt_import_result_errors {
   error_details     String?
   error_row         Int?
   created_at        DateTime          @default(now()) @db.Timestamp(6)
-  updated_at        DateTime          @default(now()) @db.Timestamp(6)
+  updated_at        DateTime          @updatedAt @db.Timestamp(6)
   is_deleted        Boolean           @default(false)
   tt_import_results tt_import_results @relation(fields: [import_result_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 }
@@ -60,9 +63,11 @@ model tt_import_results {
   import_type             Int
   count                   Int?                      @default(0)
   created_at              DateTime                  @default(now()) @db.Timestamp(6)
-  updated_at              DateTime                  @default(now()) @db.Timestamp(6)
+  updated_at              DateTime                  @updatedAt @db.Timestamp(6)
   is_deleted              Boolean                   @default(false)
   tt_import_result_errors tt_import_result_errors[]
+
+  @@index([import_status], map: "idx_import_results_status")
 }
 
 model tt_test_case_files {
@@ -73,7 +78,7 @@ model tt_test_case_files {
   file_name     String?
   file_path     String?
   created_at    DateTime      @default(now()) @db.Timestamp(6)
-  updated_at    DateTime      @default(now()) @db.Timestamp(6)
+  updated_at    DateTime      @updatedAt @db.Timestamp(6)
   is_deleted    Boolean       @default(false)
   tt_test_cases tt_test_cases @relation(fields: [test_group_id, tid], references: [test_group_id, tid], onDelete: Cascade, onUpdate: NoAction)
 
@@ -83,22 +88,23 @@ model tt_test_case_files {
 model tt_test_cases {
   test_group_id      Int
   tid                String               @db.VarChar(255)
-  first_layer        String?
-  second_layer       String?
-  third_layer        String?
-  fourth_layer       String?
-  purpose            String?
-  request_id         String?
-  check_items        String?
-  test_procedure     String?
+  first_layer        String
+  second_layer       String
+  third_layer        String
+  fourth_layer       String
+  purpose            String
+  request_id         String
+  check_items        String
+  test_procedure     String
   created_at         DateTime             @default(now()) @db.Timestamp(6)
-  updated_at         DateTime             @default(now()) @db.Timestamp(6)
+  updated_at         DateTime             @updatedAt @db.Timestamp(6)
   is_deleted         Boolean              @default(false)
   tt_test_case_files tt_test_case_files[]
   tt_test_groups     tt_test_groups       @relation(fields: [test_group_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   tt_test_contents   tt_test_contents[]
 
   @@id([test_group_id, tid])
+  @@index([test_group_id], map: "idx_test_cases_group")
 }
 
 model tt_test_contents {
@@ -109,13 +115,14 @@ model tt_test_contents {
   expected_value          String?
   is_target               Boolean                   @default(true)
   created_at              DateTime                  @default(now()) @db.Timestamp(6)
-  updated_at              DateTime                  @default(now()) @db.Timestamp(6)
+  updated_at              DateTime                  @updatedAt @db.Timestamp(6)
   is_deleted              Boolean                   @default(false)
   tt_test_cases           tt_test_cases             @relation(fields: [test_group_id, tid], references: [test_group_id, tid], onDelete: Cascade, onUpdate: NoAction)
   tt_test_results         tt_test_results?
   tt_test_results_history tt_test_results_history[]
 
   @@id([test_group_id, tid, test_case_no])
+  @@index([is_target], map: "idx_test_contents_target")
 }
 
 model tt_test_evidences {
@@ -127,7 +134,7 @@ model tt_test_evidences {
   evidence_name           String?
   evidence_path           String?
   created_at              DateTime                @default(now()) @db.Timestamp(6)
-  updated_at              DateTime                @default(now()) @db.Timestamp(6)
+  updated_at              DateTime                @updatedAt @db.Timestamp(6)
   is_deleted              Boolean                 @default(false)
   tt_test_results_history tt_test_results_history @relation(fields: [test_group_id, tid, test_case_no, history_count], references: [test_group_id, tid, test_case_no, history_count], onDelete: Cascade, onUpdate: NoAction)
 
@@ -160,10 +167,12 @@ model tt_test_groups {
   created_by         String?              @db.VarChar(255)
   updated_by         String?              @db.VarChar(255)
   created_at         DateTime             @default(now()) @db.Timestamp(6)
-  updated_at         DateTime             @default(now()) @db.Timestamp(6)
+  updated_at         DateTime             @updatedAt @db.Timestamp(6)
   is_deleted         Boolean              @default(false)
   tt_test_cases      tt_test_cases[]
   tt_test_group_tags tt_test_group_tags[]
+
+  @@index([created_by], map: "idx_test_groups_created_by")
 }
 
 model tt_test_results {
@@ -180,11 +189,12 @@ model tt_test_results {
   note               String?
   version            Int              @default(1)
   created_at         DateTime         @default(now()) @db.Timestamp(6)
-  updated_at         DateTime         @default(now()) @db.Timestamp(6)
+  updated_at         DateTime         @updatedAt @db.Timestamp(6)
   is_deleted         Boolean          @default(false)
   tt_test_contents   tt_test_contents @relation(fields: [test_group_id, tid, test_case_no], references: [test_group_id, tid, test_case_no], onDelete: Cascade, onUpdate: NoAction)
 
   @@id([test_group_id, tid, test_case_no])
+  @@index([judgment], map: "idx_test_results_judgment")
 }
 
 model tt_test_results_history {
@@ -202,7 +212,7 @@ model tt_test_results_history {
   note               String?
   version            Int                 @default(1)
   created_at         DateTime            @default(now()) @db.Timestamp(6)
-  updated_at         DateTime            @default(now()) @db.Timestamp(6)
+  updated_at         DateTime            @updatedAt @db.Timestamp(6)
   is_deleted         Boolean             @default(false)
   tt_test_evidences  tt_test_evidences[]
   tt_test_contents   tt_test_contents    @relation(fields: [test_group_id, tid, test_case_no], references: [test_group_id, tid, test_case_no], onDelete: Cascade, onUpdate: NoAction)
