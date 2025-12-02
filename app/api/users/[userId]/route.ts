@@ -169,6 +169,8 @@ export async function PUT(
               created_by: admin.id,
               updated_by: admin.id,
             },
+          });
+        }
       }
     });
 
