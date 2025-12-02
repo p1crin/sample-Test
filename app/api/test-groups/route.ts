@@ -1,10 +1,10 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, isAdmin, isTestManager, getAccessibleTestGroups } from '@/app/lib/auth';
 import { prisma } from '@/app/lib/prisma';
 import serverLogger from '@/utils/server-logger';
 import { logDatabaseQuery, logAPIEndpoint, QueryTimer } from '@/utils/database-logger';
 import { formatDate } from '@/utils/date-formatter';
+import type { Prisma } from '@/generated/prisma/client';
 
 // GET /api/test-groups - アクセス可能なテストグループを取得
 export async function GET(req: NextRequest) {
@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
     const offset = (page - 1) * limit;
 
     // Prisma の where 条件を構築
-    const whereConditions: Record<string, unknown> = {
+    const whereConditions: Prisma.tt_test_groupsWhereInput = {
       id: {
         in: accessibleIds,
       },
@@ -89,7 +89,7 @@ export async function GET(req: NextRequest) {
     const countTimer = new QueryTimer();
     const totalCount = await prisma.tt_test_groups.count({
       where: whereConditions,
-    } as any);
+    });
 
     logDatabaseQuery({
       operation: 'SELECT',
@@ -102,7 +102,6 @@ export async function GET(req: NextRequest) {
 
     // ページネーション付きでテストグループを取得
     const dataTimer = new QueryTimer();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const testGroups = await prisma.tt_test_groups.findMany({
       where: whereConditions,
       orderBy: {
@@ -110,7 +109,7 @@ export async function GET(req: NextRequest) {
       },
       skip: offset,
       take: limit,
-    } as any);
+    });
 
     logDatabaseQuery({
       operation: 'SELECT',

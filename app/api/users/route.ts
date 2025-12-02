@@ -1,9 +1,9 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/app/lib/auth';
 import { prisma } from '@/app/lib/prisma';
 import { hash } from 'bcryptjs';
 import { logAPIEndpoint, QueryTimer } from '@/utils/database-logger';
+import type { Prisma } from '@/generated/prisma/client';
 
 // GET /api/users - Get all users (Admin only)
 export async function GET(req: NextRequest) {
@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     const tagId = searchParams.get('tagId');
 
     // Build where conditions
-    const whereConditions: Record<string, unknown> = {
+    const whereConditions: Prisma.mt_usersWhereInput = {
       is_deleted: false,
     };
 
@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
           user_id: true,
         },
       });
-      userIds = userTags.map((ut: typeof userTags[0]) => ut.user_id);
+      userIds = userTags.map((ut) => ut.user_id);
     }
 
     if (userIds !== undefined && userIds.length === 0) {
@@ -77,11 +77,11 @@ export async function GET(req: NextRequest) {
       orderBy: {
         created_at: 'desc',
       },
-    } as any);
+    });
 
     // Fetch tags for each user
     const usersWithTags = await Promise.all(
-      users.map(async (user: typeof users[0]) => {
+      users.map(async (user) => {
         const tags = await prisma.mt_user_tags.findMany({
           where: {
             user_id: user.id,

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/app/lib/auth';
 import { prisma } from '@/app/lib/prisma';
@@ -54,8 +53,8 @@ export async function GET(
     });
 
     const formattedTags = tags
-      .filter((tag: typeof tags[0]) => !tag.mt_tags.is_deleted)
-      .map((tag: typeof tags[0]) => ({
+      .filter((tag) => !tag.mt_tags.is_deleted)
+      .map((tag) => ({
         tag_id: tag.mt_tags.id,
         tag_name: tag.mt_tags.name,
       }));
@@ -113,7 +112,7 @@ export async function PUT(
     const body = await req.json();
     const { name, email, user_role, password, tags } = body;
 
-    await prisma.$transaction(async (tx: any) => {
+    await prisma.$transaction(async (tx) => {
       // Update user basic info
       if (password) {
         const hashedPassword = await bcrypt.hash(password, 10);
@@ -170,8 +169,6 @@ export async function PUT(
               created_by: admin.id,
               updated_by: admin.id,
             },
-          });
-        }
       }
     });
 
