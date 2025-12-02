@@ -1,11 +1,15 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/app/lib/auth';
-import { query, getAllRows, transaction } from '@/app/lib/db';
+import { prisma } from '@/app/lib/prisma';
 import { hash } from 'bcryptjs';
-import { User } from '@/types/database';
+import { logAPIEndpoint, QueryTimer } from '@/utils/database-logger';
 
 // GET /api/users - Get all users (Admin only)
 export async function GET(req: NextRequest) {
+  const apiTimer = new QueryTimer();
+  let statusCode = 200;
+
   try {
     await requireAdmin(req);
 
@@ -15,55 +19,110 @@ export async function GET(req: NextRequest) {
     const department = searchParams.get('department');
     const tagId = searchParams.get('tagId');
 
-    let queryText = `
-      SELECT DISTINCT u.id, u.email, u.user_role, u.department, u.company, u.created_at, u.updated_at
-      FROM mt_users u
-      LEFT JOIN mt_user_tags ut ON u.id = ut.user_id
-      WHERE u.is_deleted = FALSE
-    `;
-
-    const params: unknown[] = [];
+    // Build where conditions
+    const whereConditions: Record<string, unknown> = {
+      is_deleted: false,
+    };
 
     if (email) {
-      params.push(`%${email}%`);
-      queryText += ` AND u.email ILIKE $${params.length}`;
+      whereConditions.email = {
+        contains: email,
+        mode: 'insensitive',
+      };
     }
 
     if (department) {
-      params.push(`%${department}%`);
-      queryText += ` AND u.department ILIKE $${params.length}`;
+      whereConditions.department = {
+        contains: department,
+        mode: 'insensitive',
+      };
     }
 
+    // If tagId is provided, filter users by tag
+    let userIds: number[] | undefined;
     if (tagId) {
-      params.push(parseInt(tagId));
-      queryText += ` AND ut.tag_id = $${params.length}`;
+      const userTags = await prisma.mt_user_tags.findMany({
+        where: {
+          tag_id: parseInt(tagId),
+        },
+        select: {
+          user_id: true,
+        },
+      });
+      userIds = userTags.map((ut: typeof userTags[0]) => ut.user_id);
     }
 
-    queryText += ` ORDER BY u.created_at DESC`;
+    if (userIds !== undefined && userIds.length === 0) {
+      // No users with this tag
+      statusCode = 200;
+      logAPIEndpoint({
+        method: 'GET',
+        endpoint: '/api/users',
+        statusCode,
+        executionTime: apiTimer.elapsed(),
+        dataSize: 0,
+      });
+      return NextResponse.json({ users: [] });
+    }
 
-    const result = await query<Omit<User, 'password'>>(queryText, params);
-    const users = getAllRows(result);
+    if (userIds) {
+      whereConditions.id = {
+        in: userIds,
+      };
+    }
+
+    // Fetch users
+    const users = await prisma.mt_users.findMany({
+      where: whereConditions,
+      orderBy: {
+        created_at: 'desc',
+      },
+    } as any);
 
     // Fetch tags for each user
     const usersWithTags = await Promise.all(
-      users.map(async (user) => {
-        const tagsResult = await query(
-          `SELECT t.id, t.name
-           FROM mt_tags t
-           JOIN mt_user_tags ut ON t.id = ut.tag_id
-           WHERE ut.user_id = $1 AND t.is_deleted = FALSE`,
-          [user.id]
-        );
+      users.map(async (user: typeof users[0]) => {
+        const tags = await prisma.mt_user_tags.findMany({
+          where: {
+            user_id: user.id,
+          },
+          include: {
+            mt_tags: true,
+          },
+        });
 
         return {
           ...user,
-          tags: getAllRows(tagsResult),
+          tags: tags
+            .filter((tag) => !tag.mt_tags.is_deleted)
+            .map((tag) => ({
+              id: tag.mt_tags.id,
+              name: tag.mt_tags.name,
+            })),
         };
       })
     );
 
+    statusCode = 200;
+    logAPIEndpoint({
+      method: 'GET',
+      endpoint: '/api/users',
+      statusCode,
+      executionTime: apiTimer.elapsed(),
+      dataSize: usersWithTags.length,
+    });
+
     return NextResponse.json({ users: usersWithTags });
   } catch (error) {
+    statusCode = error instanceof Error && error.message.includes('Admin') ? 403 : 500;
+    logAPIEndpoint({
+      method: 'GET',
+      endpoint: '/api/users',
+      statusCode,
+      executionTime: apiTimer.elapsed(),
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+
     console.error('GET /api/users error:', error);
 
     if (error instanceof Error && error.message.includes('Admin')) {
@@ -82,6 +141,9 @@ export async function GET(req: NextRequest) {
 
 // POST /api/users - Create user (Admin only)
 export async function POST(req: NextRequest) {
+  const apiTimer = new QueryTimer();
+  let statusCode = 201;
+
   try {
     const pass = await hash("admin123", 10);
     console.log(`password: ${pass}`);
@@ -92,6 +154,14 @@ export async function POST(req: NextRequest) {
 
     // Validate required fields
     if (!email || !password) {
+      statusCode = 400;
+      logAPIEndpoint({
+        method: 'POST',
+        endpoint: '/api/users',
+        statusCode,
+        executionTime: apiTimer.elapsed(),
+        error: 'Validation error: email and password required',
+      });
       return NextResponse.json(
         { error: 'メールアドレスとパスワードは必須です' },
         { status: 400 }
@@ -99,12 +169,21 @@ export async function POST(req: NextRequest) {
     }
 
     // Check if email already exists
-    const existingUser = await query(
-      'SELECT id FROM mt_users WHERE email = $1',
-      [email]
-    );
+    const existingUser = await prisma.mt_users.findFirst({
+      where: {
+        email: email,
+      },
+    });
 
-    if (existingUser.rows.length > 0) {
+    if (existingUser) {
+      statusCode = 400;
+      logAPIEndpoint({
+        method: 'POST',
+        endpoint: '/api/users',
+        statusCode,
+        executionTime: apiTimer.elapsed(),
+        error: 'Email already exists',
+      });
       return NextResponse.json(
         { error: 'このメールアドレスは既に使用されています' },
         { status: 400 }
@@ -115,51 +194,70 @@ export async function POST(req: NextRequest) {
     const hashedPassword = await hash(password, 10);
 
     // Create user in transaction
-    const user = await transaction(async (client) => {
+    const user = await prisma.$transaction(async (tx) => {
       // Insert user
-      const result = await client.query<User>(
-        `INSERT INTO mt_users (email, password, user_role, department, company)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id, email, user_role, department, company, created_at, updated_at`,
-        [email, hashedPassword, user_role || 2, department || '', company || '']
-      );
-
-      const newUser = result.rows[0];
+      const newUser = await tx.mt_users.create({
+        data: {
+          email,
+          password: hashedPassword,
+          user_role: user_role || 2,
+          department: department || '',
+          company: company || '',
+        },
+      });
 
       // Create tags if they don't exist and assign to user
       if (tags && Array.isArray(tags)) {
         for (const tagName of tags) {
           // Check if tag exists
-          const tagResult = await client.query(
-            'SELECT id FROM mt_tags WHERE name = $1',
-            [tagName]
-          );
+          let foundTag = await tx.mt_tags.findFirst({
+            where: {
+              name: tagName,
+            },
+          });
 
-          let tagId;
-          if (tagResult.rows.length === 0) {
-            // Create new tag
-            const newTag = await client.query(
-              'INSERT INTO mt_tags (name) VALUES ($1) RETURNING id',
-              [tagName]
-            );
-            tagId = newTag.rows[0].id;
-          } else {
-            tagId = tagResult.rows[0].id;
+          // Create new tag if it doesn't exist
+          if (!foundTag) {
+            foundTag = await tx.mt_tags.create({
+              data: {
+                name: tagName,
+              },
+            });
           }
 
           // Assign tag to user
-          await client.query(
-            'INSERT INTO mt_user_tags (user_id, tag_id) VALUES ($1, $2)',
-            [newUser.id, tagId]
-          );
+          await tx.mt_user_tags.create({
+            data: {
+              user_id: newUser.id,
+              tag_id: foundTag.id,
+            },
+          });
         }
       }
 
       return newUser;
     });
 
+    statusCode = 201;
+    logAPIEndpoint({
+      method: 'POST',
+      endpoint: '/api/users',
+      statusCode,
+      executionTime: apiTimer.elapsed(),
+      dataSize: 1,
+    });
+
     return NextResponse.json({ user }, { status: 201 });
   } catch (error) {
+    statusCode = error instanceof Error && error.message.includes('Admin') ? 403 : 500;
+    logAPIEndpoint({
+      method: 'POST',
+      endpoint: '/api/users',
+      statusCode,
+      executionTime: apiTimer.elapsed(),
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+
     console.error('POST /api/users error:', error);
 
     if (error instanceof Error && error.message.includes('Admin')) {

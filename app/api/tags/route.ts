@@ -1,20 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/app/lib/auth';
-import { query, getAllRows } from '@/app/lib/db';
+import { prisma } from '@/app/lib/prisma';
+import { logAPIEndpoint, QueryTimer } from '@/utils/database-logger';
 
 // GET /api/tags - Get all tags
 export async function GET(req: NextRequest) {
+  const apiTimer = new QueryTimer();
+  let statusCode = 200;
+
   try {
     await requireAuth(req);
 
-    const result = await query(
-      `SELECT id, name FROM mt_tags WHERE is_deleted = FALSE ORDER BY name`
-    );
+    const tags = await prisma.mt_tags.findMany({
+      where: {
+        is_deleted: false,
+      },
+      orderBy: {
+        name: 'asc',
+      },
+    });
 
-    const tags = getAllRows(result);
+    statusCode = 200;
+    logAPIEndpoint({
+      method: 'GET',
+      endpoint: '/api/tags',
+      statusCode,
+      executionTime: apiTimer.elapsed(),
+      dataSize: tags.length,
+    });
 
     return NextResponse.json({ success: true, data: tags });
   } catch (error) {
+    statusCode = error instanceof Error && error.message === 'Unauthorized' ? 401 : 500;
+    logAPIEndpoint({
+      method: 'GET',
+      endpoint: '/api/tags',
+      statusCode,
+      executionTime: apiTimer.elapsed(),
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+
     console.error('GET /api/tags error:', error);
 
     if (error instanceof Error && error.message === 'Unauthorized') {

@@ -1,7 +1,7 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, isAdmin, isTestManager, getAccessibleTestGroups } from '@/app/lib/auth';
-import { query, getAllRows, transaction } from '@/app/lib/db';
-import { TestGroup, UserRole } from '@/types';
+import { prisma } from '@/app/lib/prisma';
 import serverLogger from '@/utils/server-logger';
 import { logDatabaseQuery, logAPIEndpoint, QueryTimer } from '@/utils/database-logger';
 import { formatDate } from '@/utils/date-formatter';
@@ -42,87 +42,87 @@ export async function GET(req: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '10', 10);
     const offset = (page - 1) * limit;
 
-    // WHERE句を動的に構築
-    const whereConditions = ['id = ANY($1)', 'is_deleted = FALSE'];
-    const params: unknown[] = [accessibleIds];
-    let paramIndex = 2;
+    // Prisma の where 条件を構築
+    const whereConditions: Record<string, unknown> = {
+      id: {
+        in: accessibleIds,
+      },
+      is_deleted: false,
+    };
 
     if (oem) {
-      whereConditions.push(`oem ILIKE $${paramIndex}`);
-      params.push(`%${oem}%`);
-      paramIndex++;
+      whereConditions.oem = {
+        contains: oem,
+        mode: 'insensitive',
+      };
     }
 
     if (model) {
-      whereConditions.push(`model ILIKE $${paramIndex}`);
-      params.push(`%${model}%`);
-      paramIndex++;
+      whereConditions.model = {
+        contains: model,
+        mode: 'insensitive',
+      };
     }
 
     if (event) {
-      whereConditions.push(`event ILIKE $${paramIndex}`);
-      params.push(`%${event}%`);
-      paramIndex++;
+      whereConditions.event = {
+        contains: event,
+        mode: 'insensitive',
+      };
     }
 
     if (variation) {
-      whereConditions.push(`variation ILIKE $${paramIndex}`);
-      params.push(`%${variation}%`);
-      paramIndex++;
+      whereConditions.variation = {
+        contains: variation,
+        mode: 'insensitive',
+      };
     }
 
     if (destination) {
-      whereConditions.push(`destination ILIKE $${paramIndex}`);
-      params.push(`%${destination}%`);
-      paramIndex++;
+      whereConditions.destination = {
+        contains: destination,
+        mode: 'insensitive',
+      };
     }
 
-    const whereClause = whereConditions.join(' AND ');
-
-    // ページネーション用に合計件数を取得
-    const countQuery = `SELECT COUNT(*) as count
-       FROM tt_test_groups
-       WHERE ${whereClause}`;
+    // 合計件数を取得
     const countTimer = new QueryTimer();
-    const countResult = await query<{ count: string | number }>(countQuery, params);
-    const totalCount = parseInt(String(countResult.rows[0]?.count || '0'), 10);
+    const totalCount = await prisma.tt_test_groups.count({
+      where: whereConditions,
+    } as any);
 
     logDatabaseQuery({
       operation: 'SELECT',
       table: 'tt_test_groups',
       executionTime: countTimer.elapsed(),
       rowsReturned: 1,
-      query: countQuery,
-      params,
+      query: 'COUNT(*)',
+      params: Object.entries(whereConditions),
     });
 
     // ページネーション付きでテストグループを取得
-    const dataParams = [...params, limit, offset];
-    const limitParamIndex = params.length + 1;
-    const offsetParamIndex = params.length + 2;
-    const dataQuery = `SELECT id, oem, model, event, variation, destination, specs,
-              test_startdate, test_enddate, ng_plan_count, created_by, updated_by,
-              created_at, updated_at
-       FROM tt_test_groups
-       WHERE ${whereClause}
-       ORDER BY created_at DESC
-       LIMIT $${limitParamIndex} OFFSET $${offsetParamIndex}`;
-
     const dataTimer = new QueryTimer();
-    const result = await query<TestGroup>(dataQuery, dataParams);
-    const testGroups = getAllRows(result);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const testGroups = await prisma.tt_test_groups.findMany({
+      where: whereConditions,
+      orderBy: {
+        created_at: 'desc',
+      },
+      skip: offset,
+      take: limit,
+    } as any);
 
     logDatabaseQuery({
       operation: 'SELECT',
       table: 'tt_test_groups',
       executionTime: dataTimer.elapsed(),
       rowsReturned: testGroups.length,
-      query: dataQuery,
-      params: dataParams,
+      query: 'findMany',
+      params: [{ skip: offset, take: limit }],
     });
 
     // 日付をフォーマット（日本時間）
-    const formattedTestGroups = testGroups.map((group: TestGroup) => ({
+    const formattedTestGroups = testGroups.map((group: typeof testGroups[0]) => ({
       ...group,
       created_at: formatDate(group.created_at, 'YYYY/MM/DD HH:mm:ss'),
       updated_at: formatDate(group.updated_at, 'YYYY/MM/DD HH:mm:ss'),
@@ -286,73 +286,93 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // トランザクション内でテストグループを作成
-    const testGroup = await transaction(async (client) => {
+    // Prisma トランザクション内でテストグループを作成
+    const testGroup = await prisma.$transaction(async (tx) => {
       // テストグループを新規作成
-      const insertQuery = `INSERT INTO tt_test_groups
-         (oem, model, event, variation, destination, specs, test_startdate, test_enddate, ng_plan_count, created_by, updated_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
-         RETURNING *`;
-
-      const insertParams = [
-        oem,
-        model,
-        event || '',
-        variation || '',
-        destination || '',
-        specs || '',
-        test_startdate || null,
-        test_enddate || null,
-        ng_plan_count || 0,
-        user.id.toString(),
-      ];
-
       const insertTimer = new QueryTimer();
-      const result = await client.query<TestGroup>(insertQuery, insertParams);
-      const newGroup = result.rows[0];
+      const newGroup = await tx.tt_test_groups.create({
+        data: {
+          oem,
+          model,
+          event: event || '',
+          variation: variation || '',
+          destination: destination || '',
+          specs: specs || '',
+          test_startdate: test_startdate ? new Date(test_startdate) : null,
+          test_enddate: test_enddate ? new Date(test_enddate) : null,
+          ng_plan_count: ng_plan_count || 0,
+          created_by: user.id.toString(),
+          updated_by: user.id.toString(),
+        },
+      });
 
       logDatabaseQuery({
         operation: 'INSERT',
         table: 'tt_test_groups',
         executionTime: insertTimer.elapsed(),
         rowsAffected: 1,
-        query: insertQuery,
-        params: insertParams,
+        query: 'create',
+        params: [
+          {
+            oem,
+            model,
+            event,
+            variation,
+            destination,
+            specs,
+            test_startdate,
+            test_enddate,
+            ng_plan_count,
+            created_by: user.id,
+            updated_by: user.id,
+          },
+        ],
       });
 
       // タグが指定されている場合はテストグループタグを関連付け
       if (tag_names && Array.isArray(tag_names) && tag_names.length > 0) {
         for (const tag of tag_names) {
           // タグ名からタグIDを取得
-          const tagLookupQuery = `SELECT id FROM mt_tags WHERE name = $1 AND is_deleted = FALSE`;
           const tagLookupTimer = new QueryTimer();
-          const tagResult = await client.query(tagLookupQuery, [tag.tag_name]);
+          const foundTag = await tx.mt_tags.findFirst({
+            where: {
+              name: tag.tag_name,
+              is_deleted: false,
+            },
+          });
 
           logDatabaseQuery({
             operation: 'SELECT',
             table: 'mt_tags',
             executionTime: tagLookupTimer.elapsed(),
-            rowsReturned: tagResult.rows.length,
-            query: tagLookupQuery,
-            params: [tag.tag_name],
+            rowsReturned: foundTag ? 1 : 0,
+            query: 'findFirst',
+            params: [{ name: tag.tag_name }],
           });
 
-          if (tagResult.rows.length > 0) {
-            const tagId = tagResult.rows[0].id;
-            const tagInsertQuery = `INSERT INTO tt_test_group_tags (test_group_id, tag_id, test_role)
-               VALUES ($1, $2, $3)`;
-            const tagInsertParams = [newGroup.id, tagId, tag.test_role];
-
+          if (foundTag) {
             const tagInsertTimer = new QueryTimer();
-            await client.query(tagInsertQuery, tagInsertParams);
+            await tx.tt_test_group_tags.create({
+              data: {
+                test_group_id: newGroup.id,
+                tag_id: foundTag.id,
+                test_role: tag.test_role,
+              },
+            });
 
             logDatabaseQuery({
               operation: 'INSERT',
               table: 'tt_test_group_tags',
               executionTime: tagInsertTimer.elapsed(),
               rowsAffected: 1,
-              query: tagInsertQuery,
-              params: tagInsertParams,
+              query: 'create',
+              params: [
+                {
+                  test_group_id: newGroup.id,
+                  tag_id: foundTag.id,
+                  test_role: tag.test_role,
+                },
+              ],
             });
           }
         }
