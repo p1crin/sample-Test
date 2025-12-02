@@ -1,0 +1,20 @@
+SQL Operation,操作種類,ログレベル,主要ログ項目,ログ例,用途
+SELECT テストグループ一覧,SELECT,INFO,table: tt_test_groups,logDatabaseQuery({operation: 'SELECT' table: 'tt_test_groups' executionTime: 45 rowsReturned: 10}),パフォーマンス監視
+,SELECT,DEBUG,SQL詳細,SELECT * FROM tt_test_groups WHERE is_deleted = FALSE,SQLデバッグ
+SELECT テストグループ詳細,SELECT,INFO,table: tt_test_groups,logDatabaseQuery({operation: 'SELECT' table: 'tt_test_groups' executionTime: 32 rowsReturned: 1}),パフォーマンス監視
+,SELECT,DEBUG,SQL詳細,SELECT * FROM tt_test_groups WHERE id = 123 AND is_deleted = FALSE,SQLデバッグ
+SELECT テストグループタグ,SELECT,INFO,table: tt_test_group_tags mt_tags,logDatabaseQuery({operation: 'SELECT' table: 'tt_test_group_tags' executionTime: 28 rowsReturned: 3}),パフォーマンス監視
+,SELECT,DEBUG,JOIN の詳細,SELECT t.id t.name tgt.test_role FROM tt_test_group_tags tgt JOIN mt_tags t,SQLデバッグ
+INSERT テストグループ,INSERT,INFO,table: tt_test_groups,logDatabaseQuery({operation: 'INSERT' table: 'tt_test_groups' executionTime: 65 rowsReturned: 1}),データベース変更追跡
+,INSERT,DEBUG,SQL詳細,INSERT INTO tt_test_groups (oem model ...) VALUES ($1 $2 ...),SQLデバッグ
+INSERT タグ関連付け,INSERT,INFO,table: tt_test_group_tags,logDatabaseQuery({operation: 'INSERT' table: 'tt_test_group_tags' executionTime: 45 rowsReturned: 3}),データベース変更追跡
+,INSERT,DEBUG,複数行INSERT,INSERT INTO tt_test_group_tags (test_group_id tag_id test_role) VALUES (123 1 0) (123 2 1),SQLデバッグ
+UPDATE テストグループ,UPDATE,INFO,table: tt_test_groups,logDatabaseQuery({operation: 'UPDATE' table: 'tt_test_groups' executionTime: 52 rowsReturned: 1}),データベース変更追跡
+,UPDATE,DEBUG,更新条件,UPDATE tt_test_groups SET oem=$1 model=$2 WHERE id=$3,SQLデバッグ
+DELETE タグ関連付け,DELETE,INFO,table: tt_test_group_tags,logDatabaseQuery({operation: 'DELETE' table: 'tt_test_group_tags' executionTime: 38 rowsReturned: 3}),データベース変更追跡
+,DELETE,DEBUG,削除条件,DELETE FROM tt_test_group_tags WHERE test_group_id=$1,SQLデバッグ
+DELETE テストグループ (論理削除),UPDATE,INFO,table: tt_test_groups,logDatabaseQuery({operation: 'UPDATE' table: 'tt_test_groups' executionTime: 48 rowsReturned: 1}),データベース変更追跡
+,UPDATE,DEBUG,論理削除SQL,UPDATE tt_test_groups SET is_deleted=true WHERE id=$1,SQLデバッグ
+トランザクション開始,TRANSACTION,INFO,transaction_id,トランザクションIDを記録,複数ステップの追跡
+トランザクションコミット,TRANSACTION,INFO,success,transaction committed all operations successful,トランザクション成功確認
+トランザックロールバック,TRANSACTION,WARN,failed_step,transaction rolled back at step: insert tag,トランザクション失敗確認

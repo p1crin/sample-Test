@@ -1,0 +1,36 @@
+ログ種類,フォーマット定義,要素,説明,例
+サーバーサイド API ログ,"[${timestamp}] [${method}] ${endpoint} - ${statusCode} ${executionTime}ms","timestamp","ISO 8601 形式の日時","2024-12-02T15:30:45.123Z"
+,"[${timestamp}] [${method}] ${endpoint} - ${statusCode} ${executionTime}ms","method","HTTP メソッド（GET POST PUT DELETE）","GET"
+,"[${timestamp}] [${method}] ${endpoint} - ${statusCode} ${executionTime}ms","endpoint","API エンドポイント","/api/test-groups"
+,"[${timestamp}] [${method}] ${endpoint} - ${statusCode} ${executionTime}ms","statusCode","レスポンス HTTP ステータスコード","200"
+,"[${timestamp}] [${method}] ${endpoint} - ${statusCode} ${executionTime}ms","executionTime","実行時間（ミリ秒）","45"
+,例: [2024-12-02T15:30:45.123Z] [GET] /api/test-groups - 200 45ms,全て,完全なログ出力例,
+
+サーバーサイド DB ログ,"[${timestamp}] [DB] ${operation} on ${table} - ${executionTime}ms (${rowsReturned} rows)","timestamp","ISO 8601 形式の日時","2024-12-02T15:30:45.123Z"
+,"[${timestamp}] [DB] ${operation} on ${table} - ${executionTime}ms (${rowsReturned} rows)","operation","SQL 操作種類（SELECT INSERT UPDATE DELETE）","SELECT"
+,"[${timestamp}] [DB] ${operation} on ${table} - ${executionTime}ms (${rowsReturned} rows)","table","対象テーブル名","tt_test_groups"
+,"[${timestamp}] [DB] ${operation} on ${table} - ${executionTime}ms (${rowsReturned} rows)","executionTime","実行時間（ミリ秒）","32"
+,"[${timestamp}] [DB] ${operation} on ${table} - ${executionTime}ms (${rowsReturned} rows)","rowsReturned","取得/更新/削除行数","1"
+,例: [2024-12-02T15:30:45.123Z] [DB] SELECT on tt_test_groups - 32ms (1 rows),全て,完全なログ出力例,
+
+クライアント側ログ,"[${timestamp}] [${level}] [${componentName}] ${message}","timestamp","ISO 8601 形式の日時","2024-12-02T15:30:45.123Z"
+,"[${timestamp}] [${level}] [${componentName}] ${message}","level","ログレベル（DEBUG INFO WARN ERROR）","INFO"
+,"[${timestamp}] [${level}] [${componentName}] ${message}","componentName","ログ出力元のコンポーネント名","TestGroupListContainer"
+,"[${timestamp}] [${level}] [${componentName}] ${message}","message","ログメッセージ","データ取得成功"
+,例: [2024-12-02T15:30:45.123Z] [INFO] [TestGroupListContainer] データ取得成功,全て,完全なログ出力例,
+
+クライアント側ログ（詳細パラメータ付き）,"[${timestamp}] [${level}] [${componentName}] ${message} ${json}","timestamp","ISO 8601 形式の日時","2024-12-02T15:30:45.123Z"
+,"[${timestamp}] [${level}] [${componentName}] ${message} ${json}","level","ログレベル","INFO"
+,"[${timestamp}] [${level}] [${componentName}] ${message} ${json}","componentName","コンポーネント名","TestGroupListContainer"
+,"[${timestamp}] [${level}] [${componentName}] ${message} ${json}","message","メッセージ","データ取得成功"
+,"[${timestamp}] [${level}] [${componentName}] ${message} ${json}","json","JSON 形式の詳細パラメータ","{"page": 1, "count": 10}"
+,例: [2024-12-02T15:30:45.123Z] [INFO] [TestGroupListContainer] データ取得成功 {"page": 1, "count": 10},全て,完全なログ出力例,
+
+構造化ログの JSON フォーマット,{"timestamp": "${timestamp}" "level": "${level}" "component": "${componentName}" "message": "${message}" "metadata": ${metadata}},全て,推奨フォーマット（機械可読性が高い）,ログ分析ツール、ログアグリゲータに適している
+,例: {"timestamp": "2024-12-02T15:30:45.123Z", "level": "INFO", "component": "TestGroupListContainer", "message": "データ取得成功", "metadata": {"page": 1, "count": 10}},全て,完全な例,
+
+エラーログの詳細フォーマット,"[${timestamp}] [${level}] [${componentName}] ${message} - Error: ${errorCode} ${errorMessage}","timestamp","日時","2024-12-02T15:30:45.123Z"
+,"[${timestamp}] [${level}] [${componentName}] ${message} - Error: ${errorCode} ${errorMessage}","level","エラーレベル（通常 ERROR WARN）","ERROR"
+,"[${timestamp}] [${level}] [${componentName}] ${message} - Error: ${errorCode} ${errorMessage}","errorCode","エラーコード","500"
+,"[${timestamp}] [${level}] [${componentName}] ${message} - Error: ${errorCode} ${errorMessage}","errorMessage","エラーメッセージ","Internal Server Error"
+,例: [2024-12-02T15:30:45.123Z] [ERROR] [API] Database operation failed - Error: 500 Internal Server Error,全て,完全なログ出力例,

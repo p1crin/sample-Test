@@ -1,0 +1,24 @@
+コンポーネント,イベント,ログレベル,ログ内容,ログ例,用途
+LoginFormContainer,コンポーネント初期化,INFO,セッション状態の確認,clientLogger.info('LoginForm' 'Component mounted'),デバッグ
+,フォーム送信,INFO,フォーム送信開始、メールアドレス,clientLogger.info('LoginForm' 'ログインフォーム送信' {email: 'user@example.com'}),監査ログ
+,バリデーション成功,INFO,フォーム検証完了,clientLogger.info('LoginForm' 'Form validation passed'),デバッグ
+,ログイン成功,INFO,セッション保存,clientLogger.info('LoginForm' 'Session save completed'),監査ログ
+,ログイン失敗,WARN,エラーメッセージ,clientLogger.warn('LoginForm' 'Login failed' {error: 'Invalid credentials'}),監査ログ
+TestGroupListContainer,コンポーネント初期化,INFO,URLパラメータ同期開始,clientLogger.info('TestGroupListContainer' 'Component mounted'),デバッグ
+,URLパラメータ同期完了,INFO,同期済みパラメータ,clientLogger.info('TestGroupListContainer' 'URLパラメータ同期完了' {params: {oem: '' model: ''} pageNum: 1}),デバッグ
+,テスト数取得開始,INFO,取得開始、検索パラメータ,clientLogger.info('TestGroupListContainer' 'テスト数取得開始' {searchParams: {...} isInitialized: true}),デバッグ
+,テスト数取得成功,INFO,取得件数,clientLogger.info('TestGroupListContainer' 'テスト数取得成功' {count: 42}),デバッグ
+,テスト数取得失敗,ERROR,エラーメッセージ,clientLogger.error('TestGroupListContainer' 'テスト数取得失敗' {error: 'API error: 500'}),監視
+,データ取得開始,INFO,ページ情報、検索条件,clientLogger.info('TestGroupListContainer' 'データ取得開始' {page: 1 searchParams: {...}}),デバッグ
+,データ取得成功,INFO,取得行数,clientLogger.info('TestGroupListContainer' 'リスト取得成功' {page: 1 count: 10}),デバッグ
+,検索実行,INFO,検索パラメータ,clientLogger.info('TestGroupListContainer' '検索実行' {formValues: {oem: '2' model: ''}}),監査ログ
+TestGroupEditFormContainer,コンポーネント初期化,INFO,診断情報（ログ機能確認）,clientLogger.info('TestGroupEditFormContainer' 'Component mounted' {groupId: 123 env: true}),デバッグ
+,データ取得開始,INFO,groupId,clientLogger.info('TestGroupEditFormContainer' 'Fetching test group data' {groupId: 123}),デバッグ
+,データ取得成功,INFO,取得データのサマリー,clientLogger.info('TestGroupEditFormContainer' 'Data fetch completed' {id: 123 oem: 'OEM1'}),デバッグ
+,データ取得失敗,ERROR,エラーメッセージ,clientLogger.error('TestGroupEditFormContainer' 'Data fetch failed' {error: 'API error: 404'}),監視
+,フォーム送信,INFO,送信データのサマリー,clientLogger.info('TestGroupEditFormContainer' 'フォーム送信' {oem: 'OEM1' model: '機種1'}),監査ログ
+,更新成功,INFO,成功メッセージ,clientLogger.info('TestGroupEditFormContainer' 'テストグループを更新しました'),監査ログ
+,更新失敗,WARN,エラー内容,clientLogger.warn('TestGroupEditFormContainer' '更新に失敗しました' {error: {...}}),監視
+SeachForm（検索フォーム）,フォームデータ変更,DEBUG,変更されたフィールド,clientLogger.debug('SeachForm' 'フォーム値変更' {oem: '2' field: 'oem'}),デバッグ
+TestCaseListContainer,ページ移動,INFO,ページ番号,clientLogger.info('TestCaseListContainer' 'ページ移動' {page: 2}),デバッグ
+,テストケース取得,INFO,取得行数、検索条件,clientLogger.info('TestCaseListContainer' 'テストケース取得成功' {page: 1 count: 10}),デバッグ

@@ -1,0 +1,70 @@
+API エンドポイント,ログ関数,ログ内容（パラメータ）,ログ値の例,データ型,備考
+GET /api/test-groups,logAPIEndpoint(),endpoint,/api/test-groups,string,エンドポイント
+,logAPIEndpoint(),method,GET,string,HTTP メソッド
+,logAPIEndpoint(),params,page=1&limit=10&oem=2,string,URLパラメータ
+,logAPIEndpoint(),executionTime,45,number,ミリ秒単位
+,logAPIEndpoint(),statusCode,200,number,HTTP ステータスコード
+,logDatabaseQuery(),operation,SELECT,string,SQL 操作種類
+,logDatabaseQuery(),table,tt_test_groups,string,テーブル名
+,logDatabaseQuery(),executionTime,32,number,ミリ秒単位
+,logDatabaseQuery(),rowsReturned,10,number,取得行数
+
+GET /api/test-groups/{groupId},logAPIEndpoint(),endpoint,/api/test-groups/123,string,エンドポイント+ID
+,logAPIEndpoint(),groupId,123,number,テストグループID
+,logAPIEndpoint(),executionTime,52,number,ミリ秒単位
+,logDatabaseQuery(),operation,SELECT,string,SQL 操作種類
+,logDatabaseQuery(),table,tt_test_groups/tt_test_group_tags/mt_tags,string,複数テーブルの場合はカンマ区切り
+,logDatabaseQuery(),executionTime,28,number,ミリ秒単位（タグ取得）
+,logDatabaseQuery(),rowsReturned,3,number,取得タグ数
+
+POST /api/test-groups,logAPIEndpoint(),endpoint,/api/test-groups,string,エンドポイント
+,logAPIEndpoint(),method,POST,string,HTTP メソッド
+,logAPIEndpoint(),executionTime,125,number,ミリ秒単位
+,logAPIEndpoint(),statusCode,201,number,作成成功
+,logDatabaseQuery(),operation,INSERT,string,INSERT 操作
+,logDatabaseQuery(),table,tt_test_groups,string,メインテーブル
+,logDatabaseQuery(),executionTime,65,number,ミリ秒単位
+
+PUT /api/test-groups/{groupId},logAPIEndpoint(),endpoint,/api/test-groups/123,string,エンドポイント+ID
+,logAPIEndpoint(),method,PUT,string,HTTP メソッド
+,logAPIEndpoint(),executionTime,95,number,ミリ秒単位（トランザクション含む）
+,logDatabaseQuery(),operation,UPDATE,string,UPDATE 操作
+,logDatabaseQuery(),table,tt_test_groups,string,メインテーブル
+,logDatabaseQuery(),executionTime,52,number,ミリ秒単位
+,logDatabaseQuery(),operation,DELETE,string,既存タグ削除
+,logDatabaseQuery(),table,tt_test_group_tags,string,タグ関連付けテーブル
+,logDatabaseQuery(),executionTime,15,number,ミリ秒単位
+,logDatabaseQuery(),operation,INSERT,string,新規タグ挿入
+,logDatabaseQuery(),table,tt_test_group_tags,string,タグ関連付けテーブル
+,logDatabaseQuery(),executionTime,25,number,ミリ秒単位
+
+DELETE /api/test-groups/{groupId},logAPIEndpoint(),endpoint,/api/test-groups/123,string,エンドポイント+ID
+,logAPIEndpoint(),method,DELETE,string,HTTP メソッド
+,logAPIEndpoint(),executionTime,65,number,ミリ秒単位
+,logDatabaseQuery(),operation,UPDATE,string,論理削除は UPDATE
+,logDatabaseQuery(),table,tt_test_groups,string,テーブル名
+,logDatabaseQuery(),executionTime,48,number,ミリ秒単位
+
+クライアント側：TestGroupListContainer,clientLogger.info(),component,TestGroupListContainer,string,コンポーネント名
+,clientLogger.info(),message,URLパラメータ同期完了,string,ユーザーフレンドリーなメッセージ
+,clientLogger.info(),params,{oem: '2' model: '' ...},object,同期済みのパラメータ
+,clientLogger.info(),pageNum,1,number,ページ番号
+,clientLogger.info(),searchParams,{oem: '2' model: '' ...},object,検索条件
+,clientLogger.error(),error,API error: 500,string,エラーメッセージ
+
+クライアント側：TestGroupEditFormContainer,clientLogger.info(),component,TestGroupEditFormContainer,string,コンポーネント名
+,clientLogger.info(),groupId,123,number,テストグループID
+,clientLogger.info(),message,Fetching test group data,string,処理内容
+,clientLogger.info(),data,{id: 123 oem: 'OEM1' ...},object,取得したデータ
+,clientLogger.warn(),field,oem,string,エラー対象フィールド
+,clientLogger.error(),error,API error: 404,string,エラーメッセージ
+
+クライアント側：SeachForm,clientLogger.debug(),component,SeachForm,string,コンポーネント名
+,clientLogger.debug(),message,フォーム値変更,string,イベント内容
+,clientLogger.debug(),field,oem,string,変更されたフィールド
+,clientLogger.debug(),value,2,string/number,新しい値
+
+共通パラメータ,timestamp,2024-12-02T15:30:45.123Z,string,ISO 8601 形式
+,userId,user123,string,認証ユーザーID（API ログ）
+,transactionId,tx_abc123,string,トランザクション ID（複数ステップの追跡用）
+,requestId,req_xyz789,string,リクエスト追跡 ID（ロギング集約用）
