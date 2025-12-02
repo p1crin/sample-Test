@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { getToken } from 'next-auth/jwt';
 import { UserRole, TestRole } from '@/types';
-import { query, getSingleRow } from '@/app/lib/db';
+import { prisma } from '@/app/lib/prisma';
 
 // Session user interface
 export interface SessionUser {
@@ -91,14 +91,12 @@ export async function canViewTestGroup(
   }
 
   // Check if user created the group
-  const groupResult = await query<{ created_by: string }>(
-    `SELECT created_by FROM tt_test_groups
-     WHERE id = $1 AND is_deleted = FALSE`,
-    [testGroupId]
-  );
+  const group = await prisma.tt_test_groups.findUnique({
+    where: { id: testGroupId },
+    select: { created_by: true, is_deleted: true },
+  });
 
-  const group = getSingleRow<{ created_by: string }>(groupResult);
-  if (!group) {
+  if (!group || group.is_deleted) {
     return false;
   }
 
@@ -117,16 +115,20 @@ export async function hasTestGroupPermission(
   userId: number,
   testGroupId: number
 ): Promise<boolean> {
-  const result = await query(
-    `SELECT COUNT(*) as count
-     FROM tt_test_group_tags tgt
-     JOIN mt_user_tags ut ON tgt.tag_id = ut.tag_id
-     WHERE tgt.test_group_id = $1 AND ut.user_id = $2`,
-    [testGroupId, userId]
-  );
+  const count = await prisma.tt_test_group_tags.count({
+    where: {
+      test_group_id: testGroupId,
+      mt_tags: {
+        mt_user_tags: {
+          some: {
+            user_id: userId,
+          },
+        },
+      },
+    },
+  });
 
-  const row = getSingleRow<{ count: string }>(result);
-  return row ? parseInt(row.count) > 0 : false;
+  return count > 0;
 }
 
 // Check if user has specific test role on test group
@@ -135,18 +137,26 @@ export async function hasTestRole(
   testGroupId: number,
   requiredRole: TestRole
 ): Promise<boolean> {
-  const result = await query(
-    `SELECT tgt.test_role
-     FROM tt_test_group_tags tgt
-     JOIN mt_user_tags ut ON tgt.tag_id = ut.tag_id
-     WHERE tgt.test_group_id = $1 AND ut.user_id = $2`,
-    [testGroupId, userId]
-  );
+  const tags = await prisma.tt_test_group_tags.findMany({
+    where: {
+      test_group_id: testGroupId,
+      mt_tags: {
+        mt_user_tags: {
+          some: {
+            user_id: userId,
+          },
+        },
+      },
+    },
+    select: {
+      test_role: true,
+    },
+  });
 
   // Check if user has the required role or a higher privilege role
   // Designer (1) > Executor (2) > Viewer (3)
-  for (const row of result.rows) {
-    if (row.test_role <= requiredRole) {
+  for (const tag of tags) {
+    if (tag.test_role <= requiredRole) {
       return true;
     }
   }
@@ -193,14 +203,12 @@ export async function canModifyTestGroup(
   }
 
   // Check if user created the group
-  const groupResult = await query(
-    `SELECT created_by FROM tt_test_groups
-     WHERE id = $1 AND is_deleted = FALSE`,
-    [testGroupId]
-  );
+  const group = await prisma.tt_test_groups.findUnique({
+    where: { id: testGroupId },
+    select: { created_by: true, is_deleted: true },
+  });
 
-  const group = getSingleRow<{ created_by: string }>(groupResult);
-  if (!group) {
+  if (!group || group.is_deleted) {
     return false;
   }
 
@@ -214,34 +222,55 @@ export async function getAccessibleTestGroups(
 ): Promise<number[]> {
   // Admins can access all
   if (userRole === UserRole.ADMIN) {
-    const result = await query(
-      `SELECT id FROM tt_test_groups WHERE is_deleted = FALSE`
-    );
-    return result.rows.map((row: { id: number }) => row.id);
+    const groups = await prisma.tt_test_groups.findMany({
+      where: { is_deleted: false },
+      select: { id: true },
+    });
+    return groups.map((group) => group.id);
   }
 
   // Test managers can access groups they created or are assigned to
   if (userRole === UserRole.TEST_MANAGER) {
-    const result = await query(
-      `SELECT DISTINCT tg.id
-       FROM tt_test_groups tg
-       LEFT JOIN tt_test_group_tags tgt ON tg.id = tgt.test_group_id
-       LEFT JOIN mt_user_tags ut ON tgt.tag_id = ut.tag_id
-       WHERE tg.is_deleted = FALSE
-       AND (tg.created_by = $1 OR ut.user_id = $1)`,
-      [userId.toString()]
-    );
-    return result.rows.map((row: { id: number }) => row.id);
+    const groups = await prisma.tt_test_groups.findMany({
+      where: {
+        is_deleted: false,
+        OR: [
+          { created_by: userId.toString() },
+          {
+            tt_test_group_tags: {
+              some: {
+                mt_tags: {
+                  mt_user_tags: {
+                    some: {
+                      user_id: userId,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      },
+      select: { id: true },
+      distinct: ['id'],
+    });
+    return groups.map((group) => group.id);
   }
 
   // General users can only access groups they are assigned to
-  const result = await query(
-    `SELECT DISTINCT tgt.test_group_id
-     FROM tt_test_group_tags tgt
-     JOIN mt_user_tags ut ON tgt.tag_id = ut.tag_id
-     WHERE ut.user_id = $1`,
-    [userId]
-  );
+  const tags = await prisma.tt_test_group_tags.findMany({
+    where: {
+      mt_tags: {
+        mt_user_tags: {
+          some: {
+            user_id: userId,
+          },
+        },
+      },
+    },
+    select: { test_group_id: true },
+    distinct: ['test_group_id'],
+  });
 
-  return result.rows.map((row: { test_group_id: number }) => row.test_group_id);
+  return tags.map((tag) => tag.test_group_id);
 }

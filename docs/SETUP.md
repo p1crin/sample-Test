@@ -45,17 +45,17 @@ CREATE DATABASE testcase_db;
 npx prisma migrate deploy
 ```
 
-### 6. サンプルデータを投入（オプション）
+このコマンドでスキーマ作成とサンプルデータが自動で投入されます。
 
-Prisma Studio でデータベースにデータを投入できます：
-
-```bash
-npx prisma studio
+**サンプルユーザー認証情報：**
+```
+admin@example.com / password123
+manager@example.com / password123
+tester1@example.com / password123
+tester2@example.com / password123
 ```
 
-ブラウザが開きます。`mt_users` テーブルから「Add record」をクリックしてユーザーを追加してください。
-
-### 7. 開発サーバーを起動
+### 6. 開発サーバーを起動
 
 ```bash
 npm run dev
@@ -70,7 +70,6 @@ npm run dev
 | `npm run dev` | 開発サーバー起動 |
 | `npm run build` | ビルド |
 | `npm run lint` | Lintチェック |
-| `npx prisma studio` | データベースGUI |
 | `npx prisma migrate dev --name <名前>` | マイグレーション作成 |
 
 ## トラブルシューティング
