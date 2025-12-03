@@ -2,7 +2,6 @@
 import { User } from '@/types';
 import { useSession, signOut } from 'next-auth/react';
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
 import { clearAuthSession } from '@/stores/feature/auth';
 
 export type HeaderProps = {
@@ -15,12 +14,10 @@ export type HeaderProps = {
 
 
 export function Header({ onToggleSidebar, user, onLogout, popupOpen, onAvatarClick }: HeaderProps) {
-  const [userData, setUserData] = useState<User | null>();
   const { data: session } = useSession();
 
-  useEffect(() => {
-    setUserData(user);
-  }, [user]);
+  // NextAuth セッションから直接メールアドレスを取得（Redux に依存しない）
+  const userEmail = session?.user?.email || user?.email || user?.name;
 
   return (
     <header
@@ -55,8 +52,8 @@ export function Header({ onToggleSidebar, user, onLogout, popupOpen, onAvatarCli
         <div className="ml-auto flex items-center flex-wrap sm:flex-nowrap gap-2 sm:gap-4">
           {/* PC表示 */}
           <div className="hidden sm:flex items-center gap-4">
-            {userData && (
-              <span className="text-sm text-white">{userData.email ?? userData.name}</span>
+            {userEmail && (
+              <span className="text-sm text-white">{userEmail}</span>
             )}
             <Link href="/password">
               <button className="text-sm text-white py-2 px-4 rounded border hover:bg-stone-600">
