@@ -95,7 +95,7 @@ const TestCaseForm: React.FC<TestCaseFormProps> = ({ value }) => {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col items-center w-4/5">
+    <div className="flex flex-col items-center w-4/5">
       <div className="flex items-center mb-4 justify-center w-full">
         <label className="flex items-center w-1/12 mr-2">
           <input
@@ -199,7 +199,7 @@ const TestCaseForm: React.FC<TestCaseFormProps> = ({ value }) => {
           <Button onClick={() => setIsDialogOpen(false)} className="bg-gray-500 hover:bg-gray-400">キャンセル</Button>
         </div>
       </Modal>
-    </form>
+    </div>
   );
 };
 

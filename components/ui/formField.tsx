@@ -25,6 +25,8 @@ export interface FormFieldProps {
   error?: string;
   /** 必須フラグ (オプション) */
   required?: boolean;
+  /** ファイル名表示 (ファイル入力用、オプション) */
+  fileDisplay?: string;
 }
 
 const FORM_FIELD_STYLE = "flex flex-cols space-x-4 justify-end";
@@ -41,7 +43,7 @@ const INPUT_DATE_FORM_STYLE = "h-10 w-67/100 rounded border border-[#cccccc] bg-
  * @param {FormFieldProps} props - フォームフィールドのプロパティ
  * @returns {JSX.Element} フォームフィールドのJSX要素
  */
-export default function FormField({ label, type, name, value, onChange, placeholder, options, error }: FormFieldProps) {
+export default function FormField({ label, type, name, value, onChange, placeholder, options, error, fileDisplay }: FormFieldProps) {
   const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
@@ -137,12 +139,24 @@ export default function FormField({ label, type, name, value, onChange, placehol
           placeholder={placeholder}
           className={INPUT_DATE_FORM_STYLE}
         />
+      ) : type === 'file' ? (
+        <div className="flex flex-col items-start flex-1">
+          <input
+            type="file"
+            name={name}
+            onChange={(e) => onChange(e as React.ChangeEvent<HTMLInputElement>)}
+            className={INPUT_FORM_STYLE}
+          />
+          {fileDisplay && (
+            <span className="text-sm text-gray-600 mt-1">{fileDisplay}</span>
+          )}
+        </div>
       ) : (
         <input
           type={type}
           name={name}
           value={controlledValue}
-          onChange={type === 'file' ? (e) => onChange(e as React.ChangeEvent<HTMLInputElement>) : (e) => onChange(e as React.ChangeEvent<HTMLInputElement>)}
+          onChange={(e) => onChange(e as React.ChangeEvent<HTMLInputElement>)}
           placeholder={placeholder}
           className={INPUT_FORM_STYLE}
           autoComplete='new-password'
