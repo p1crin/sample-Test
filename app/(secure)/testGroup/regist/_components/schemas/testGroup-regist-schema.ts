@@ -24,8 +24,8 @@ export const testGroupRegistSchema = z.object({
     .min(1, { message: '試験終了日は必須項目です' }),
   ngPlanCount: z.string()
     .min(1, { message: '不具合摘出予定数は必須項目です' })
-    .refine((val) => !isNaN(Number(val)) && Number(val) <= 9999, {
-      message: '不具合摘出予定数は最大9999件です'
+    .refine((val) => !isNaN(Number(val)) && Number(val) >= 0 && Number(val) <= 9999, {
+      message: '不具合摘出予定数は0件〜9999件の範囲で入力してください'
     }),
   designerTag: z.array(z.string()).optional(),
   executerTag: z.array(z.string()).optional(),

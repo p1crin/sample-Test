@@ -25,11 +25,53 @@ export async function POST(req: NextRequest) {
     const requestId = formData.get('requestId') as string;
     const checkItems = formData.get('checkItems') as string;
     const testProcedure = formData.get('testProcedure') as string;
-    const controlSpecFile = formData.get('controlSpecFile') as File | null;
-    const dataFlowFile = formData.get('dataFlowFile') as File | null;
     const testContentsStr = formData.get('testContents') as string;
 
     const testContents = testContentsStr ? JSON.parse(testContentsStr) : [];
+
+    // FileInfo 配列をパース（controlSpecFile と dataFlowFile）
+    interface FileInfo {
+      name: string;
+      id: string;
+      base64?: string;
+      type?: string;
+    }
+
+    const controlSpecFiles: FileInfo[] = [];
+    const dataFlowFiles: FileInfo[] = [];
+
+    // controlSpecFile[0], controlSpecFile[1], ... をパース
+    let controlSpecIndex = 0;
+    while (formData.has(`controlSpecFile[${controlSpecIndex}]`)) {
+      const fileStr = formData.get(`controlSpecFile[${controlSpecIndex}]`) as string;
+      controlSpecFiles.push(JSON.parse(fileStr));
+      controlSpecIndex++;
+    }
+
+    // dataFlowFile[0], dataFlowFile[1], ... をパース
+    let dataFlowIndex = 0;
+    while (formData.has(`dataFlowFile[${dataFlowIndex}]`)) {
+      const fileStr = formData.get(`dataFlowFile[${dataFlowIndex}]`) as string;
+      dataFlowFiles.push(JSON.parse(fileStr));
+      dataFlowIndex++;
+    }
+
+    // TIDの重複チェック
+    const existingTestCase = await prisma.tt_test_cases.findUnique({
+      where: {
+        test_group_id_tid: {
+          test_group_id: groupId,
+          tid,
+        },
+      },
+    });
+
+    if (existingTestCase) {
+      return NextResponse.json({
+        success: false,
+        error: `TID「${tid}」は既に登録されています`,
+      }, { status: 409 });
+    }
 
     // トランザクション開始
     const result = await prisma.$transaction(async (tx) => {
@@ -58,43 +100,49 @@ export async function POST(req: NextRequest) {
       }
 
       // 制御仕様書ファイル保存
-      if (controlSpecFile) {
-        const controlSpecBuffer = await controlSpecFile.arrayBuffer();
-        const controlSpecFileName = `control_spec_${Date.now()}_${controlSpecFile.name}`;
-        const controlSpecPath = join(uploadDir, controlSpecFileName);
-        await writeFile(controlSpecPath, Buffer.from(controlSpecBuffer));
+      for (let i = 0; i < controlSpecFiles.length; i++) {
+        const fileInfo = controlSpecFiles[i];
+        if (fileInfo.base64) {
+          const controlSpecFileName = `control_spec_${Date.now()}_${i}_${fileInfo.name}`;
+          const controlSpecPath = join(uploadDir, controlSpecFileName);
+          const buffer = Buffer.from(fileInfo.base64, 'base64');
+          await writeFile(controlSpecPath, buffer);
 
-        // tt_test_case_files に記録（type=0: 制御仕様書）
-        await tx.tt_test_case_files.create({
-          data: {
-            test_group_id: groupId,
-            tid,
-            file_type: 0,
-            file_no: 1,
-            file_name: controlSpecFile.name,
-            file_path: `/uploads/test-cases/${groupId}/${tid}/${controlSpecFileName}`,
-          },
-        });
+          // tt_test_case_files に記録（type=0: 制御仕様書）
+          await tx.tt_test_case_files.create({
+            data: {
+              test_group_id: groupId,
+              tid,
+              file_type: 0,
+              file_no: i + 1,
+              file_name: fileInfo.name,
+              file_path: `/uploads/test-cases/${groupId}/${tid}/${controlSpecFileName}`,
+            },
+          });
+        }
       }
 
       // データフローファイル保存
-      if (dataFlowFile) {
-        const dataFlowBuffer = await dataFlowFile.arrayBuffer();
-        const dataFlowFileName = `data_flow_${Date.now()}_${dataFlowFile.name}`;
-        const dataFlowPath = join(uploadDir, dataFlowFileName);
-        await writeFile(dataFlowPath, Buffer.from(dataFlowBuffer));
+      for (let i = 0; i < dataFlowFiles.length; i++) {
+        const fileInfo = dataFlowFiles[i];
+        if (fileInfo.base64) {
+          const dataFlowFileName = `data_flow_${Date.now()}_${i}_${fileInfo.name}`;
+          const dataFlowPath = join(uploadDir, dataFlowFileName);
+          const buffer = Buffer.from(fileInfo.base64, 'base64');
+          await writeFile(dataFlowPath, buffer);
 
-        // tt_test_case_files に記録（type=1: データフロー）
-        await tx.tt_test_case_files.create({
-          data: {
-            test_group_id: groupId,
-            tid,
-            file_type: 1,
-            file_no: 1,
-            file_name: dataFlowFile.name,
-            file_path: `/uploads/test-cases/${groupId}/${tid}/${dataFlowFileName}`,
-          },
-        });
+          // tt_test_case_files に記録（type=1: データフロー）
+          await tx.tt_test_case_files.create({
+            data: {
+              test_group_id: groupId,
+              tid,
+              file_type: 1,
+              file_no: i + 1,
+              file_name: fileInfo.name,
+              file_path: `/uploads/test-cases/${groupId}/${tid}/${dataFlowFileName}`,
+            },
+          });
+        }
       }
 
       // tt_test_contents に登録

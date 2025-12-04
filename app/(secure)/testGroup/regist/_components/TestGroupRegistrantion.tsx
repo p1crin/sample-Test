@@ -167,9 +167,11 @@ const Resist: React.FC = () => {
       name: 'ngPlanCount',
       value: formData.ngPlanCount,
       onChange: handleInputChange,
-      placeholder: '',
+      placeholder: '0〜9999',
       required: true,
-      error: errors.ngPlanCount
+      error: errors.ngPlanCount,
+      min: 0,
+      max: 9999
     },
     {
       label: 'テスト設計者',

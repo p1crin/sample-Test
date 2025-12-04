@@ -15,8 +15,6 @@ export type VerticalFormProps = React.HTMLAttributes<HTMLDivElement>;
 interface VerticalFormComponentProps {
   /** フォームフィールドのプロパティの配列 */
   fields: FormFieldProps[];
-  /** フォームの初期値 (オプション) */
-  values?: Record<string, string | string[]>;
 }
 
 const VERTICAL_FORM_STYLE = "pb-2 w-4/5 grid gap-4 grid-cols-1";

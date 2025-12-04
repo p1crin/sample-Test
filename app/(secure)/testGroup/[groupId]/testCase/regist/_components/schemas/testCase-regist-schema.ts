@@ -1,5 +1,12 @@
 import { z } from 'zod';
 
+const FileInfoSchema = z.object({
+  name: z.string(),
+  id: z.string(),
+  base64: z.string().optional(),
+  type: z.string().optional(),
+});
+
 export const testCaseRegistSchema = z.object({
   tid: z.string()
     .min(1, { message: 'TIDは必須項目です' })
@@ -26,10 +33,10 @@ export const testCaseRegistSchema = z.object({
     .min(1, { message: '確認観点は必須項目です' }),
   testProcedure: z.string()
     .min(1, { message: 'テスト手順は必須項目です' }),
-  controlSpecFile: z.instanceof(File).nullable()
-    .refine((file) => file !== null, { message: '制御仕様書は必須項目です' }),
-  dataFlowFile: z.instanceof(File).nullable()
-    .refine((file) => file !== null, { message: 'データフローは必須項目です' }),
+  controlSpecFile: z.array(FileInfoSchema)
+    .min(1, { message: '制御仕様書は必須項目です' }),
+  dataFlowFile: z.array(FileInfoSchema)
+    .min(1, { message: 'データフローは必須項目です' }),
   testContents: z.array(z.object({
     id: z.number(),
     testCase: z.string(),

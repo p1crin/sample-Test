@@ -3,12 +3,14 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { VerticalForm } from '@/components/ui/verticalForm';
+import FileUploadField from '@/components/ui/FileUploadField';
 import ButtonGroup from '@/components/ui/buttonGroup';
 import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
 import clientLogger from '@/utils/client-logger';
 import { testCaseRegistSchema } from './schemas/testCase-regist-schema';
 import TestCaseForm from '@/components/ui/testCaseForm';
+import { FileInfo } from '@/utils/fileUtils';
 
 type TestCase = {
   id: number;
@@ -33,17 +35,16 @@ const TestCaseRegistrantion: React.FC = () => {
     requestId: '',
     checkItems: '',
     testProcedure: '',
-    controlSpecFile: null as File | null,
-    dataFlowFile: null as File | null,
+    controlSpecFile: [] as FileInfo[],
+    dataFlowFile: [] as FileInfo[],
   });
 
   const [testContents, setTestContents] = useState<TestCase[]>([]);
-  const [controlSpecFileName, setControlSpecFileName] = useState('');
-  const [dataFlowFileName, setDataFlowFileName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [isTidChecking, setIsTidChecking] = useState(false);
 
   const handleInputChange = (e: any) => {
     const target = e.target as HTMLInputElement | HTMLTextAreaElement;
@@ -54,17 +55,42 @@ const TestCaseRegistrantion: React.FC = () => {
     }));
   };
 
-  const handleFileChange = (e: any, fieldName: string) => {
-    const inputElement = e.target as HTMLInputElement;
-    const file = inputElement.files?.[0] || null;
+  const handleFileChange = (fieldName: string, files: FileInfo[]) => {
     setFormData(prev => ({
       ...prev,
-      [fieldName]: file
+      [fieldName]: files
     }));
-    if (fieldName === 'controlSpecFile') {
-      setControlSpecFileName(file?.name || '');
-    } else {
-      setDataFlowFileName(file?.name || '');
+  };
+
+  const handleTidBlur = async () => {
+    if (!formData.tid.trim()) {
+      return;
+    }
+
+    setIsTidChecking(true);
+    try {
+      const response = await fetch(
+        `/api/test-cases/check-tid?groupId=${groupId}&tid=${encodeURIComponent(formData.tid)}`
+      );
+      const result = await response.json();
+
+      if (result.success && result.isDuplicate) {
+        setErrors(prev => ({
+          ...prev,
+          tid: `TID「${formData.tid}」は既に登録されています`,
+        }));
+      } else {
+        // TIDが重複していない場合、tidエラーをクリア
+        setErrors(prev => {
+          const newErrors = { ...prev };
+          delete newErrors.tid;
+          return newErrors;
+        });
+      }
+    } catch (error) {
+      clientLogger.error('TestCaseRegistration', 'TID重複チェックエラー', { error });
+    } finally {
+      setIsTidChecking(false);
     }
   };
 
@@ -75,9 +101,11 @@ const TestCaseRegistrantion: React.FC = () => {
       name: 'tid',
       value: formData.tid,
       onChange: handleInputChange,
+      onBlur: handleTidBlur,
       placeholder: '例：1-1-1-1',
       required: true,
-      error: errors.tid
+      error: errors.tid,
+      disabled: isTidChecking
     },
     {
       label: '第1層',
@@ -150,26 +178,6 @@ const TestCaseRegistrantion: React.FC = () => {
       error: errors.checkItems
     },
     {
-      label: '制御仕様書',
-      type: 'file',
-      name: 'controlSpecFile',
-      value: '',
-      onChange: (e: any) => handleFileChange(e, 'controlSpecFile'),
-      required: true,
-      error: errors.controlSpecFile,
-      fileDisplay: controlSpecFileName
-    } as any,
-    {
-      label: 'データフロー',
-      type: 'file',
-      name: 'dataFlowFile',
-      value: '',
-      onChange: (e: any) => handleFileChange(e, 'dataFlowFile'),
-      required: true,
-      error: errors.dataFlowFile,
-      fileDisplay: dataFlowFileName
-    } as any,
-    {
       label: 'テスト手順',
       type: 'textarea',
       name: 'testProcedure',
@@ -215,12 +223,13 @@ const TestCaseRegistrantion: React.FC = () => {
       formDataObj.append('checkItems', formData.checkItems);
       formDataObj.append('testProcedure', formData.testProcedure);
 
-      if (formData.controlSpecFile) {
-        formDataObj.append('controlSpecFile', formData.controlSpecFile);
-      }
-      if (formData.dataFlowFile) {
-        formDataObj.append('dataFlowFile', formData.dataFlowFile);
-      }
+      // 複数のファイルを処理
+      formData.controlSpecFile.forEach((fileInfo, index) => {
+        formDataObj.append(`controlSpecFile[${index}]`, JSON.stringify(fileInfo));
+      });
+      formData.dataFlowFile.forEach((fileInfo, index) => {
+        formDataObj.append(`dataFlowFile[${index}]`, JSON.stringify(fileInfo));
+      });
 
       if (testContents.length > 0) {
         formDataObj.append('testContents', JSON.stringify(testContents));
@@ -238,7 +247,7 @@ const TestCaseRegistrantion: React.FC = () => {
         setModalMessage('テストケースを登録しました');
         setIsModalOpen(true);
         setTimeout(() => {
-          router.push(`/testGroup/${groupId}`);
+          router.push(`/testGroup/${groupId}/testCase`);
         }, 1500);
       } else {
         clientLogger.error('TestCaseRegistration', 'テストケース作成失敗', { error: result.error });
@@ -275,6 +284,26 @@ const TestCaseRegistrantion: React.FC = () => {
   return (
     <div>
       <VerticalForm fields={fieldsBeforeFiles} />
+
+      {/* ファイルアップロードセクション */}
+      <div className="pb-2 w-4/5 grid gap-4 grid-cols-1">
+        <FileUploadField
+          label="制御仕様書"
+          name="controlSpecFile"
+          value={formData.controlSpecFile}
+          onChange={(e) => handleFileChange('controlSpecFile', e.target.value)}
+          error={errors.controlSpecFile}
+          isCopyable={true}
+        />
+        <FileUploadField
+          label="データフロー"
+          name="dataFlowFile"
+          value={formData.dataFlowFile}
+          onChange={(e) => handleFileChange('dataFlowFile', e.target.value)}
+          error={errors.dataFlowFile}
+          isCopyable={true}
+        />
+      </div>
 
       {/* テスト内容セクション */}
       <div className="mb-6">
