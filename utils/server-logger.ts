@@ -1,31 +1,46 @@
+import pino from 'pino';
+
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
+/**
+ * ログエントリのインターフェース
+ */
 interface LogEntry {
   level: LogLevel;
-  message: string;
   timestamp: string;
-  optionalParams?: unknown[];
+  message: string;
+  optionalParams?: Record<string, unknown>;
 }
 
+/**
+ * Pinoベースのサーバーロガー
+ * - 開発環境: 読みやすいテキスト形式でconsole出力
+ * - 本番環境: JSON形式でCloudWatch Logsに出力
+ */
 class ServerLogger {
-  private level: LogLevel;
+  private pinoLogger: pino.Logger;
+  private isProduction: boolean;
 
   constructor() {
-    this.level = process.env.NODE_ENV === 'production' ? 'info' : 'debug';
-  }
+    this.isProduction = process.env.NODE_ENV === 'production';
 
-  private shouldLog(level: LogLevel): boolean {
-    const levels: LogLevel[] = ['debug', 'info', 'warn', 'error'];
-    return levels.indexOf(level) >= levels.indexOf(this.level);
-  }
-
-  private formatLog(level: LogLevel, message: string, ...optionalParams: unknown[]): LogEntry {
-    return {
-      level,
-      message,
-      timestamp: new Date().toISOString(),
-      optionalParams,
-    };
+    // Pinoロガーの設定
+    if (this.isProduction) {
+      // 本番環境: JSON形式でCloudWatch Logsに送信
+      // ECSタスク定義でawslogs ログドライバーが設定されていると、
+      // 標準出力に出力されたJSON形式のログが自動的にCloudWatch Logsに送信される
+      this.pinoLogger = pino({
+        level: 'info',
+        timestamp: pino.stdTimeFunctions.isoTime,
+      });
+    } else {
+      // 開発環境: 読みやすいテキスト形式で出力
+      // Next.js環境ではtransport workerが問題を起こすため、単純なconsoleベースにする
+      this.pinoLogger = pino({
+        level: 'debug',
+        timestamp: pino.stdTimeFunctions.isoTime,
+      });
+    }
   }
 
   private output(entry: LogEntry): void {
@@ -42,28 +57,96 @@ class ServerLogger {
     }
   }
 
-  debug(message: string, ...optionalParams: unknown[]): void {
-    if (this.shouldLog('debug')) {
-      this.output(this.formatLog('debug', message, optionalParams));
+  /**
+   * デバッグレベルのログを出力
+   */
+  debug(message: string, context?: Record<string, unknown>): void {
+    if (this.isProduction) {
+      this.pinoLogger.debug(context || {}, message);
+    } else {
+      this.output({
+        level: 'debug',
+        timestamp: new Date().toISOString(),
+        message,
+        optionalParams: context,
+      });
     }
   }
 
-  info(message: string, ...optionalParams: unknown[]): void {
-    if (this.shouldLog('info')) {
-      this.output(this.formatLog('info', message, optionalParams));
+  /**
+   * インフォレベルのログを出力
+   */
+  info(message: string, context?: Record<string, unknown>): void {
+    if (this.isProduction) {
+      this.pinoLogger.info(context || {}, message);
+    } else {
+      this.output({
+        level: 'info',
+        timestamp: new Date().toISOString(),
+        message,
+        optionalParams: context,
+      });
     }
   }
 
-  warn(message: string, ...optionalParams: unknown[]): void {
-    if (this.shouldLog('warn')) {
-      this.output(this.formatLog('warn', message, optionalParams));
+  /**
+   * 警告レベルのログを出力
+   */
+  warn(message: string, context?: Record<string, unknown>): void {
+    if (this.isProduction) {
+      this.pinoLogger.warn(context || {}, message);
+    } else {
+      this.output({
+        level: 'warn',
+        timestamp: new Date().toISOString(),
+        message,
+        optionalParams: context,
+      });
     }
   }
 
-  error(message: string, ...optionalParams: unknown[]): void {
-    if (this.shouldLog('error')) {
-      this.output(this.formatLog('error', message, optionalParams));
+  /**
+   * エラーレベルのログを出力
+   */
+  error(message: string, error?: Error | Record<string, unknown>, context?: Record<string, unknown>): void {
+    if (error instanceof Error) {
+      const errorContext = {
+        ...context,
+        errorName: error.name,
+        errorMessage: error.message,
+        errorStack: error.stack,
+      };
+      if (this.isProduction) {
+        this.pinoLogger.error(errorContext, message);
+      } else {
+        this.output({
+          level: 'error',
+          timestamp: new Date().toISOString(),
+          message,
+          optionalParams: errorContext,
+        });
+      }
+    } else {
+      if (this.isProduction) {
+        this.pinoLogger.error(error || context || {}, message);
+      } else {
+        this.output({
+          level: 'error',
+          timestamp: new Date().toISOString(),
+          message,
+          optionalParams: (error || context) as Record<string, unknown> | undefined,
+        });
+      }
     }
+  }
+
+  /**
+   * 子ロガーを作成（リクエスト追跡用）
+   */
+  child(bindings: Record<string, unknown>): ServerLogger {
+    const childLogger = new ServerLogger();
+    childLogger.pinoLogger = this.pinoLogger.child(bindings);
+    return childLogger;
   }
 }
 

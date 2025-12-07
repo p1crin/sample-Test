@@ -947,5 +947,143 @@ jobs:
 3. **キャッシング**: Redux ストアでクライアント状態管理
 4. **ページネーション**: APIエンドポイントで limit/offset サポート
 5. **クエリ最適化**: PostgreSQL インデックス
-6. **ログ**: クライアント/サーバー側ログでモニタリング
+6. **ログ**: Pinoベースの分散ロギングシステム
+
+## ロギングシステム（Pino）
+
+### サーバー側ロギング
+
+**実装**: [utils/server-logger.ts](utils/server-logger.ts)
+
+```typescript
+// 使用例
+import serverLogger from '@/utils/server-logger';
+
+serverLogger.info('ユーザーログイン', { userId: user.id, email: user.email });
+serverLogger.error('データベースエラー', error, { query: 'SELECT * FROM users' });
+```
+
+**特徴**:
+- **Pino ベース**: 高速でシンプルなロギングライブラリ
+- **環境別出力**:
+  - 開発環境: 読みやすいテキスト形式でコンソール出力 (`console.log` / `console.error`)
+  - 本番環境: JSON形式で標準出力に出力 → ECSのawslogsドライバーが自動的にCloudWatch Logsに送信
+- **構造化ログ**: JSON形式でコンテキスト情報（userId, query等）を含める
+- **Error オブジェクト対応**: スタックトレース自動キャプチャ
+- **Next.js 互換**: 開発環境では transport worker ではなく console ベースで安定動作
+
+### クライアント側ロギング
+
+**実装**: [utils/client-logger.ts](utils/client-logger.ts)
+
+```typescript
+// 使用例
+import clientLogger from '@/utils/client-logger';
+
+// 情報ログ
+clientLogger.info('TestGroupRegistration', 'テストグループ作成成功', { groupId: result.id });
+
+// エラーログ
+clientLogger.error('TestGroupRegistration', 'テストグループ作成失敗', { error: errorMsg });
+
+// デバッグログ（開発環境のみ出力）
+clientLogger.debug('DataFetch', 'ユーザーデータ取得中', { userId: 123 });
+
+// 警告ログ
+clientLogger.warn('FormValidation', '入力値が大きすぎます', { fieldName: 'description', max: 255 });
+```
+
+**特徴**:
+- **ローカルコンソール出力**: 常にブラウザのコンソールに出力
+- **CloudWatch への非同期送信**: 本番環境のみ自動送信
+  - ログキューイング: 最大10個のログをバッチで送信
+  - ページ遷移時のフラッシング: `navigator.sendBeacon()` で未送信ログを送信
+  - 自動リトライ: 送信失敗時に最大3回まで再試行
+- **コンテキスト収集**: userAgent、URL、componentName を自動付加
+- **エラーハンドリング**: ネットワークエラー時も静かに処理（ユーザー体験を損なわない）
+
+### ログ API エンドポイント
+
+**エンドポイント**: `POST /api/logs`
+
+**実装**: [app/api/logs/route.ts](app/api/logs/route.ts)
+
+クライアント側から送信されたログをサーバー側で受け取り、Pinoロガーで処理します。本番環境ではCloudWatch Logsに記録されます。
+
+```json
+// リクエスト例
+{
+  "logs": [
+    {
+      "level": "info",
+      "componentName": "TestGroupRegistration",
+      "message": "テストグループ作成成功",
+      "params": [{ "groupId": 123 }],
+      "timestamp": "2024-12-07T15:30:00.000Z",
+      "userAgent": "Mozilla/5.0 ...",
+      "url": "https://example.com/testGroup/regist"
+    }
+  ]
+}
+```
+
+### CloudWatch Logs でのログ確認
+
+本番環境（AWS ECS Fargate）でのログフロー：
+
+```
+クライアント側のログ出力
+  ↓
+/api/logs エンドポイントに送信（バッチ処理）
+  ↓
+サーバー側の Pino ロガーで処理
+  ↓
+標準出力に JSON 形式で出力
+  ↓
+ECS タスク定義の awslogs ドライバー
+  ↓
+CloudWatch Logs (ロググループ: /aws/ecs/test-case-db)
+```
+
+### ログレベルの使い分け
+
+| レベル | 用途 | 本番環境出力 |
+|-------|------|----------|
+| **debug** | 開発時のデバッグ情報 | ❌ 出力されない |
+| **info** | 正常な操作のログ（ユーザーログイン、作成成功等） | ✅ 出力 |
+| **warn** | 警告情報（非推奨APIの使用等） | ✅ 出力 |
+| **error** | エラー（例外、失敗した操作） | ✅ 出力 |
+
+### 設定
+
+環境変数で制御：
+
+```bash
+# .env.local (開発環境)
+NEXT_PUBLIC_ENABLE_CLIENT_LOGGING=true
+NODE_ENV=development
+
+# 本番環境 (ECS タスク定義)
+NEXT_PUBLIC_ENABLE_CLIENT_LOGGING=true
+NODE_ENV=production
+```
+
+### CloudWatch Logs の Insights クエリ例
+
+```
+# クライアント側のエラーをすべて表示
+fields @timestamp, componentName, message, params
+| filter source = "client" and level = "error"
+| stats count() by componentName
+
+# ユーザーごとのアクティビティ追跡
+fields @timestamp, userId, message, url
+| filter userId = "user123"
+| sort @timestamp desc
+
+# API エンドポイントの応答時間
+fields @timestamp, endpoint, duration
+| filter ispresent(duration)
+| stats avg(duration), max(duration) by endpoint
+```
 
