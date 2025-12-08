@@ -3,12 +3,14 @@ import { useState } from 'react';
 import { MenuItem, menuConfig } from '@/config/menu-config';
 import { usePathname } from 'next/navigation';
 import Image from 'next/image';
+import { UserRole } from '@/types/database';
 
 export type SidebarProps = {
   open: boolean;
+  userRole: UserRole;
 };
 
-export function Sidebar({ open }: SidebarProps) {
+export function Sidebar({ open, userRole }: SidebarProps) {
   const pathname = usePathname();
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set());
 
@@ -24,7 +26,28 @@ export function Sidebar({ open }: SidebarProps) {
     });
   };
 
+  const canRenderMenuItems = (items: MenuItem[]): boolean => {
+    return items.some((item) => {
+      // Check if user has required role to see this menu item
+      if (item.requiredRole !== undefined && userRole > item.requiredRole) {
+        return false;
+      }
+
+      // If item has children, recursively check
+      if (item.children) {
+        return canRenderMenuItems(item.children);
+      }
+
+      return true;
+    });
+  };
+
   const renderMenuItem = (item: MenuItem) => {
+    // Check if user has required role to see this menu item
+    if (item.requiredRole !== undefined && userRole > item.requiredRole) {
+      return null;
+    }
+
     const isExpanded = expandedMenus.has(item.id);
     const isActive = item.path ? pathname.startsWith(item.path) : false;
 
@@ -94,14 +117,16 @@ export function Sidebar({ open }: SidebarProps) {
       style={{ minWidth: open ? '12rem' : 0 }}
     >
       <nav className="flex flex-col gap-6">
-        {menuConfig.map((group) => (
-          <div key={group.id} className="space-y-2">
-            <div className="text-xs text-neutral-400 font-semibold tracking-wider select-none">
-              {group.label}
+        {menuConfig
+          .filter((group) => canRenderMenuItems(group.items))
+          .map((group) => (
+            <div key={group.id} className="space-y-2">
+              <div className="text-xs text-neutral-400 font-semibold tracking-wider select-none">
+                {group.label}
+              </div>
+              <div className="space-y-1">{group.items.map((item) => renderMenuItem(item))}</div>
             </div>
-            <div className="space-y-1">{group.items.map((item) => renderMenuItem(item))}</div>
-          </div>
-        ))}
+          ))}
       </nav>
     </aside>
   );

@@ -15,7 +15,7 @@ interface ApiUserResponse {
   department?: string;
   company?: string;
   is_deleted: boolean;
-  tags?: { name: string }[];
+  tags?: { id: number; name: string }[];
 }
 
 export type Result<T> = {

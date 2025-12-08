@@ -1,9 +1,12 @@
+import { UserRole } from '@/types/database';
+
 export type MenuItem = {
   id: string;
   label: string;
   path?: string;
   icon?: string;
   children?: MenuItem[];
+  requiredRole?: UserRole;
 };
 
 export type MenuGroup = {
@@ -45,6 +48,7 @@ export const menuConfig: MenuGroup[] = [
         id: 'usermanagement',
         label: 'ユーザ一覧',
         path: '/user',
+        requiredRole: UserRole.ADMIN,
       },
     ],
   },

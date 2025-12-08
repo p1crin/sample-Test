@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
         executionTime: apiTimer.elapsed(),
         dataSize: 0,
       });
-      return NextResponse.json({ users: [] });
+      return NextResponse.json({ success: true, data: [] });
     }
 
     if (userIds) {
@@ -112,7 +112,7 @@ export async function GET(req: NextRequest) {
       dataSize: usersWithTags.length,
     });
 
-    return NextResponse.json({ users: usersWithTags });
+    return NextResponse.json({ success: true, data: usersWithTags });
   } catch (error) {
     statusCode = error instanceof Error && error.message.includes('Admin') ? 403 : 500;
     logAPIEndpoint({
@@ -145,8 +145,6 @@ export async function POST(req: NextRequest) {
   let statusCode = 201;
 
   try {
-    const pass = await hash("admin123", 10);
-    console.log(`password: ${pass}`);
     await requireAdmin(req);
 
     const body = await req.json();
