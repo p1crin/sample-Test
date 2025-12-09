@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useSession } from 'next-auth/react';
 import clientLogger from '@/utils/client-logger';
 import { Column } from '@/components/datagrid/DataGrid';
 import { TestGroupListRow } from '../../_components/types/testGroup-list-row';
@@ -15,6 +16,7 @@ import React from 'react';
 export function TestGroupListContainer() {
   const router = useRouter();
   const searchParamsQuery = useSearchParams();
+  const { data: session } = useSession();
 
   const [menuItems, setMenuItems] = useState<TestGroupListRow[]>([]);
   const [page, setPage] = useState(1);
@@ -26,6 +28,9 @@ export function TestGroupListContainer() {
   } | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const pageSize = 10;
+
+  // 権限チェック: TEST_MANAGER(1)またはADMIN(0)のみが編集・削除・複製可能
+  const canEdit = session?.user?.user_role !== undefined && session.user.user_role <= 1;
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedTestGroup, setSelectedTestGroup] = useState<TestGroupListRow | null>(null);
@@ -255,6 +260,8 @@ export function TestGroupListContainer() {
     <div className="flex items-center justify-end space-x-4 w-full box-border pr-4">
       <Button
         onClick={() => toTestGroupEditPage(item.id)}
+        disabled={!canEdit}
+        title={!canEdit ? '編集権限がありません' : '編集'}
       >
         編集
       </Button>
@@ -264,6 +271,8 @@ export function TestGroupListContainer() {
           setIsModalOpen(true);
           setModalContent('initial');
         }}
+        disabled={!canEdit}
+        title={!canEdit ? '削除権限がありません' : '削除'}
       >
         削除
       </Button>
@@ -274,6 +283,8 @@ export function TestGroupListContainer() {
       </Button>
       <Button
         onClick={() => toTestGroupCopyPage(item.id)}
+        disabled={!canEdit}
+        title={!canEdit ? '複製権限がありません' : '複製'}
       >
         複製
       </Button>
