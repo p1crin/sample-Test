@@ -22,7 +22,10 @@ export default function TestSummaryResultContainer({ groupName }: TestSummaryRes
     direction: 'asc' | 'desc';
   } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [apiError, setApiError] = useState<Error | null>(null);
   const pageSize = 10;
+
+  if (apiError) throw apiError;
 
   useEffect(() => {
     const getDataCountFunc = async () => {
@@ -37,6 +40,7 @@ export default function TestSummaryResultContainer({ groupName }: TestSummaryRes
           page,
           error: err instanceof Error ? err.message : String(err),
         });
+        setApiError(err instanceof Error ? err : new Error(String(err)));
       }
     };
     getDataCountFunc();
@@ -60,7 +64,10 @@ export default function TestSummaryResultContainer({ groupName }: TestSummaryRes
           count: userData.data?.length,
         });
       } catch (err) {
-        if (!ignore) setMenuItems([]);
+        if (!ignore) {
+          setMenuItems([]);
+          setApiError(err instanceof Error ? err : new Error(String(err)));
+        }
         clientLogger.error('UserListContainer', 'データ取得失敗', {
           page,
           error: err instanceof Error ? err.message : String(err),

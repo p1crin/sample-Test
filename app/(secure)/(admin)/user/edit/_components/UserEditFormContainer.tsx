@@ -13,6 +13,9 @@ type UserEditFormContainerProps = {
 export function UserEditFormContainer({ id }: UserEditFormContainerProps) {
   const [errors, setErrors] = useState<Record<string, string[]>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<Error | null>(null);
+
+  if (apiError) throw apiError;
 
   // 初期データ
   const initialForm: UserEditFormState = {
@@ -88,6 +91,7 @@ export function UserEditFormContainer({ id }: UserEditFormContainerProps) {
         clientLogger.error('UserEditFormContainer', 'データ取得失敗', {
           error: err instanceof Error ? err.message : String(err),
         });
+        setApiError(err instanceof Error ? err : new Error(String(err)));
       }
     };
     getDataFunc();

@@ -2,7 +2,7 @@
 
 import ErrorPage from '@/components/ui/ErrorPage';
 
-export default function UserErrorPage({
+export default function TestCaseErrorPage({
   error,
   reset,
 }: {
@@ -14,7 +14,7 @@ export default function UserErrorPage({
       error={error}
       reset={reset}
       backLink="/testGroup"
-      backLinkLabel="ホームに戻る"
+      backLinkLabel="テストグループ一覧に戻る"
     />
   );
 }

@@ -23,6 +23,9 @@ export function ImportInfoContainer({ id }: ImportInfoContainerProps) {
   const [data, setData] = useState<ImportInfoListRow | null>(null);
   const [labelData, setLabelData] = useState(labels);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<Error | null>(null);
+
+  if (apiError) throw apiError;
 
   useEffect(() => {
     const fetchData = async () => {
@@ -39,6 +42,7 @@ export function ImportInfoContainer({ id }: ImportInfoContainerProps) {
           error: err instanceof Error ? err.message : String(err),
         });
         setLoadError('データの取得に失敗しました');
+        setApiError(err instanceof Error ? err : new Error(String(err)));
       }
     };
 

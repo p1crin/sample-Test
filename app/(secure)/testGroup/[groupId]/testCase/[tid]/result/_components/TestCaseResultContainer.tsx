@@ -35,6 +35,9 @@ export function TestCaseResultContainer({ tid: tid }: { tid: number }) {
   const [labelData, setLabelData] = useState(labels);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [accordionOpen, setAccordionOpen] = useState([false, false]);
+  const [apiError, setApiError] = useState<Error | null>(null);
+
+  if (apiError) throw apiError;
 
   const router = useRouter();
   const pathname = usePathname();
@@ -71,6 +74,7 @@ export function TestCaseResultContainer({ tid: tid }: { tid: number }) {
           error: err instanceof Error ? err.message : String(err),
         });
         setLoadError('データの取得に失敗しました');
+        setApiError(err instanceof Error ? err : new Error(String(err)));
       }
     };
 
@@ -95,6 +99,7 @@ export function TestCaseResultContainer({ tid: tid }: { tid: number }) {
           error: err instanceof Error ? err.message : String(err),
         });
         setLoadError('サンプルテストケースの取得に失敗しました');
+        setApiError(err instanceof Error ? err : new Error(String(err)));
       }
     };
 

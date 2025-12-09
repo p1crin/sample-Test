@@ -27,9 +27,15 @@ export function TestCaseListContainer() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedTestCase, setSelectedTestCase] = useState<TestCaseListRow | null>(null);
+  const [apiError, setApiError] = useState<Error | null>(null);
 
   // Extract groupId from pathname
   const groupId = parseInt(pathname.split('/')[2] || '0', 10);
+
+  // APIエラーがある場合はスロー（error.tsx がキャッチする）
+  if (apiError) {
+    throw apiError;
+  }
 
   useEffect(() => {
     const getDataCountFunc = async () => {
@@ -44,10 +50,12 @@ export function TestCaseListContainer() {
         const count = result.testCases ? (Array.isArray(result.testCases) ? result.testCases.length : 0) : 0;
         setPageCount(Math.ceil(count / pageSize));
       } catch (err) {
-        clientLogger.error('TestCaseListContainer', 'データ取得失敗', {
-          page,
-          error: err instanceof Error ? err.message : String(err),
+        const error = err instanceof Error ? err : new Error(String(err));
+        clientLogger.error('TestCaseListContainer', 'テストケース数取得失敗', {
+          groupId,
+          error: error.message,
         });
+        setApiError(error);
       }
     };
     if (groupId > 0) {
@@ -101,10 +109,13 @@ export function TestCaseListContainer() {
         });
       } catch (err) {
         if (!ignore) setMenuItems([]);
-        clientLogger.error('TestCaseListContainer', 'データ取得失敗', {
+        const error = err instanceof Error ? err : new Error(String(err));
+        clientLogger.error('TestCaseListContainer', 'テストケースリスト取得失敗', {
           page,
-          error: err instanceof Error ? err.message : String(err),
+          groupId,
+          error: error.message,
         });
+        if (!ignore) setApiError(error);
       }
     };
     if (groupId > 0) {

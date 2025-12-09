@@ -14,6 +14,9 @@ export function TestCaseEditFormContainer({ id }: TestCaseEditFormContainerProps
   const [toastOpen, setToastOpen] = useState(false);
   const [errors, setErrors] = useState<Record<string, string[]>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<Error | null>(null);
+
+  if (apiError) throw apiError;
 
   // 初期データ
   const initialForm: TestCaseEditFormState = {
@@ -101,6 +104,7 @@ export function TestCaseEditFormContainer({ id }: TestCaseEditFormContainerProps
         clientLogger.error('TestCaseEditFormContainer', 'データ取得失敗', {
           error: err instanceof Error ? err.message : String(err),
         });
+        setApiError(err instanceof Error ? err : new Error(String(err)));
       }
     };
     getDataFunc();

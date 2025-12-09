@@ -16,8 +16,14 @@ export function ImportResultListContainer() {
     key: keyof ImportResultListRow;
     direction: 'asc' | 'desc';
   } | null>(null);
+  const [apiError, setApiError] = useState<Error | null>(null);
   const pageSize = 10;
   const router = useRouter();
+
+  // APIエラーがある場合はスロー（error.tsx がキャッチする）
+  if (apiError) {
+    throw apiError;
+  }
 
   useEffect(() => {
     const getDataCountFunc = async () => {
@@ -28,10 +34,11 @@ export function ImportResultListContainer() {
         }
         setPageCount(result.success && result.data ? Math.ceil(result.data / pageSize) : 0);
       } catch (err) {
-        clientLogger.error('UserListContainer', 'データ取得失敗', {
-          page,
-          error: err instanceof Error ? err.message : String(err),
+        const error = err instanceof Error ? err : new Error(String(err));
+        clientLogger.error('ImportResultListContainer', 'インポート結果数取得失敗', {
+          error: error.message,
         });
+        setApiError(error);
       }
     };
     getDataCountFunc();
@@ -55,10 +62,12 @@ export function ImportResultListContainer() {
         });
       } catch (err) {
         if (!ignore) setMenuItems([]);
-        clientLogger.error('UserListContainer', 'データ取得失敗', {
+        const error = err instanceof Error ? err : new Error(String(err));
+        clientLogger.error('ImportResultListContainer', 'インポート結果リスト取得失敗', {
           page,
-          error: err instanceof Error ? err.message : String(err),
+          error: error.message,
         });
+        if (!ignore) setApiError(error);
       }
     };
     getDataListFunc();

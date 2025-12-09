@@ -34,6 +34,9 @@ export function TestCaseConductContainer({ tid: tid }: { tid: number }) {
   const [accordionOpen, setAccordionOpen] = useState([true, false]);
   const [showNewTestCaseConduct, setShowNewTestCaseConduct] = useState(false);
   const [buttonDisabled, setButtonDisabled] = useState(false);
+  const [apiError, setApiError] = useState<Error | null>(null);
+
+  if (apiError) throw apiError;
 
   const user = useSelector((state: RootState) => state.auth.user);
   console.log("user:", user)
@@ -53,6 +56,7 @@ export function TestCaseConductContainer({ tid: tid }: { tid: number }) {
           error: err instanceof Error ? err.message : String(err),
         });
         setLoadError('データの取得に失敗しました');
+        setApiError(err instanceof Error ? err : new Error(String(err)));
       }
     };
 
@@ -82,6 +86,7 @@ export function TestCaseConductContainer({ tid: tid }: { tid: number }) {
           error: err instanceof Error ? err.message : String(err),
         });
         setLoadError('サンプルテストケースの取得に失敗しました');
+        setApiError(err instanceof Error ? err : new Error(String(err)));
       }
     };
 

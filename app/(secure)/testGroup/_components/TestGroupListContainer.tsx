@@ -31,6 +31,12 @@ export function TestGroupListContainer() {
   const [selectedTestGroup, setSelectedTestGroup] = useState<TestGroupListRow | null>(null);
   const [newid, setNewid] = useState<number | null>(null);
   const [modalContent, setModalContent] = useState<'initial' | 'confirm'>('initial');
+  const [apiError, setApiError] = useState<Error | null>(null);
+
+  // APIエラーがある場合はスロー（error.tsx がキャッチする）
+  if (apiError) {
+    throw apiError;
+  }
 
   // フォーム入力値（リアルタイムで変更）
   const [formValues, setFormValues] = useState<Record<string, string>>({
@@ -132,10 +138,12 @@ export function TestGroupListContainer() {
         setPageCount(Math.ceil(count / pageSize));
         clientLogger.info('TestGroupListContainer', 'テスト数取得成功', { count, searchParams });
       } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
         clientLogger.error('TestGroupListContainer', 'テスト数取得失敗', {
-          error: err instanceof Error ? err.message : String(err),
+          error: error.message,
           searchParams,
         });
+        setApiError(error);
       }
     };
     getDataCountFunc();
@@ -179,10 +187,12 @@ export function TestGroupListContainer() {
         });
       } catch (err) {
         if (!ignore) setMenuItems([]);
+        const error = err instanceof Error ? err : new Error(String(err));
         clientLogger.error('TestGroupListContainer', 'リスト取得失敗', {
           page,
-          error: err instanceof Error ? err.message : String(err),
+          error: error.message,
         });
+        if (!ignore) setApiError(error);
       }
     };
     getDataListFunc();

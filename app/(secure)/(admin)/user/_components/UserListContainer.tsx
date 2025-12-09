@@ -24,8 +24,14 @@ export function UserListContainer() {
     key: keyof UserListRow;
     direction: 'asc' | 'desc';
   } | null>(null);
+  const [apiError, setApiError] = useState<Error | null>(null);
   const pageSize = 10;
   const router = useRouter();
+
+  // APIエラーがある場合はスロー（error.tsx がキャッチする）
+  if (apiError) {
+    throw apiError;
+  }
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<UserListTableRow | null>(null);
@@ -35,14 +41,16 @@ export function UserListContainer() {
       try {
         const result = await getDataCount();
         if (!result.success || !result.data) {
-          throw new Error('データの取得に失敗しました' + ` (error: ${result.error})`);
+          throw new Error('ユーザー数の取得に失敗しました');
         }
         setPageCount(result.success && result.data ? Math.ceil(result.data / pageSize) : 0);
       } catch (err) {
-        clientLogger.error('UserListContainer', 'データ取得失敗', {
+        const error = err instanceof Error ? err : new Error(String(err));
+        clientLogger.error('UserListContainer', 'ユーザー数取得失敗', {
           page,
-          error: err instanceof Error ? err.message : String(err),
+          error: error.message,
         });
+        setApiError(error);
       }
     };
     getDataCountFunc();
@@ -65,10 +73,12 @@ export function UserListContainer() {
         });
       } catch (err) {
         if (!ignore) setMenuItems([]);
-        clientLogger.error('UserListContainer', 'データ取得失敗', {
+        const error = err instanceof Error ? err : new Error(String(err));
+        clientLogger.error('UserListContainer', 'ユーザーデータ取得失敗', {
           page,
-          error: err instanceof Error ? err.message : String(err),
+          error: error.message,
         });
+        if (!ignore) setApiError(error);
       }
     };
     getDataListFunc();
@@ -79,9 +89,18 @@ export function UserListContainer() {
 
   useEffect(() => {
     async function fetchTagOptions() {
-      const result = await getTagOptions();
-      if (result.success && result.data) {
+      try {
+        const result = await getTagOptions();
+        if (!result.success || !result.data) {
+          throw new Error('タグオプションの取得に失敗しました');
+        }
         setTagOptions(result.data);
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        clientLogger.error('UserListContainer', 'タグオプション取得失敗', {
+          error: error.message,
+        });
+        setApiError(error);
       }
     }
     fetchTagOptions();

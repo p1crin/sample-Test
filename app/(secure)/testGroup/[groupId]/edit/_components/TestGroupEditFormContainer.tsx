@@ -20,9 +20,14 @@ export function TestGroupEditFormContainer({ groupId }: TestGroupEditFormContain
 
   const [toastOpen, setToastOpen] = useState(false);
   const [errors, setErrors] = useState<Record<string, string[]>>({});
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<Error | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
+
+  // APIエラーがある場合はスロー（error.tsx がキャッチする）
+  if (apiError) {
+    throw apiError;
+  }
 
   // 初期データ
   const initialForm: TestGroupFormData = {
@@ -227,13 +232,12 @@ export function TestGroupEditFormContainer({ groupId }: TestGroupEditFormContain
 
         clientLogger.info('TestGroupEditFormContainer', 'フォームデータ設定', formData);
         setForm(formData);
-        setLoadError(null);
         setIsDataLoaded(true);
         clientLogger.info('TestGroupEditFormContainer', 'データ取得完了');
       } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : 'データの取得に失敗しました';
-        clientLogger.error('TestGroupEditFormContainer', 'データ取得失敗', { error: errorMsg });
-        setLoadError(errorMsg);
+        const error = err instanceof Error ? err : new Error(String(err));
+        clientLogger.error('TestGroupEditFormContainer', 'データ取得失敗', { error: error.message });
+        setApiError(error);
         setIsDataLoaded(true);
       }
     };
@@ -256,24 +260,14 @@ export function TestGroupEditFormContainer({ groupId }: TestGroupEditFormContain
   }
 
   return (
-    <>
-      {loadError && (
-        <div className="bg-red-50 border border-red-200 rounded p-4 mb-4" role="alert">
-          <p className="text-red-800 font-semibold">エラーが発生しました</p>
-          <p className="text-red-600 text-sm mt-1">{loadError}</p>
-        </div>
-      )}
-      {!loadError && (
-        <TestGroupEditForm
-          form={form}
-          errors={errors}
+    <TestGroupEditForm
+      form={form}
+      errors={errors}
           toastOpen={toastOpen}
           onChange={handleChange}
           onClear={handleClear}
           onSubmit={handleSubmit}
           onToastClose={() => setToastOpen(false)}
-        />
-      )}
-    </>
+    />
   );
 }
