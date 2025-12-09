@@ -1,4 +1,4 @@
-@startuml
+@startuml テストケース一覧_検索ボタン押下時
 scale max 3000 height
 title 検索ボタン押下時シーケンス図
 
@@ -77,7 +77,7 @@ alt 権限チェック成功
 
   alt 取得成功
     Rds --> TestCaseApi: データを返却。
-    TestCaseApi --> TestCase: 200 OK
+    TestCaseApi --> TestCase: 200 OK\n{ success: true, data: [...], pageInfo: { page: 1, pageSize: 20, pageCount: n } }
     TestCase --> User: テストケース一覧画面を表示。
   else 取得失敗
     Rds --> TestCaseApi: エラーを返却。

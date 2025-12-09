@@ -1,4 +1,4 @@
-@startuml
+@startuml テストケース編集_戻るボタン押下時
 scale max 3000 height
 title 戻るボタン押下時シーケンス図
 

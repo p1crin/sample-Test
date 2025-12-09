@@ -1,11 +1,27 @@
-@startuml
+@startuml テストグループ一覧_新規登録ボタン押下時
 scale max 3000 height
 title 新規登録ボタン押下時シーケンス図
 
 actor "ログインユーザ" as User
-participant "テストグループ一覧画面" as TestGroup
-participant "テストグループ新規登録画面" as TestGroupRegist
+participant "テストグループ一覧画面" as Screen
+participant "テストグループ新規登録画面" as RegistScreen
 
-User -> TestGroup: テストグループ新規登録ボタン押下
-TestGroup -> TestGroupRegist: テストグループ新規登録画面へ遷移する。
+User -> Screen: テストグループ新規登録ボタン押下
+activate Screen
+
+Screen -> RegistScreen: /testGroup/regist\nへ遷移
+activate RegistScreen
+
+RegistScreen -> RegistScreen: getServerSession()で認証確認
+alt 未認証
+    RegistScreen --> User: Unauthorized エラー発生
+else 認証済み (システム管理者 OR テスト管理者)
+    RegistScreen --> User: テストグループ新規登録画面を表示
+else 認証済み (一般ユーザ)
+    RegistScreen -> RegistScreen: 403 Forbidden スロー
+    RegistScreen --> User: 403 エラー画面表示
+end
+
+deactivate RegistScreen
+deactivate Screen
 @enduml

@@ -1,4 +1,4 @@
-@startuml
+@startuml ログイン画面_ログインボタン押下時
 scale max 3000 height
 title ログインボタン押下時シーケンス図
 

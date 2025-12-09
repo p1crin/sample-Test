@@ -1,11 +1,36 @@
-@startuml
+@startuml テストグループ一覧_編集ボタン押下時
 scale max 3000 height
 title 編集ボタン押下時シーケンス図
 
 actor "ログインユーザ" as User
-participant "テストグループ一覧画面" as TestGroup
-participant "テストグループ編集画面" as TestGroupEdit
+participant "テストグループ一覧画面" as Screen
+participant "テストグループ編集画面" as EditScreen
 
-User -> TestGroup: 編集ボタン押下
-TestGroup -> TestGroupEdit: 選択したIDをクエリパラメータに保存し、\nテストグループ編集画面へ遷移する。
+User -> Screen: 編集ボタン押下
+activate Screen
+
+Screen -> EditScreen: /testGroup/{groupId}/edit\nへ遷移\n(IDをパス変数に保存)
+activate EditScreen
+
+EditScreen -> EditScreen: getServerSession()で認証確認\n+ 権限チェック\n(システム管理者 OR テスト管理者)
+alt 未認証
+    EditScreen --> User: Unauthorized エラー発生
+else 認証済み (システム管理者 OR テスト管理者)
+    EditScreen -> EditScreen: APIでテストグループ情報を取得
+    alt 取得成功
+        EditScreen --> User: テストグループ編集画面を表示
+    else 403 Forbidden (権限なし)
+        EditScreen -> EditScreen: 403 Forbidden スロー
+        EditScreen --> User: 403 エラー画面表示
+    else 500 Internal Server Error
+        EditScreen -> EditScreen: 500 エラースロー
+        EditScreen --> User: 500 エラー画面表示
+    end
+else 認証済み (一般ユーザ)
+    EditScreen -> EditScreen: 403 Forbidden スロー
+    EditScreen --> User: 403 エラー画面表示
+end
+
+deactivate EditScreen
+deactivate Screen
 @enduml

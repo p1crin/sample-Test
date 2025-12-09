@@ -1,4 +1,4 @@
-@startuml 
+@startuml テストケース一覧_TIDリンク押下時
 title TIDリンク押下時シーケンス図
 actor "ログインユーザー" as User
 participant "テストケース一覧画面" as TestCase

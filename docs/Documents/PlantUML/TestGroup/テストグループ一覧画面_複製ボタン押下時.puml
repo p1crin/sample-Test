@@ -1,11 +1,36 @@
-@startuml
+@startuml テストグループ一覧_複製ボタン押下時
 scale max 3000 height
 title 複製ボタン押下時シーケンス図
 
 actor "ログインユーザ" as User
-participant "テストグループ一覧画面" as TestGroup
-participant "テストグループ複製画面" as TestGroupCopy
+participant "テストグループ一覧画面" as Screen
+participant "テストグループ複製画面" as CopyScreen
 
-User -> TestGroup: 複製ボタン押下
-TestGroup -> TestGroupCopy: 選択したIDをクエリパラメータに保存し、\nテストグループ複製画面へ遷移する。
+User -> Screen: 複製ボタン押下
+activate Screen
+
+Screen -> CopyScreen: /testGroup/{groupId}/copy\nへ遷移\n(IDをパス変数に保存)
+activate CopyScreen
+
+CopyScreen -> CopyScreen: getServerSession()で認証確認\n+ 権限チェック\n(システム管理者 OR テスト管理者)
+alt 未認証
+    CopyScreen --> User: Unauthorized エラー発生
+else 認証済み (システム管理者 OR テスト管理者)
+    CopyScreen -> CopyScreen: APIで複製元テストグループ情報を取得
+    alt 取得成功
+        CopyScreen --> User: テストグループ複製画面を表示
+    else 403 Forbidden (権限なし)
+        CopyScreen -> CopyScreen: 403 Forbidden スロー
+        CopyScreen --> User: 403 エラー画面表示
+    else 500 Internal Server Error
+        CopyScreen -> CopyScreen: 500 エラースロー
+        CopyScreen --> User: 500 エラー画面表示
+    end
+else 認証済み (一般ユーザ)
+    CopyScreen -> CopyScreen: 403 Forbidden スロー
+    CopyScreen --> User: 403 エラー画面表示
+end
+
+deactivate CopyScreen
+deactivate Screen
 @enduml

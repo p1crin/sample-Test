@@ -1,4 +1,4 @@
-@startuml
+@startuml テストケース新規登録_登録ボタン押下時
 scale max 3000 height
 title テストケース登録シーケンス図
 
