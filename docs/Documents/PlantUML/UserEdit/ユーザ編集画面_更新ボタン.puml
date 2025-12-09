@@ -1,0 +1,142 @@
+@startuml
+scale max 3000 height
+title 更新ボタン押下時シーケンス図
+
+actor "ログインユーザ" as User
+participant "ユーザ編集画面" as UsersEdit
+participant "ユーザ編集API" as UsersEditApi
+participant "AWS RDS" as Rds
+
+User -> UsersEdit: 更新ボタン押下。
+UsersEdit -> UsersEdit: ブラウザから\nJWTトークンを取得。
+
+alt トークン無し
+  UsersEdit --> User: ログイン画面へリダイレクト。
+else トークン記載のuser_roleが0(システム管理者)以外の場合
+  UsersEdit --> User: 権限エラーを表示。
+end
+
+UsersEdit -> UsersEdit: バリデーションチェック。
+UsersEdit -> UsersEditApi: ユーザ編集APIをリクエスト。
+  
+note right UsersEditApi
+  Authorization: Bearer {JWT}
+end note
+
+ref over UsersEditApi
+  ミドルウェアで権限チェック(許可された権限:[システム管理者])
+end ref
+
+alt 権限チェック成功
+  UsersEditApi -> UsersEditApi: 入力されたパスワードを暗号化。
+  UsersEditApi -> Rds: 入力されたユーザ情報を登録。
+  note right Rds
+    UPDATE mt_user_tags
+    SET
+      email = 入力されたID(メールアドレス),
+      name = 入力された氏名,
+      user_role = 入力された権限,
+      department = 入力された部署,
+      company = 入力された会社名,
+      password = 暗号化されたパスワード,
+      is_deleted = 入力されたステータスが無効ならtrue、有効ならfalse
+    WHERE
+    id = リクエストパラメータのユーザID;
+  end note
+
+  alt 更新成功
+    Rds --> UsersEditApi: 削除件数を返却。
+  else 更新失敗
+    Rds --> UsersEditApi: エラーを返却。
+    UsersEditApi --> UsersEdit: 500 Internal Server Error
+    UsersEdit --> User: 以下のエラーメッセージをアラートで表示。
+    note right User
+      「テストケース更新に失敗しました。再度お試しください。」
+    end note
+  end
+  UsersEditApi -> Rds: 該当するユーザタグ関連情報を削除する。
+  note right Rds
+    DELETE FROM
+      mt_user_tags
+    WHERE
+      user_id = リクエストパラメータのユーザID;
+  end note
+
+  alt 削除成功
+    Rds --> UsersEditApi: 削除件数を返却。
+  else 削除失敗
+    Rds --> UsersEditApi: エラーを返却。
+    UsersEditApi --> UsersEdit: 500 Internal Server Error
+    UsersEdit --> User: 以下のエラーメッセージをアラートで表示。
+    note right User
+      「テストケース更新に失敗しました。再度お試しください。」
+    end note
+  end
+
+  loop タグの数繰り返す
+    UsersEditApi -> Rds: 入力されたタグからタグIDを取得。
+    note right Rds
+      SELECT
+        id
+      FROM mt_tags
+      WHERE
+        name =入力されたタグ;
+    end note
+    alt 取得成功
+      Rds --> UsersEditApi: タグIDを返却。
+    else 該当するデータが存在しない
+      UsersEditApi -> Rds: タグ情報を登録。
+      note right Rds
+        INSERT INTO met_tags(name)
+        VALUES
+        (入力されたタグ)
+        RETURNING id;
+      end note
+      Rds --> UsersEditApi: タグIDを返却。
+    else 取得失敗
+      Rds --> UsersEditApi: エラーを返却。
+      UsersEditApi --> UsersEdit: 500 Internal Server Error
+      UsersEdit --> User: 以下のエラーメッセージをアラートで表示。
+      note right User
+        「テストケース更新に失敗しました。再度お試しください。」
+      end note
+    end
+    UsersEditApi -> Rds: ユーザタグ関連情報を登録する。
+    note right Rds
+      INSERT INTO mt_user_tags
+      (
+        user_id,
+        tag_id
+      )
+      VALUES
+      (
+        リクエストパラメータのユーザID,
+        取得したタグID
+      );
+    end note
+
+    alt 登録成功
+      Rds --> UsersEditApi: 登録件数を返却。
+      UsersEditApi --> UsersEdit: 200 OK
+      UsersEdit --> User: テストグループ一覧画面へ遷移する。
+    else 登録失敗
+      Rds --> UsersEditApi: エラーを返却。
+      UsersEditApi --> UsersEdit: 500 Internal Server Error
+      UsersEdit --> User: 以下のエラーメッセージをアラートで表示。
+      note right User
+        「テストケース更新に失敗しました。再度お試しください。」
+      end note
+    end
+  end
+else JWTトークン不正
+  UsersEditApi --> UsersEdit: 401 Unauthoraized
+  UsersEdit -> UsersEdit: 保存された情報を削除。
+  UsersEdit --> User: ログイン画面へリダイレクト。
+else 権限チェックエラー
+  UsersEditApi --> UsersEdit: 403 Forbidden
+  UsersEdit --> User: 権限エラーを表示。
+else リクエストパラメータ不正
+  UsersEditApi --> UsersEdit: 400 Bad Request
+  UsersEdit --> User: パラメータエラーを表示。
+end
+@enduml

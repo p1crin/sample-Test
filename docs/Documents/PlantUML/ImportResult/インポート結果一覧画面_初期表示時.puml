@@ -1,0 +1,85 @@
+@startuml
+scale max 3000 height
+title 初期表示時シーケンス図
+
+actor "ログインユーザ" as User
+participant "インポート結果一覧画面" as ImportResult
+participant "インポート結果一覧取得API" as ImportResultApi
+participant "AWS RDS" as Rds
+
+User -> ImportResult: インポート結果一覧画面へアクセス。
+ImportResult -> ImportResult: ブラウザからJWTトークンを取得。
+
+alt トークン無し
+  ImportResult --> User: ログイン画面へリダイレクト。
+else トークン記載のuser_roleが0(システム管理者)、1(テスト管理者)、2(一般)以外の場合
+  ImportResult --> User: 権限エラーを表示。
+end
+ImportResult -> ImportResultApi: インポート結果一覧取得APIをリクエスト。
+note right ImportResultApi
+  Authtorization: Bearer{JWT}
+end note
+
+ref over ImportResultApi
+ミドルウェアで権限チェック(許可された権限:[システム管理者、テスト管理者、一般])
+end ref
+
+alt 権限チェック成功
+  alt 権限がシステム管理者
+    ImportResultApi -> Rds: インポート結果一覧を全件取得。
+    note right Rds
+      SELECT
+        id,
+        file_name,
+        import_date,
+        import_status,
+        executor_name,
+        import_type,
+    end note
+
+    alt 取得成功
+      Rds --> ImportResultApi: データを返却。
+      ImportResultApi --> ImportResult: 200 OK
+      ImportResult --> User: インポート結果一覧を表示。
+    else 取得失敗
+      Rds --> ImportResultApi: エラーを返却。
+      ImportResultApi --> ImportResult: 500 Internal Server Error
+      ImportResult --> User: サーバーエラーを表示。 
+    end
+  else 権限がテスト管理者、一般
+    ImportResultApi -> Rds: 条件に一致するインポート結果一覧を取得。
+    note right Rds
+      SELECT
+        id,
+        file_name,
+        import_date,
+        import_status,
+        executor_name,
+        import_type,
+      WHERE
+        import_type = 1;
+    end note
+
+    alt 取得成功
+      Rds --> ImportResultApi: データを返却。
+      ImportResultApi --> ImportResult: 200 OK
+      ImportResult --> User: インポート結果一覧を表示。
+    else 取得失敗
+      Rds --> ImportResultApi: エラーを返却。
+      ImportResultApi --> ImportResult: 500 Internal Server Error
+      ImportResult --> User: サーバーエラーを表示。 
+    end
+  end
+else トークン無し
+  ImportResultApi --> ImportResult: 401 Unauthorized
+  ImportResult -> ImportResult: 保存されたトークンを削除。
+  ImportResult --> User: ログイン画面へリダイレクト。
+else 権限チェック失敗
+  ImportResultApi --> ImportResult: 403 Forbidden
+  ImportResult --> User: 権限エラーを表示。
+else リクエストパラメータ不正
+  ImportResultApi --> ImportResult: 400 Bad Request
+  ImportResult --> User: パラメータエラーを表示。
+end
+
+@enduml

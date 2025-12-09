@@ -1,0 +1,222 @@
+@startuml
+scale max 3000 height
+title 削除ボタン押下時シーケンス図
+
+actor "ログインユーザ" as User
+participant "テストグループ一覧画面" as TestGroup
+participant "テストケース件数取得API" as TestCaseCountApi
+participant "テストグループ削除API" as TestGroupDeleteApi
+participant "AWS RDS" as RDS
+participant "AWS S3" as S3
+
+User -> TestGroup: 削除ボタン押下。
+TestGroup -> TestCaseCountApi: テストケース件数取得APIをリクエスト。
+note right TestCaseCountApi
+  Authorization: Bearer{JWT}
+end note
+
+ref over TestCaseCountApi
+  ミドルウェアで権限チェック(許可された権限[システム管理者、テスト管理者])
+end ref
+
+alt チェック成功
+  TestCaseCountApi -> RDS: 該当するテストケース件数を取得。
+  note right RDS
+    SELECT
+      COUNT(*)
+    FROM
+      tt_test_cases
+    WHERE
+      test_group_id = リクエストパラメータのテストグループID;
+  end note
+
+  alt 取得成功
+    RDS --> TestCaseCountApi: 取得件数を返却。
+    TestCaseCountApi --> TestGroup: 200 OK
+    TestGroup --> User: 以下のメッセージと削除ボタン、\nキャンセルボタンをモーダルで表示。
+    note right User
+    「本当にこのテストグループを削除しますか？
+    この操作は取り消せません。削除すると関連するn件のテストケースが失われます。
+    対象テストグループID:X」
+    ※n:選択したテストグループIDに紐づいているテストケースの件数。
+    ※X:選択したテストグループID
+    end note
+  else
+    RDS --> TestCaseCountApi: エラーを返却。
+    TestCaseCountApi --> TestGroup: 500 Internal Server Error
+    TestGroup --> User: 以下のメッセージと削除ボタン、\nキャンセルボタンをモーダルで表示。
+    note right User
+      「本当にこのテストグループを削除しますか？
+      この操作は取り消せません。削除すると関連するテストケースが失われます。
+      対象テストグループID:X」
+      ※n:選択したテストグループIDに紐づいているテストケースの件数。
+      ※X:選択したテストグループID
+    end note
+  end
+
+  alt 削除ボタンを押下した場合
+    User -> TestGroup: 削除ボタンを押下。
+    TestGroup --> User: 以下のメッセージと削除ボタン、\nキャンセルボタンをモーダルで表示。
+    note right User
+      「本当に削除しますか？
+      対象テストグループ:X
+      ※X:選択したテストグループID」
+    end note
+
+    alt 削除ボタンを押下した場合
+      User -> TestGroup: 削除ボタン押下。
+      TestGroup-> TestGroupDeleteApi: テストグループ削除APIをリクエスト。
+      note right TestGroupDeleteApi
+        Authorization: Bearer{JWT}
+      end note
+
+      ref over TestGroupDeleteApi
+        ミドルウェアで権限チェック(許可された権限[システム管理者、テスト管理者])
+      end ref
+      
+      alt 権限チェック成功
+        TestGroupDeleteApi-> RDS: 削除対象のファイルパスを取得。
+        note right RDS
+          SELECT
+	          tcf.file_path
+          FROM
+	          tt_test_case_files tcf
+          WHERE
+	          tcf.test_group_id = リクエストパラメータのテストグループID
+	        AND NOT EXISTS (
+	          SELECT
+		          1
+	          FROM
+		          tt_test_case_files other
+	          WHERE
+		          other.file_path = tcf.file_path
+		        AND other.test_group_id != リクエストパラメータのテストグループID
+		        AND other.is_deleted = false
+          );
+        end note
+        note right RDS
+          SELECT
+            evidence_path
+          FROM
+            tt_test_evidences
+          WHERE
+            test_group_id = リクエストパラメータのテストグループID;
+        end note
+        
+        alt 取得成功
+          RDS --> TestGroupDeleteApi: データを返却。
+        else 取得失敗
+          RDS --> TestGroupDeleteApi: エラーを返却。
+          TestGroupDeleteApi --> TestGroup: 500 Internal Server Error
+          TestGroup --> User: 以下のエラーメッセージをアラートで表示。
+          note right User
+            「テストグループの削除に失敗しました。再度お試しください。」
+          end note
+        end
+        TestGroupDeleteApi -> RDS: テストグループIDがリクエストパラメータの\ntest_group_idと一致するテストエビデンス情報を削除。
+        note right RDS
+          DELETE FROM 
+            tt_test_evidences
+          WHERE
+            test_group_id = リクエストパラメータのテストグループID;
+        end note
+
+        TestGroupDeleteApi --> RDS: テストグループIDがリクエストパラメータの\ntest_group_idと一致するテスト結果履歴情報を削除。
+        note right RDS
+          DELETE FROM
+            tt_test_results_history
+          WHERE
+            test_group_id = リクエストパラメータのテストグループID;
+        end note
+        TestGroupDeleteApi -> RDS: テストグループIDがリクエストパラメータの\ntest_group_idと一致するテスト結果情報を削除。
+        note right RDS
+          DELETE FROM
+            tt_test_results
+          WHERE
+            test_group_id = リクエストパラメータのテストグループID;
+        end note
+        TestGroupDeleteApi -> RDS: テストグループIDがリクエストパラメータの\ntest_group_idと一致するテスト内容情報を削除。
+        note right RDS
+          DELETE FROM
+            tt_test_contents
+          WHERE
+            test_group_id = リクエストパラメータのテストグループID;
+        end note
+        TestGroupDeleteApi -> RDS: テストグループIDがリクエストパラメータの\ntest_group_idと一致するテスト情報ファイル情報を削除。
+        note right RDS
+          DELETE FROM
+            tt_test_case_files
+          WHERE
+            test_group_id = リクエストパラメータのテストグループID
+          RETURNING
+            file_name,
+            file_path;
+        end note
+        TestGroupDeleteApi -> RDS: テストグループIDがリクエストパラメータの\ntest_group_idと一致するテスト情報を削除。
+        note right RDS
+          DELETE FROM
+            tt_test_cases
+          WHERE
+            test_group_id = リクエストパラメータのテストグループID;
+        end note
+        TestGroupDeleteApi -> RDS: テストグループIDがリクエストパラメータの\ntest_group_idと一致するテストグループタグ関連情報を削除。
+        note right RDS
+          DELETE FROM
+            tt_test_group_tags
+          INNER JOIN
+            tt_test_group_tags ON tt_test_groups.id = tt_test_group_tags.test_group_id
+          WHERE
+            tt_test_group.ig = リクエストパラメータのテストグループID
+        end note
+        TestGroupDeleteApi -> RDS: テストグループIDがリクエストパラメータの\ntest_group_idと一致するテストグループ情報を削除。
+        note right RDS
+          DELETE FROM
+            tt_test_group
+          WHERE
+            id = リクエストパラメータのテストグループID;
+        end note
+
+        alt 削除成功
+          RDS --> TestGroupDeleteApi: 削除件数を返却。
+          TestGroupDeleteApi -> S3: 削除対象のファイルパスが該当するファイルを削除。
+          TestGroupDeleteApi --> TestGroup: 200 OK
+          TestGroup --> User: テストグループ一覧を表示。
+        else 削除失敗
+          RDS --> TestGroupDeleteApi: エラーを返却。
+          TestGroupDeleteApi --> TestGroup: 500 Internal Server Error
+          TestGroup --> User: 以下のエラーメッセージをアラートで表示。
+          note right User
+            「テストグループの削除に失敗しました。再度お試しください。」
+          end note
+        end
+      else トークン無し
+        TestGroupDeleteApi --> TestGroup: 401 Unauthorized
+        TestGroup -> TestGroup: 保存された情報を削除。
+        TestGroup --> User: ログイン画面へリダイレクト
+      else 権限チェック失敗
+        TestGroupDeleteApi --> TestGroup: 403 Forbidden
+        TestGroup --> User: 権限エラーを表示。
+      else リクエストパラメータ不正
+        TestGroupDeleteApi --> TestGroup: 400 Bad Request
+        TestGroup --> User: パラメータエラーを表示。
+      end
+    else キャンセルボタンを押下した場合
+      User -> TestGroup: キャンセルボタン押下。
+      TestGroup -> TestGroup: 削除再確認モーダルを閉じる。
+    end
+  else キャンセルボタンを押下した場合
+    User -> TestGroup: キャンセルボタン押下。
+    TestGroup -> TestGroup: 削除確認モーダルを閉じる。
+  end
+else トークン無し
+  TestGroupDeleteApi --> TestGroup: 401 Unauthorized
+  TestGroup -> TestGroup: 保存された情報を削除。
+  TestGroup --> User: ログイン画面へリダイレクト
+else 権限チェック失敗
+  TestGroupDeleteApi --> TestGroup: 403 Forbidden
+  TestGroup --> User: 権限エラーを表示。
+else リクエストパラメータ不正
+  TestGroupDeleteApi --> TestGroup: 400 Bad Request
+  TestGroup --> User: パラメータエラーを表示。
+end
+@enduml

@@ -1,0 +1,9 @@
+@startuml 
+title 戻るボタン押下時シーケンス図
+actor "ログインユーザー" as User
+participant "テストケース結果確認画面" as Screen
+participant "テストケース一覧画面" as TestCase
+
+User ->  Screen: 戻るボタン押下。
+Screen -> TestCase: テストケース一覧画面へ遷移する。
+@enduml

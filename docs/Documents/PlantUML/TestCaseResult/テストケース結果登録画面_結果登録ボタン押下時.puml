@@ -1,0 +1,9 @@
+@startuml
+title 結果登録ボタン押下時シーケンス図
+actor "ログインユーザー" as User
+participant "テストケース結果確認画面" as Screen
+participant "テストケース結果登録画面" as TestConduct
+
+User ->  Screen: 結果登録ボタン押下。
+Screen -> TestConduct: テストケース一覧画面へ遷移する。
+@enduml

@@ -1,0 +1,9 @@
+@startuml
+title 戻るボタン押下時シーケンス図
+actor "ログインユーザー" as User
+participant "テスト集計結果表示画面" as TestSummary
+participant "テストグループ一覧画面" as TestGroup
+
+User -> TestSummary: 戻るボタン押下。
+TestSummary -> TestGroup: テストグループ一覧画面へ遷移する。
+@enduml

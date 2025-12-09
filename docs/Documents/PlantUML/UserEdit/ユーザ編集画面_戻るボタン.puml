@@ -1,0 +1,11 @@
+@startuml
+scale max 3000 height
+title 戻るボタン押下時シーケンス図
+
+actor "ログインユーザ" as User
+participant "ユーザ編集画面" as UsersEdit
+participant "ユーザ一覧画面" as Users
+
+User -> UsersEdit: 戻るボタン押下時
+UsersEdit -> Users: ユーザ一覧画面へ遷移する。
+@enduml

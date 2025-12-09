@@ -1,0 +1,127 @@
+@startuml
+scale max 3000 height
+title 初期表示時シーケンス図
+
+actor "ログインユーザ" as User
+participant "テストケース編集画面" as TestCaseEdit
+participant "テストケース詳細取得API" as TestCaseInfoApi
+participant "AWS RDS" as Rds
+participant "S3ファイルダウンロードAPI" as S3DownloadApi
+participant "AWS S3" as S3
+
+User -> TestCaseEdit: テストケース編集画面へアクセス。
+TestCaseEdit -> TestCaseEdit: ブラウザからJWTトークンを取得。
+
+alt トークン無し
+  TestCaseEdit --> User: ログイン画面へリダイレクト。
+else トークン記載のuser_roleが0(システム管理者)、1(テスト管理者)以外の場合
+  TestCaseEdit --> User: 権限エラーを表示。
+end
+
+TestCaseEdit -> TestCaseInfoApi: テストケース詳細取得APIをリクエスト。
+note right TestCaseInfoApi
+  Authorization: Bearer{JWT}
+end note
+
+ref over TestCaseInfoApi
+  ミドルウェアで権限チェック(許可された権限[システム管理者、テスト管理者])
+end ref
+
+alt 権限チェック成功
+  TestCaseInfoApi -> Rds: 該当するテストケース情報を取得。
+  note right Rds
+    SELECT
+      test_group_id,
+      tid,
+      first_layer,
+      second_layer,
+      third_layer,
+      fourth_layer,
+      purpose,
+      request_id,
+      check_items,
+      test_procedure
+    FROM
+      tt_test_cases
+    WHERE
+      test_group_id = リクエストパラメータのtest_group_id AND
+      tid = リクエストパラメータのtid;
+  end note
+
+  alt 取得成功
+    Rds --> TestCaseInfoApi: データを返却。
+  else 取得失敗
+    Rds --> TestCaseInfoApi: エラーを返却。
+    TestCaseInfoApi --> TestCaseEdit: 500 Internal Server Error
+    TestCaseEdit --> User: サーバーエラーを表示。
+  end
+
+  TestCaseInfoApi -> Rds: 該当するテストケースファイル情報を取得。
+  note right Rds
+    SELECT
+      file_type,
+      file_no,
+      file_name,
+      file_path
+    FROM
+      tt_test_case_files
+    WHERE
+      test_group_id = リクエストパラメータのtest_group_id AND
+      tid = リクエストパラメータのtid AND
+      is_deleted = false;
+  end note
+
+  alt 取得成功
+    Rds --> TestCaseInfoApi: データを返却。
+  else 取得失敗
+    Rds --> TestCaseInfoApi: エラーを返却。
+    TestCaseInfoApi --> TestCaseEdit: 500 Internal Server Error
+    TestCaseEdit --> User: サーバーエラーを表示。
+  end
+
+  loop 各ファイルについて
+    TestCaseInfoApi -> S3DownloadApi: S3ファイルダウンロードAPIをリクエスト
+    note right S3DownloadApi
+      Authorization: Bearer{JWT}
+    end note
+    S3DownloadApi -> S3: ファイルをダウンロード
+    S3 --> S3DownloadApi: ファイルデータを返却
+    S3DownloadApi --> TestCaseInfoApi: ファイルデータを返却
+  end
+
+  TestCaseInfoApi -> Rds: 該当するテストケース内容情報を取得。
+  note right Rds
+    SELECT
+      test_case_no,
+      test_case,
+      expected_value,
+      is_target
+    FROM
+      tt_test_contents
+    WHERE
+      test_group_id = リクエストパラメータのtest_group_id AND
+      tid = リクエストパラメータのtid AND
+      is_deleted = false;
+  end note
+
+  alt 取得成功
+    Rds --> TestCaseInfoApi: データを返却。
+    TestCaseInfoApi --> TestCaseEdit: 200 OK
+    TestCaseEdit --> User: テストケース編集画面を表示。
+  else 取得失敗
+    Rds --> TestCaseInfoApi: エラーを返却。
+    TestCaseInfoApi --> TestCaseEdit: 500 Internal Server Error
+    TestCaseEdit --> User: サーバーエラーを表示。
+  end
+else トークン無し
+  TestCaseInfoApi --> TestCaseEdit: 401 Unauthorized
+  TestCaseEdit -> TestCaseEdit: 保存された情報を削除
+  TestCaseEdit --> User: ログイン画面へリダイレクト。
+else 権限チェック失敗
+  TestCaseInfoApi --> TestCaseEdit: 403 Forbidden
+  TestCaseEdit --> User: 権限エラーを表示。
+else リクエストパラメータ不正
+  TestCaseInfoApi --> TestCaseEdit: 400 Bad Request
+  TestCaseEdit --> User: パラメータエラーを表示。
+end
+@enduml

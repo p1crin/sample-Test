@@ -1,0 +1,120 @@
+@startuml
+scale max 3000 height
+title 初期表示時シーケンス図
+
+actor "ログインユーザ" as User
+participant "ユーザ一覧実施画面" as Users
+participant "タグ一覧取得API" as TagsApi
+participant "ユーザ一覧取得API" as UsersApi
+participant "AWS RDS" as Rds
+
+User -> Users: ユーザ一覧画面へアクセス。
+Users -> Users: ブラウザからJWTトークンを取得。
+
+alt トークン無し
+  Users --> User: ログイン画面へリダイレクト。
+else トークン記載のuser_roleが0(システム管理者)以外の場合
+  Users --> User: 権限エラーを表示。
+end
+Users -> TagsApi: タグ一覧取得APIをリクエスト。
+note right UsersApi
+  Authorization: Bearer{JWT}
+end note
+ref over TagsApi
+  ミドルウェアで権限チェック(許可された権限:[システム管理者])
+end ref
+
+alt 権限チェック成功
+  TagsApi -> Rds: タグ情報を全件取得。
+  note right Rds
+    SELECT id,name FROM mt_tags;
+  end note
+
+  alt 取得成功
+    Rds --> TagsApi: タグ情報を返却。
+  else 取得失敗
+    Rds --> TagsApi: エラーを返却。
+    TagsApi --> Users: 500 Internal Server Error
+    Users --> User: サーバーエラーを表示。
+  end
+else トークン無し
+  TagsApi --> Users: 401 Unauthorized
+  Users -> Users: 保存された情報を削除。
+  Users --> User: ログイン画面へリダイレクト。
+else 権限チェック失敗
+  TagsApi --> Users: 403 Forbidden
+  Users --> User: 権限エラーを表示。
+else リクエストパラメータ不正
+  TagsApi --> Users: 400 Bad Request
+  Users --> User: パラメータエラーを表示。
+end
+
+
+Users -> UsersApi: ユーザ一覧取得APIをリクエスト。
+note right UsersApi
+  Authorization: Bearer{JWT}
+end note
+
+ref over UsersApi
+  ミドルウェアで権限チェック(許可された権限:システム管理者)
+end ref
+
+alt 権限チェック成功
+  UsersApi -> Rds: 指定された条件に一致するユーザ情報を取得。
+  note right Rds
+    SELECT
+      u.id,
+      u.email,
+      u.name,
+      u.user_role,
+      u.department,
+      u.company,
+      u.created_at,
+      u.updated_at,
+      u.is_deleted,
+      COALESCE(tags.tags, '') AS tags
+    FROM
+      mt_users u
+    LEFT JOIN (
+      SELECT
+        ut.user_id,
+        string_agg(t.name, ', ') AS tags
+      FROM
+        mt_user_tags ut
+      JOIN
+        mt_tags t ON ut.tag_id = t.id
+      WHERE
+        ut.is_deleted = false
+      GROUP BY
+        ut.user_id
+      ) tags ON u.id = tags.user_id
+    WHERE
+      u.is_deleted = false
+      AND u.email ILIKE '%' || 入力されたID(メールアドレス) || '%'
+      AND u.name ILIKE '%' || 入力された氏名 || '%'
+      AND u.user_role = 入力された権限
+      AND u.department ILIKE '%' || 入力された部署 || '%'
+      AND u.company ILIKE '%' || 入力された会社名 || '%'
+      AND u.is_deleted = 入力されたステータス
+      AND u.id IN (
+          SELECT ut2.user_id
+          FROM mt_user_tags ut2
+          JOIN mt_tags t2 ON ut2.tag_id = t2.id
+          WHERE t2.name = ANY(入力されたタグ)
+          AND ut2.is_deleted = false
+        )
+    ORDER BY
+      u.id;
+  end note
+else トークン無し
+  UsersApi --> Users: 401 Unauthorized
+  Users -> Users: 保存された情報を削除。
+  Users --> User: ログイン画面へリダイレクト。
+else 権限チェック失敗
+  UsersApi --> Users: 403 Forbidden
+  Users --> User: 権限エラーを表示。
+else リクエストパラメータ不正
+  UsersApi --> Users: 400 Bad Request
+  Users --> User: パラメータエラーを表示。
+end
+@enduml

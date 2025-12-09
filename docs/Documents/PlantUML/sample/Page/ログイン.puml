@@ -1,0 +1,35 @@
+@startuml ログイン画面
+autonumber
+actor "ログインユーザー" as User
+participant "画面\n(/login)" as Screen
+participant "API\n(/api/auth/[...nextauth])" as API
+
+User -> Screen: 画面アクセス
+activate Screen
+Screen -> Screen: useSession()でセッション確認
+alt ログイン済み
+    Screen -> User: /test-groupsにリダイレクト
+else 未ログイン
+    Screen -> User: ログインフォーム表示
+end
+deactivate Screen
+
+User -> Screen: メールアドレスとパスワード入力
+activate Screen
+Screen -> API: POST /api/auth/callback/credentials\n{ email, password }
+activate API
+API -> API: DBからユーザー検索\nSELECT * FROM mt_users\nWHERE email = $1
+API -> API: bcrypt.compare()でパスワード検証
+alt 認証成功
+    API -> API: JWTトークン生成
+    API -> Screen: 200 OK\n{ user, token }
+    deactivate API
+    Screen -> Screen: セッション保存
+    Screen -> User: /test-groupsにリダイレクト
+else 認証失敗
+    API -> Screen: 401 Unauthorized
+    deactivate API
+    Screen -> User: エラーメッセージ表示
+end
+deactivate Screen
+@enduml

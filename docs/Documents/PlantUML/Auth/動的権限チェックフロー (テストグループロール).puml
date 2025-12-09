@@ -1,0 +1,39 @@
+@startuml 動的権限チェック
+autonumber
+participant "API" as API
+participant "canEditTestCases()\n(lib/auth.ts)" as CanEdit
+participant "hasTestRole()" as HasRole
+participant "Database" as DB
+
+API -> API: user = requireAuth(req)
+API -> CanEdit: canEditTestCases(user, testGroupId)
+activate CanEdit
+
+alt 管理者 (user_role === 0)
+    CanEdit -> API: return true
+    deactivate CanEdit
+else 一般ユーザー
+    CanEdit -> HasRole: hasTestRole(user.id, testGroupId, TestRole.DESIGNER)
+    activate HasRole
+    
+    HasRole -> DB: SELECT tgt.test_role\nFROM tt_test_group_tags tgt\nJOIN mt_user_tags ut ON tgt.tag_id = ut.tag_id\nWHERE tgt.test_group_id = $1 AND ut.user_id = $2
+    activate DB
+    DB -> HasRole: ロール一覧
+    deactivate DB
+    
+    HasRole -> HasRole: ロール判定\nDesigner(1) > Executor(2) > Viewer(3)\ntest_role <= required_role
+    
+    alt 設計者ロールあり
+        HasRole -> CanEdit: return true
+        deactivate HasRole
+        CanEdit -> API: return true
+        deactivate CanEdit
+    else 設計者ロールなし
+        HasRole -> CanEdit: return false
+        deactivate HasRole
+        CanEdit -> API: return false
+        deactivate CanEdit
+        API -> API: throw Error('Forbidden')
+    end
+end
+@enduml

@@ -1,0 +1,111 @@
+@startuml
+scale max 3000 height
+title 検索ボタン押下時シーケンス図
+actor ログインユーザ as User
+participant "テストグループ一覧画面" as TestGroup
+participant "テストグループ一覧取得API" as TestGroupApi
+participant "AWS RDS" as Rds
+
+User -> TestGroup: 検索ボタン押下。
+TestGroup -> TestGroup: ブラウザからJWTトークンを取得。
+
+alt トークン無し
+  TestGroup --> User: ログイン画面へリダイレクト。
+else トークン記載のuser_roleが0(システム管理者)、1(テスト管理者)、2(一般)以外の場合
+  TestGroup --> User: 権限エラーを表示。
+end
+TestGroup -> TestGroupApi: テストグループ一覧取得APIをリクエスト。
+note right TestGroupApi
+  Authorization: Bearer{JWT}
+end note
+
+ref over TestGroupApi
+  ミドルウェアで権限チェック(許可された権限[システム管理者、テスト管理者、一般])
+end ref
+
+alt 権限チェック成功
+  alt 取得したユーザ情報の権限が0(システム管理者)
+  TestGroupApi -> Rds: アクセス可能なテストグループのIDを取得\nすべてアクセス可能
+    note right
+      SELECT id 
+      FROM tt_test_groups 
+      WHERE is_deleted = FALSE;
+    end note
+  else 取得したユーザ情報の権限が1(テスト管理者)
+  TestGroupApi -> Rds: アクセス可能なテストグループのIDを取得。\n自分が作成したグループまたは割り当てられたグループにアクセス可能
+    note right
+      SELECT DISTINCT tg.id
+      FROM tt_test_groups tg
+      LEFT JOIN tt_test_group_tags tgt ON tg.id = tgt.test_group_id
+      LEFT JOIN mt_user_tags ut ON tgt.tag_id = ut.tag_id
+      WHERE tg.is_deleted = FALSE
+      AND (tg.created_by = リクエストパラメータのユーザID OR ut.user_id = リクエストパラメータのユーザID);
+    end note
+  else 取得したユーザ情報の権限が2(一般)
+  TestGroupApi -> Rds: アクセス可能なテストグループのIDを取得。\n割り当てられたグループにのみアクセス可能
+    note right
+      SELECT DISTINCT tgt.test_group_id
+      FROM tt_test_group_tags tgt
+      JOIN mt_user_tags ut ON tgt.tag_id = ut.tag_id
+      WHERE ut.user_id = リクエストパラメータのユーザID;
+    end note
+  end
+
+  Rds --> TestGroupApi: アクセス可能なテストグループのIDを返却。
+
+  TestGroupApi -> Rds: 指定された条件に一致するテストグループ情報を取得。
+
+  note right Rds
+    SELECT
+      id,
+      oem,
+      model,
+      event,
+      variation,
+      destination,
+      specs,
+      test_startdate,
+      test_enddate,
+      ng_plan_count,
+      created_at,
+      updated_at
+    FROM
+      tt_test_groups
+    WHERE
+      id = ANY(アクセス可能なテストグループのID)
+      -- 以下、入力されている場合のみWHERE句に追加
+      AND oem ILIKE '%入力されたOEM%'
+      AND model ILIKE '%入力された機種%'
+      AND event ILIKE '%入力されたイベント%'
+      AND variation ILIKE '%入力されたバリエーション%'
+      AND destination ILIKE '%入力された仕向%'
+    ORDER BY
+      created_at DESC
+    LIMIT {limit} OFFSET {offset};
+  end note
+  
+  alt 取得成功
+    Rds --> TestGroupApi: データを返却。
+    TestGroupApi --> TestGroup:  200 OK
+    TestGroup --> User: 検索結果を表示。
+  else 取得失敗
+    Rds --> TestGroupApi: エラーを返却。
+    TestGroupApi --> TestGroup: 500 Internal Sever Error
+    TestGroup --> User: 以下のエラーメッセージをアラートで表示。
+    note right User
+      「テストグループ検索に失敗しました。再度お試しください。」
+    end note
+  end
+
+else トークン無し
+  TestGroupApi --> TestGroup: 401 Unautorized
+  TestGroup -> TestGroup: 保存された情報を削除。
+  TestGroup --> User: ログイン画面へリダイレクト。
+else 権限チェック失敗
+  TestGroupApi --> TestGroup: 403 Forbidden
+  TestGroup --> User: 権限エラーを表示。
+else リクエストパラメータ不正
+  TestGroupApi --> TestGroup: 400 Bad Request
+  TestGroup --> User: パラメータエラーを表示。
+end
+@enduml

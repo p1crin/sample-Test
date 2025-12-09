@@ -1,0 +1,41 @@
+@startuml
+scale max 3000 height
+title エクスポートボタン押下時シーケンス
+
+actor "ログインユーザ" as User
+participant "ユーザ一覧画面" as Users
+participant "ユーザエクスポートAPI" as UsersExportApi
+participant "AWS Batch" as Batch
+
+User -> Users: エクスポートボタン押下
+Users -> Users: ブラウザからJWTトークンを取得。
+
+alt トークン無し
+  Users --> User: ログイン画面へリダイレクト。
+else トークン記載のuser_roleが0(システム管理者)以外の場合
+  Users --> User: 権限エラーを表示。
+end
+Users -> UsersExportApi: ユーザエクスポートAPIをリクエスト。
+note right UsersExportApi
+  Authorization: Bearer{JWT}
+end note
+
+ref over UsersExportApi
+  ミドルウェアで権限チェック(許可された権限[システム管理者])
+end ref
+
+UsersExportApi -> Batch: ユーザエクスポートバッチを実行。\n※別紙バッチ設計書を参照
+
+alt バッチが成功した場合
+  Batch --> UsersExportApi: 作成されたユーザインポートファイルが\n格納されたS3のURLを返却。
+  UsersExportApi --> Users: CSVファイルの格納先のURLを返却。
+  Users --> User: 返却されたURL先から\nユーザCSVファイルをダウンロード。
+else バッチが失敗した場合
+  Batch --> UsersExportApi: エラーを返却。
+  UsersExportApi --> Users: 500 Internal Server Error
+  Users --> User: 以下のエラーメッセージをアラートで表示。
+  note right User
+    「ユーザエクスポートに失敗しました。再度お試しください。」
+  end note
+end
+@enduml

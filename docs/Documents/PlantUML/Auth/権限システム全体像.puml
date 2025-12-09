@@ -1,0 +1,57 @@
+@startuml 権限システム全体像
+
+package "静的ロール (mt_users.user_role)" {
+    [0: 管理者] as Admin
+    [1: テスト管理者] as TestManager
+    [2: 一般ユーザー] as General
+}
+
+package "動的ロール (tt_test_group_tags.test_role)" {
+    [1: 設計者] as Designer
+    [2: 実施者] as Executor
+    [3: 閲覧者] as Viewer
+}
+
+package "機能" {
+    [テストグループ作成] as CreateGroup
+    [テストケース作成/編集] as EditCase
+    [テスト結果登録] as ExecuteTest
+    [テスト結果閲覧] as ViewResult
+    [ユーザー管理] as UserManagement
+}
+
+Admin --> CreateGroup : 全権限
+Admin --> EditCase : 全権限
+Admin --> ExecuteTest : 全権限
+Admin --> ViewResult : 全権限
+Admin --> UserManagement : 全権限
+
+TestManager --> CreateGroup : 可能
+TestManager --> EditCase : 動的ロールによる
+TestManager --> ExecuteTest : 動的ロールによる
+TestManager --> ViewResult : 動的ロールによる
+
+General --> EditCase : 動的ロールによる
+General --> ExecuteTest : 動的ロールによる
+General --> ViewResult : 動的ロールによる
+
+Designer --> EditCase : 可能
+Designer --> ExecuteTest : 可能
+Designer --> ViewResult : 可能
+
+Executor --> ExecuteTest : 可能
+Executor --> ViewResult : 可能
+
+Viewer --> ViewResult : 可能
+
+note right of Designer
+  設計者は実施者と閲覧者の
+  権限も含む
+end note
+
+note right of Executor
+  実施者は閲覧者の
+  権限も含む
+end note
+
+@enduml

@@ -1,0 +1,12 @@
+@startuml
+scale max 3000 height
+title 戻るボタン押下時シーケンス図
+
+actor "ログインユーザ" as User
+participant "テストケース編集画面" as TestCaseEdit
+participant "テストケース一覧画面" as TestCase
+
+User -> TestCaseEdit: 戻るボタン押下時
+TestCaseEdit -> TestCase: テストケース一覧画面へ遷移する。
+
+@enduml

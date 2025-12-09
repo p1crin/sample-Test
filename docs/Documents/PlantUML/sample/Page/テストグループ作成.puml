@@ -1,0 +1,37 @@
+@startuml テストグループ作成画面
+autonumber
+actor "ログインユーザー" as User
+participant "画面\n(/test-groups/new)" as Screen
+participant "API\n(/api/test-groups)" as API
+
+User -> Screen: 画面アクセス
+activate Screen
+Screen -> Screen: useSession()で権限確認
+alt 管理者またはテスト管理者
+    Screen -> User: フォーム表示
+else 一般ユーザー
+    Screen -> User: /test-groupsにリダイレクト
+end
+deactivate Screen
+
+User -> Screen: フォーム入力して送信\n(OEM, Model, Event, Tags等)
+activate Screen
+Screen -> API: POST /api/test-groups\n{ oem, model, event, tags, ... }
+activate API
+API -> API: JWTトークン検証
+API -> API: 権限チェック\n(user_role === 0 || 1)
+alt 権限あり
+    API -> API: BEGIN TRANSACTION
+    API -> API: INSERT INTO tt_test_groups\n(oem, model, event, ...)
+    API -> API: INSERT INTO tt_test_group_tags\n(test_group_id, tag_id, test_role)
+    API -> API: COMMIT
+    API -> Screen: 201 Created\n{ testGroupId }
+    deactivate API
+    Screen -> User: /test-groupsにリダイレクト
+else 権限なし
+    API -> Screen: 403 Forbidden
+    deactivate API
+    Screen -> User: エラー表示
+end
+deactivate Screen
+@enduml

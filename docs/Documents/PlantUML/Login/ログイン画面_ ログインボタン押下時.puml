@@ -1,0 +1,28 @@
+@startuml
+scale max 3000 height
+title ログインボタン押下時シーケンス図
+
+actor "ログインユーザ" as User
+participant "ログイン画面" as LoginApi
+
+User -> Login: ログインボタン押下
+ref over Login
+  入力されたメールアドレスとパスワードを用いて認証。
+  ※処理詳細は認証部_認証フロー詳細を参照。
+end ref
+
+alt 認証成功
+    Login -> Login: 返却されたトークンをブラウザに保存。
+    Login --> User: テストグループ一覧画面へ遷移する。
+else 認証失敗
+  Login --> User: 以下のエラーメッセージを\nパスワード入力欄下部に表示。
+  note right User
+    「メールアドレスまたはパスワードが正しくありません。再度お試しください。」
+  end note
+else 取得失敗
+  Login --> User
+  note right User
+    「ログインに失敗しました。再度お試しください。」
+  end note
+end
+@enduml

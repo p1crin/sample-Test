@@ -1,0 +1,84 @@
+@startuml
+scale max 3000 height
+title パスワード変更ボタン押下時シーケンス図
+
+actor "ログインユーザ" as User
+participant "パスワード変更画面" as PasswordChange
+participant "パスワード変更API" as PasswordChangeApi
+participant "AWS RDS" as RDS
+
+User -> PasswordChange: パスワード変更ボタン押下
+PasswordChange -> PasswordChange: バリデーションチェック。
+PasswordChange -> PasswordChangeApi: パスワード変更APIをリクエスト。
+ref over PasswordChangeApi
+  ミドルウェアで権限チェック(許可された権限[システム管理者、テスト管理者、一般])
+end ref
+
+alt 権限チェック成功
+  PasswordChangeApi -> PasswordChangeApi: 入力されたパスワードを暗号化。
+  PasswordChangeApi -> RDS: 該当するユーザ情報を取得。
+  note right RDS
+    SELECT
+      id,
+      email,
+      name,
+      user_role,
+      department,
+      company,
+    WHERE
+      email = トークンのユーザID
+    AND
+      password = 暗号化されたパスワード
+  end note
+  
+  alt 取得成功
+    PasswordChangeApi -> PasswordChangeApi: 新しいパスワードを暗号化。
+    PasswordChangeApi -> RDS: 該当するユーザ情報のパスワードを更新。
+    note right RDS
+      UPDATE mt_users
+      set
+        password = 暗号化された新しいパスワード
+      WHERE
+        id = トークンのユーザID
+    end note
+
+    alt 更新成功
+      RDS --> PasswordChangeApi: 更新件数を返却。
+      PasswordChangeApi --> PasswordChange: 200 OK
+      PasswordChange -> PasswordChange: 保存された情報を削除。
+      PasswordChange --> User: ログイン画面へリダイレクト。
+    else 更新失敗
+      RDS --> PasswordChangeApi: エラーを返却。
+      PasswordChangeApi --> PasswordChange: 500 Internal Sever Error
+      PasswordChange -->  User: 以下のエラーメッセージをアラートで表示。
+      note right User
+        「パスワード変更に失敗しました。再度お試しください。」
+      end note
+    end
+  else 該当するユーザ情報がない
+    RDS --> PasswordChangeApi: データを返却。
+    PasswordChangeApi --> PasswordChange: 404 Not Found
+    PasswordChange --> User: 現在のパスワード入力欄下部に\n以下のエラーメッセージを表示。
+    note right User
+      「現在のパスワードが正しくありません。」
+    end note
+  else 取得失敗
+    RDS --> PasswordChangeApi: エラーを返却。
+    PasswordChangeApi --> PasswordChange: 500 Internal Server Error
+    PasswordChange --> User: 以下のエラーメッセージをアラートで表示。
+    note right User
+      「パスワード変更に失敗しました。再度お試しください。」
+    end note
+  end
+else トークン無し
+  PasswordChangeApi --> PasswordChange: 401 Unauthorized
+  PasswordChange -> PasswordChange: 保存された情報を削除。
+  PasswordChange --> User: ログイン画面へリダイレクト。
+else 権限チェック失敗
+  PasswordChangeApi --> PasswordChange: 403 Forbidden
+  PasswordChange --> User: 権限エラーを表示。
+else リクエストパラメータ不正
+  PasswordChangeApi --> PasswordChange: 400 Bad Request
+  PasswordChange --> User: パラメータエラーを表示。
+end
+@enduml

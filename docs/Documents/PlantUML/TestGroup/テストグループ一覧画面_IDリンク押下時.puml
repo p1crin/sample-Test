@@ -1,0 +1,11 @@
+@startuml
+scale max 3000 height
+title IDリンク押下時シーケンス図
+
+actor "ログインユーザ" as User
+participant "テストグループ一覧画面" as TestGroup
+participant "テストケース一覧画面" as TestCase
+
+User -> TestGroup: IDリンク押下
+TestGroup -> TestCase: 選択したIDをクエリパラメータに保存し、\nテストケース一覧へ遷移する。
+@enduml

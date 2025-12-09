@@ -1,0 +1,9 @@
+@startuml 
+title TIDリンク押下時シーケンス図
+actor "ログインユーザー" as User
+participant "テストケース一覧画面" as TestCase
+participant "テストケース結果確認画面" as Screen
+
+User -> TestCase: TIDリンク押下。
+TestCase -> Screen: テストケース結果確認画面へ遷移する。
+@enduml

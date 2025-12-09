@@ -1,0 +1,181 @@
+@startuml
+scale max 3000 height
+title テストケース編集シーケンス図
+
+actor "ログインユーザ" as User
+participant "テストケース編集画面" as TestCaseEdit
+participant "S3署名付きURL発行API" as S3API
+participant "AWS S3" as S3
+participant "テストケース編集API" as TestCaseEditApi
+participant "AWS RDS" as RDS
+
+== ファイルアップロード ==
+User -> TestCaseEdit: テストケース入力\n+ ファイル選択
+
+loop 各ファイルについて
+    TestCaseEdit -> S3API: S3署名付きURL発行APIをリクエスト
+    note right of S3API
+      temp/ フォルダに一時保存
+      24時間後に自動削除
+    end note
+    S3API -> S3API: JWT検証 + 署名付きURL生成
+    S3API --> TestCaseEdit: { presignedUrl, tempS3Key }
+
+    TestCaseEdit -> S3: ファイルをアップロード
+    S3 -> S3: temp/ にファイル保存
+    note right of S3
+      例: temp/1234567890-specification.pdf
+    end note
+    S3 --> TestCaseEdit: 200 OK
+    
+    TestCaseEdit -> TestCaseEdit: tempS3Keyを配列に追加
+end
+
+TestCaseEdit --> User: ファイルアップロード完了
+
+== テストケース編集 + 本番フォルダへコピー ==
+User -> TestCaseEdit: 「更新」ボタンクリック
+
+TestCaseEdit -> TestCaseEditApi: テストケース編集APIをリクエスト
+
+note right TestCaseEditApi
+  Authorization: Bearer{JWT}
+end note
+
+ref over TestCaseEditApi
+  ミドルウェアで権限チェック(許可された権限[システム管理者、テスト管理者])
+end ref
+
+alt 権限あり
+    TestCaseEditApi -> RDS: 入力されたテストケース情報を更新
+    note right of RDS
+    UPDATE tt_test_cases
+    SET
+      first_layer = リクエストパラメータのfirst_layer,
+      second_layer = リクエストパラメータのsecond_layer,
+      third_layer = リクエストパラメータのthird_layer,
+      fourth_layer = リクエストパラメータのfourth_layer,
+      purpose = リクエストパラメータのpurpose,
+      request_id = リクエストパラメータのrequest_id,
+      check_items = リクエストパラメータのcheck_items,
+      test_procedure = リクエストパラメータのtest_procedure,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE
+      test_group_id = リクエストパラメータのtest_group_id AND
+      tid = リクエストパラメータのtid;
+    end note
+    RDS --> TestCaseEditApi: 更新件数を返却
+
+    loop 削除対象ファイルについて
+        TestCaseEditApi -> RDS: ファイル情報を削除
+        note right RDS
+        DELETE FROM tt_test_case_files
+        WHERE
+          test_group_id = リクエストパラメータのtest_group_id AND
+          tid = リクエストパラメータのtid AND
+          file_type = リクエストパラメータのfile_type AND
+          file_no = リクエストパラメータのfile_no;
+        end note
+    end
+
+    loop temp_filesの各tempS3Key
+        TestCaseEditApi -> S3: temp/ から本番ディレクトリにコピー
+        S3 --> TestCaseEditApi: コピー完了
+
+        TestCaseEditApi -> RDS: ファイル情報を更新
+        note right of RDS
+        INSERT INTO tt_test_case_files
+        (
+          test_group_id,
+          tid,
+          file_type,
+          file_no,
+          file_name,
+          file_path,
+          created_at,
+          updated_at,
+          is_deleted
+        )
+        VALUES
+        (
+          リクエストパラメータのtest_group_id,
+          リクエストパラメータのtid,
+          リクエストパラメータのfile_type,
+          リクエストパラメータのfile_no,
+          リクエストパラメータのfile_name,
+          本番S3パス,
+          CURRENT_TIMESTAMP,
+          CURRENT_TIMESTAMP,
+          false
+        )
+        ON CONFLICT (test_group_id, tid, file_type, file_no)
+        DO UPDATE SET
+          file_name = EXCLUDED.file_name,
+          file_path = EXCLUDED.file_path,
+          updated_at = CURRENT_TIMESTAMP,
+          is_deleted = EXCLUDED.is_deleted;
+        end note
+    end
+
+    loop 各テストケースについて
+        TestCaseEditApi -> RDS: テストケース内容を更新
+        note right RDS
+        INSERT INTO tt_test_contents
+        (
+          test_group_id,
+          tid,
+          test_case_no,
+          test_case,
+          expected_value,
+          is_target,
+          created_at,
+          updated_at,
+          is_deleted
+        )
+        VALUES
+        (
+          リクエストパラメータのtest_group_id,
+          リクエストパラメータのtid,
+          リクエストパラメータのtest_case_no,
+          リクエストパラメータのtest_case,
+          リクエストパラメータのexpected_value,
+          true,
+          CURRENT_TIMESTAMP,
+          CURRENT_TIMESTAMP,
+          false
+        )
+        ON CONFLICT (test_group_id, tid, test_case_no)
+        DO UPDATE SET
+          test_case = EXCLUDED.test_case,
+          expected_value = EXCLUDED.expected_value,
+          updated_at = CURRENT_TIMESTAMP,
+          is_deleted = EXCLUDED.is_deleted;
+        end note
+    end
+
+    alt 更新成功
+        RDS --> TestCaseEditApi: 更新件数を返却
+        TestCaseEditApi --> TestCaseEdit: 200 OK
+        TestCaseEdit --> User: テストケース一覧へ遷移する
+    else 更新失敗
+        RDS --> TestCaseEditApi: エラーを返却
+        TestCaseEditApi --> TestCaseEdit: 500 Internal Server Error
+        TestCaseEdit --> User: 以下のエラーメッセージをアラートで表示
+        note right User
+          「テストケース更新に失敗しました。再度お試しください。」
+        end note
+    end
+else 権限なし
+    TestCaseEditApi --> TestCaseEdit: 403 Forbidden
+    TestCaseEdit --> User: 権限エラーを表示
+end
+
+== S3ライフサイクルポリシーによる自動クリーンアップ ==
+note over S3
+  24時間後...
+  
+  S3ライフサイクルポリシーが自動実行
+  temp/ フォルダ内のファイルを削除
+end note
+
+@enduml

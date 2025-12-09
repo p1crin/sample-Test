@@ -1,0 +1,11 @@
+@startuml
+scale max 3000 height
+title 集計ボタン押下時シーケンス図
+
+actor "ログインユーザ" as User
+participant "テストグループ一覧画面" as TestGroup
+participant "テスト集計結果表示画面" as TestGroupSummaryResult
+
+User -> TestGroup: 集計ボタン押下
+TestGroup -> TestGroupSummaryResult: 選択したIDをクエリパラメータに保存し、\nテスト集計結果表示画面へ遷移する。
+@enduml

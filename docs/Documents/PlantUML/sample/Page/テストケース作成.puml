@@ -1,0 +1,38 @@
+@startuml テストケース作成画面
+autonumber
+actor "ログインユーザー" as User
+participant "画面\n(/test-groups/[groupId]/cases/new)" as Screen
+participant "API\n(/api/test-groups/[groupId]/cases)" as API
+
+User -> Screen: 画面アクセス
+activate Screen
+Screen -> API: GET /api/test-groups/[groupId]
+activate API
+API -> API: JWTトークン検証
+API -> API: 設計者ロール確認\n(test_role = 1)
+alt 設計者ロールあり
+    API -> Screen: 200 OK
+    deactivate API
+    Screen -> User: フォーム表示
+else ロールなし
+    API -> Screen: 403 Forbidden
+    deactivate API
+    Screen -> User: エラー表示
+end
+deactivate Screen
+
+User -> Screen: フォーム入力して送信\n(TID, layers, purpose, contents[])
+activate Screen
+Screen -> API: POST /api/test-groups/[groupId]/cases\n{ tid, layers, purpose, contents[] }
+activate API
+API -> API: JWTトークン検証
+API -> API: 設計者ロール確認
+API -> API: BEGIN TRANSACTION
+API -> API: INSERT INTO tt_test_cases\n(test_group_id, tid, layers, purpose, ...)
+API -> API: INSERT INTO tt_test_contents\n(test_case_id, test_case_no, test_case, ...)\n※複数行
+API -> API: COMMIT
+API -> Screen: 201 Created
+deactivate API
+Screen -> User: /test-groups/[groupId]/casesにリダイレクト
+deactivate Screen
+@enduml

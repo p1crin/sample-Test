@@ -1,0 +1,137 @@
+@startuml
+scale max 3000 height
+title テスト集計結果表示シーケンス図
+actor ログインユーザ as User
+participant "テスト集計結果表示画面" as TestResult
+participant "集計レポートデータ取得API" as SummaryApi
+participant "日時レポートグラフデータ取得API" as DailyReportApi
+participant "AWS RDS" as Rds
+
+User -> TestResult: テスト集計結果表示画面へアクセス。
+TestResult -> TestResult: ブラウザからJWTトークンを取得。
+
+alt トークン無し
+  TestResult --> User: ログイン画面へリダイレクト。
+else トークン記載のuser_roleが0(システム管理者)、1(テスト管理者)、2(一般)以外の場合
+  TestResult --> User: 権限エラーを表示。
+end
+
+ref over TestResult
+  テストグループ情報を取得。
+  ※共通表示部_テストグループ情報モーダル_情報取得処理詳細を参照。
+end ref
+TestResult -> SummaryApi: 集計レポートデータ取得APIをリクエスト。
+note right SummaryApi
+  Authorization: Bearer{JWT}
+end note
+
+ref over SummaryApi
+  ミドルウェアで権限チェック(許可された権限[システム管理者、テスト管理者、一般])
+end ref
+
+alt 権限チェック成功
+  SummaryApi -> Rds: tt_test_resultsテーブルとtt_test_casesテーブルを結合してデータを取得。
+  note right Rds
+    SELECT
+      tc.first_layer,
+      tc.second_layer,
+      COUNT(*) AS total_items,
+      SUM(CASE WHEN tr.judgment IN ('OK', '参照OK', 'NG') THEN 1 ELSE 0 END) AS completed_items,
+      SUM(CASE WHEN tr.judgment = '未着手' THEN 1 ELSE 0 END) AS not_started_items,
+      SUM(CASE WHEN tr.judgment IN ('保留', 'QA中') THEN 1 ELSE 0 END) AS in_progress_items,
+      SUM(CASE WHEN tr.judgment IN ('OK', '参照OK') THEN 1 ELSE 0 END) AS ok_items,
+      SUM(CASE WHEN tr.judgment = 'NG' THEN 1 ELSE 0 END) AS ng_items,
+      SUM(CASE WHEN tr.judgment = '対象外' THEN 1 ELSE 0 END) AS excluded_items,
+      (SUM(CASE WHEN tr.judgment IN ('OK', '参照OK') THEN 1 ELSE 0 END) / COUNT(*)) AS ok_rate,
+      (SUM(CASE WHEN tr.judgment IN ('OK', '参照OK', 'NG') THEN 1 ELSE 0 END) / COUNT(*)) AS progress_rate
+    FROM
+      tt_test_results tr
+    JOIN
+      tt_test_cases tc
+    ON
+      tr.test_group_id = tc.test_group_id AND tr.tid = tc.tid
+    WHERE
+      tr.test_group_id = {test_group_id}
+    GROUP BY
+      tc.first_layer, tc.second_layer
+  end note
+
+  alt 取得成功
+    Rds --> SummaryApi: データを返却。
+    SummaryApi --> TestResult:  200 OK
+  else 取得失敗
+    Rds --> SummaryApi: エラーを返却。
+    SummaryApi --> TestResult: 500 Internal Sever Error
+    TestResult --> User: サーバーエラーを表示。
+  end
+else トークン無し
+  SummaryApi --> TestResult: 401 Unautorized
+  TestResult -> TestResult: 保存された情報を削除。
+  TestResult --> User: ログイン画面へリダイレクト。
+else 権限チェック失敗
+  SummaryApi --> TestResult: 403 Forbidden
+  TestResult --> User: 権限エラーを表示。
+else リクエストパラメータ不正
+  SummaryApi --> TestResult: 400 Bad Request
+  TestResult --> User: パラメータエラーを表示。
+end
+
+
+TestResult -> DailyReportApi: 日時レポートグラフデータ取得APIをリクエスト。
+note right DailyReportApi
+  Authorization: Bearer{JWT}
+end note
+
+ref over DailyReportApi
+  ミドルウェアで権限チェック(許可された権限[システム管理者、テスト管理者、一般])
+end ref
+
+alt 権限チェック成功
+  DailyReportApi -> Rds: 日時レポートグラフデータを取得。
+  note right Rds
+    SELECT
+      tr.execution_date,
+      tr.judgment,
+      tg.test_startdate,
+      tg.test_enddate,
+      tg.ng_plan_count
+    FROM
+      tt_test_results tr
+    JOIN
+      tt_test_groups tg
+    ON
+      tr.test_group_id = tg.id
+    WHERE
+      tr.test_group_id = {test_group_id}
+  end note
+
+  alt 取得成功
+    Rds --> DailyReportApi: データを返却。
+    DailyReportApi -> DailyReportApi: データを基に動的に計算を実行。
+    note right DailyReportApi
+      <latex>\scriptsize\text{NG}数 = 日毎の\text{NG}件数</latex>
+      <latex>\scriptsizeテスト残件数(予測) = 総項目数 - 総項目数 * \left(1 - e^{-\left(0.35 \times \left(\frac{31}{試験終了日 - 試験開始日 + 1}\right) \times 経過日数\right)}\right) / \left(1 + 100 \times e^{-\left(0.35 \times \left(\frac{31}{試験終了日 - 試験開始日 + 1}\right) \times 経過日数\right)}\right)</latex>
+      <latex>\scriptsizeテスト残件数(実績) = 総項目数 - \text{OK}数</latex>
+      <latex>\scriptsize不具合摘出数(予測) = 不具合摘出予定数 \times \left(1 - e^{\left(0.35 \times \left(\frac{31}{試験終了日 - 試験開始日 + 1}\right) \times 経過日数\right)}\right) / \left(1 + 100 \times e^{-\left(0.35 \times \left(\frac{31}{試験終了日 - 試験開始日 + 1}\right) \times 経過日数\right)}\right)</latex>
+      <latex>\scriptsize不具合摘出数(実績) = 累計の\text{NG}数</latex>
+      <latex>\scriptsize未解決不具合数 = 日毎の最新の試験結果が\text{NG}となっている件数</latex>
+    end note
+    DailyReportApi --> TestResult:  200 OK
+    TestResult --> User: テスト集計結果表示画面を表示。
+  else 取得失敗
+    Rds --> DailyReportApi: エラーを返却。
+    DailyReportApi --> TestResult: 500 Internal Sever Error
+    TestResult --> User: サーバーエラーを表示。
+  end
+else トークン無し
+  DailyReportApi --> TestResult: 401 Unautorized
+  TestResult -> TestResult: 保存された情報を削除。
+  TestResult --> User: ログイン画面へリダイレクト。
+else 権限チェック失敗
+  DailyReportApi --> TestResult: 403 Forbidden
+  TestResult --> User: 権限エラーを表示。
+else リクエストパラメータ不正
+  DailyReportApi --> TestResult: 400 Bad Request
+  TestResult --> User: パラメータエラーを表示。
+end
+@enduml

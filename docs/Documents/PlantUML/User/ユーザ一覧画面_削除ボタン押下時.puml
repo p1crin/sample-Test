@@ -1,0 +1,77 @@
+@startuml
+scale max 3000 height
+title 削除ボタン押下時シーケンス図
+
+actor "ログインユーザ" as User
+participant "ユーザ一覧画面" as Users
+participant "ユーザ削除API" as UserDeleteApi
+participant "RDS" as RDS
+
+User -> Users: 削除ボタン押下
+Users -> Users: ブラウザからJWTトークンを取得。
+
+alt トークン無し
+  Users --> User: ログイン画面へリダイレクト。
+else トークン記載のuser_roleが0(システム管理者)以外の場合
+  Users --> User: 権限エラーを表示。
+end
+Users -> Users: 以下のメッセージと削除ボタン、\n閉じるボタンをモーダルで表示。
+note right Users
+  「本当にこのユーザを削除しますか？
+  対象ユーザ: XXXX」
+  ※XXXX:選択したいユーザ名
+end note
+
+alt 削除ボタンを押下した場合
+  Users -> UserDeleteApi: ユーザ削除APIをリクエスト
+  note right UserDeleteApi
+    Authorization: Bearer{JWT}
+  end note
+  
+  ref over UserDeleteApi
+    ミドルウェアで権限チェック(許可された権限[システム管理者])
+  end ref
+  
+  alt 権限チェック成功
+    UserDeleteApi -> RDS: ユーザIDがリクエストパラメータの\nユーザIDと一致するユーザタグ関連情報を削除。
+    note right RDS
+      DELETE FROM
+        mt_user_tags
+      WHERE
+        user_id = リクエストパラメータのユーザID;
+    end note
+    UserDeleteApi -> RDS: ユーザIDがリクエストパラメータの\nユーザIDと一致するユーザ情報を削除。
+    note right RDS
+      DELETE FROM
+        mt_users
+      WHERE
+        id = リクエストパラメータのユーザID;
+    end note
+
+    alt 削除が成功
+      RDS --> UserDeleteApi: 削除件数を返却。
+      UserDeleteApi --> Users: 200 OK
+      Users --> User: ユーザ一覧画面を表示する。
+    else 削除が失敗
+      RDS --> UserDeleteApi: エラーを返却。
+      UserDeleteApi --> Users: 500 Internal Sever Error
+      Users --> User: 以下のエラーメッセージをアラートで表示。
+      note right User
+        「ユーザ削除に失敗しました。再度お試しください。」
+      end note
+    end
+  else トークン無し
+    UserDeleteApi --> Users: 401 Unauthorized
+    Users -> Users: 保存された情報を削除。
+    Users --> User: ログイン画面へリダイレクト。
+  else 権限チェック失敗
+    UserDeleteApi --> Users: 403 Forbidden
+    Users --> User: 権限エラーを表示。
+  else リクエストパラメータ不正
+    UserDeleteApi --> Users: 400 Bad Request
+    Users --> User: パラメータエラーを表示。
+  end
+else 閉じるボタンを押下した場合
+  Users --> User: 削除確認モーダルを閉じる。
+end
+@enduml

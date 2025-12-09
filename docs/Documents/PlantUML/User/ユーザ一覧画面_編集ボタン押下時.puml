@@ -1,0 +1,11 @@
+@startuml
+scale max 3000 height
+title 編集ボタン押下時シーケンス図
+
+actor "ログインユーザ" as User
+participant "ユーザ一覧画面" as Users
+participant "ユーザ 編集画面" as UsersEdit
+
+User -> Users: 編集ボタン押下
+Users -> UsersEdit: ユーザ 編集画面へ遷移する。
+@enduml

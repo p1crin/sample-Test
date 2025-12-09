@@ -1,0 +1,92 @@
+@startuml
+scale max 3000 height
+title 初期表示時シーケンス図
+
+actor "ログインユーザ" as User
+participant "インポート内容確認画面" as ImportResult
+participant "インポート結果詳細取得API" as ImportResultInfoApi
+participant "AWS RDS" as Rds
+
+User -> ImportResult: インポート内容確認画面へアクセス。
+ImportResult -> ImportResult: ブラウザからJWTトークンを取得。
+
+alt トークン無し
+  ImportResult --> User: ログイン画面へリダイレクト。
+else トークン記載のuser_roleが0(システム管理者)、1(テスト管理者)、2(一般)以外の場合
+  ImportResult --> User: 権限エラーを表示。
+end
+ImportResult -> ImportResultInfoApi: インポート結果詳細取得APIをリクエスト。
+note right ImportResultInfoApi
+  Authtorization: Bearer{JWT}
+end note
+
+ref over ImportResultInfoApi
+ミドルウェアで権限チェック(許可された権限:[システム管理者、テスト管理者、一般])
+end ref
+
+alt 権限チェック成功
+  ImportResultInfoApi -> Rds: クエリパラメータのIDと一致する\nインポート結果情報する。
+  note right Rds
+    SELECT 
+      id,
+      file_name,
+      import_date,
+      import_status,
+      executor_name,
+      import_type,
+      count,
+    FROM
+     tt_import_results
+    WHERE
+      id = クエリパラメータのID;
+  end note
+
+  alt 取得成功
+    Rds --> ImportResultInfoApi: データを返却。
+    
+    opt トークンの権限が テスト管理者、一般
+      opt 取得したインポート結果情報のimport_typeが0(ユーザ)
+        ImportResultInfoApi --> ImportResult: 403 Forbidden
+        ImportResult --> User: 権限エラーを表示。
+      end
+    end
+  else 取得失敗
+    Rds --> ImportResultInfoApi: エラーを返却。
+    ImportResultInfoApi --> ImportResult: 500 Internal Server Error
+    ImportResult --> User: サーバーエラーを表示。
+  end
+  ImportResultInfoApi -> Rds: クエリパラメータのIDと一致する\nインポート結果エラー情報する。
+  note right Rds
+    SELECT
+      id,
+      import_result_id,
+      error_message,
+      error_row,
+    FROM
+     tt_import_result_errors
+    WHERE
+      import_result_id = クエリパラメータのID;
+  end note
+
+  alt 取得成功
+    Rds --> ImportResultInfoApi: データを返却。
+    ImportResultInfoApi -> ImportResultInfoApi: 取得したインポート結果情報と\nインポート結果エラー情報からレスポンスを成形。
+    ImportResultInfoApi --> ImportResult: 200 OK
+    ImportResult --> User: インポート内容確認画面を表示。
+  else 取得失敗
+    Rds --> ImportResultInfoApi: エラーを返却。
+    ImportResultInfoApi --> ImportResult: 500 Internal Server Error
+    ImportResult --> User: サーバーエラーを表示。
+  end
+else トークン無し
+  ImportResultInfoApi --> ImportResult: 401 Unauthorized
+  ImportResult -> ImportResult: 保存されたトークンを削除。
+  ImportResult --> User: ログイン画面へリダイレクト。
+else 権限チェック失敗
+  ImportResultInfoApi --> ImportResult: 403 Forbidden
+  ImportResult --> User: 権限エラーを表示。
+else リクエストパラメータ不正
+  ImportResultInfoApi --> ImportResult: 400 Bad Request
+  ImportResult --> User: パラメータエラーを表示。
+end
+@enduml

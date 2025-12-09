@@ -1,0 +1,38 @@
+@startuml ユーザー作成画面
+autonumber
+actor "ログインユーザー" as User
+participant "画面\n(/users/new)" as Screen
+participant "API\n(/api/users)" as API
+
+User -> Screen: 画面アクセス
+activate Screen
+Screen -> Screen: useSession()で権限確認
+alt 管理者
+    Screen -> User: フォーム表示
+else 管理者以外
+    Screen -> User: /test-groupsにリダイレクト
+end
+deactivate Screen
+
+User -> Screen: フォーム入力して送信\n(email, password, user_role, tags)
+activate Screen
+Screen -> API: POST /api/users\n{ email, password, user_role, department, tags }
+activate API
+API -> API: JWTトークン検証
+API -> API: 管理者権限確認
+API -> API: bcrypt.hash(password)
+API -> API: BEGIN TRANSACTION
+API -> API: INSERT INTO mt_users\n(email, password_hash, user_role, department, ...)
+loop 各タグ
+    API -> API: SELECT tag_id FROM mt_tags WHERE tag_name = $1
+    alt タグが存在しない
+        API -> API: INSERT INTO mt_tags (tag_name)
+    end
+    API -> API: INSERT INTO mt_user_tags (user_id, tag_id)
+end
+API -> API: COMMIT
+API -> Screen: 201 Created\n{ userId }
+deactivate API
+Screen -> User: /usersにリダイレクト
+deactivate Screen
+@enduml

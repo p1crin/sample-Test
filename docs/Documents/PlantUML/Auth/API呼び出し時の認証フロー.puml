@@ -1,0 +1,44 @@
+@startuml API認証フロー
+autonumber
+participant "画面" as Screen
+participant "Browser\nCookie" as Cookie
+participant "API\n(/api/*)" as API
+participant "requireAuth()\n(lib/auth.ts)" as AuthLib
+participant "getToken()\n(next-auth/jwt)" as GetToken
+
+Screen -> Cookie: fetch('/api/test-groups')
+activate Cookie
+Cookie -> API: GET /api/test-groups\nCookie: next-auth.session-token=<JWT>
+deactivate Cookie
+activate API
+
+API -> AuthLib: requireAuth(req)
+activate AuthLib
+
+AuthLib -> GetToken: getToken({ req, secret })
+activate GetToken
+GetToken -> GetToken: CookieからJWTトークン取得
+GetToken -> GetToken: NEXTAUTH_SECRETで署名検証
+GetToken -> GetToken: 有効期限確認
+
+alt JWT無効または期限切れ
+    GetToken -> AuthLib: return null
+    deactivate GetToken
+    AuthLib -> API: throw Error('Unauthorized')
+    deactivate AuthLib
+    API -> Screen: 401 Unauthorized
+    deactivate API
+else JWT有効
+    GetToken -> AuthLib: return token\n{ sub, email, user_role, ... }
+    deactivate GetToken
+    
+    AuthLib -> AuthLib: ユーザー情報構築\nuser.id = parseInt(token.sub)\nuser.email = token.email\nuser.user_role = token.user_role
+    
+    AuthLib -> API: return user
+    deactivate AuthLib
+    
+    API -> API: ビジネスロジック実行
+    API -> Screen: 200 OK\n{ data }
+    deactivate API
+end
+@enduml

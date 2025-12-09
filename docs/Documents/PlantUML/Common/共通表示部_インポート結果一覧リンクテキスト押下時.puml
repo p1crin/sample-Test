@@ -1,0 +1,10 @@
+@startuml
+scale max 3000 height
+title インポート結果一覧リンクテキスト押下時シーケンス図
+
+actor "ログインユーザ" as User
+participant "Webアプリ画面" as WebApp
+
+User -> WebApp: インポート結果一覧リンクテキストを押下。
+WebApp --> User: インポート結果一覧画面へ遷移する。
+@enduml

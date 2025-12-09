@@ -1,0 +1,98 @@
+@startuml
+scale max 3000 height
+title 検索ボタン押下時シーケンス図
+
+actor "ログインユーザ" as User
+participant "テストケース一覧画面" as TestCase
+participant "テストケース一覧取得API" as TestCaseApi
+participant "AWS RDS" as Rds
+
+User -> TestCase: 検索ボタン押下。
+
+TestCase ->TestCaseApi: テストケース一覧取得APIをリクエスト。
+note right TestCaseApi
+  Authorization: Bearer{JWT}
+end note
+
+ref over TestCaseApi
+  ミドルウェアで権限チェック(許可された権限[システム管理者、テスト管理者、一般])
+end ref
+
+alt 権限チェック成功
+  TestCaseApi --> Rds: 指定されてた条件に一致する\nテストケース情報と進捗情報を取得する。
+  note right Rds
+    SELECT 
+      tc.test_group_id,
+      tc.tid,
+      ttc.first_layer,
+      ttc.second_layer,
+      ttc.third_layer,
+      ttc.fourth_layer,
+      ttc.purpose,
+      ttc.request_id,
+      ttc.check_items,
+      ttc.test_procedure,
+      tc.created_at,
+      tc.updated_at,
+      SUM(CASE WHEN tr.judgment IS NULL OR tr.judgment = '未着手' THEN 1 ELSE 0 END) AS not_started_items,
+      SUM(CASE WHEN tr.judgment IN ('OK', '参照OK') THEN 1 ELSE 0 END) AS ok_items,
+      SUM(CASE WHEN tr.judgment = 'NG' THEN 1 ELSE 0 END) AS ng_items,
+      SUM(CASE WHEN tr.judgment = '対象外' THEN 1 ELSE 0 END) AS excluded_items
+    FROM 
+      tt_test_cases ttc
+    JOIN 
+      tt_test_contents tc 
+    ON 
+      ttc.test_group_id = tc.test_group_id 
+      AND ttc.tid = tc.tid
+    LEFT JOIN 
+      tt_test_results tr 
+    ON 
+      tc.test_group_id = tr.test_group_id 
+      AND tc.tid = tr.tid 
+      AND tc.test_case_no = tr.test_case_no
+    GROUP BY 
+      tc.test_group_id,
+      tc.tid,
+      ttc.first_layer,
+      ttc.second_layer,
+      ttc.third_layer,
+      ttc.fourth_layer,
+      ttc.purpose,
+      ttc.request_id,
+      ttc.check_items,
+      ttc.test_procedure,
+      tc.created_at,
+      tc.updated_at;
+    WHERE
+      tc.tid = リクエストパラメータのTID
+      AND tc.tid ILIKE '%'||入力されたTID || '%'
+      AND tc.first_layer ILIKE '%'||入力された第1層 || '%'
+      AND tc.second_layer ILIKE '%'||入力された第2層 || '%'
+      AND tc.third_layer ILIKE '%'||入力された第3層 || '%'
+      AND tc.fourth_layer ILIKE '%'||入力された第4層 || '%'
+    ORDER BY
+      tc.tid;
+  end note
+
+  alt 取得成功
+    Rds --> TestCaseApi: データを返却。
+    TestCaseApi --> TestCase: 200 OK
+    TestCase --> User: テストケース一覧画面を表示。
+  else 取得失敗
+    Rds --> TestCaseApi: エラーを返却。
+    TestCaseApi --> TestCase: 500 Internal Server Error
+    TestCase --> User: サーバーエラーを表示。
+  end
+else トークン無し
+  TestCaseApi --> TestCase: 401 Unauthorized
+  TestCase -> TestCase: 保存された情報を削除
+  TestCase --> User: ログイン画面へリダイレクト。
+else 権限チェック失敗
+  TestCaseApi --> TestCase: 403 Forbidden
+  TestCase --> User: 権限エラーを表示。
+else リクエストパラメータ不正
+  TestCaseApi --> TestCase: 400 Bad Request
+  TestCase --> User: パラメータエラーを表示。
+end
+@enduml

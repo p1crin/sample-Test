@@ -1,0 +1,128 @@
+@startuml
+scale max 3000 height
+title 登録ボタン押下時シーケンス図
+
+actor "ログインユーザ" as User
+participant "テストグループ新規登録画面" as TestGroupRegist
+participant "テストグループ新規登録API" as TestGroupRegistApi
+participant "AWS RDS" as RDS
+
+User -> TestGroupRegist: 登録ボタン押下。
+
+TestGroupRegist -> TestGroupRegist: バリデーションチェック。
+TestGroupRegist -> TestGroupRegistApi: テストグループ新規登録API\nをリクエスト。
+note right TestGroupRegistApi
+  Authorization: Bearer{JWT}
+end note
+
+ref over TestGroupRegistApi
+  ミドルウェアで権限チェック(許可された権限[システム管理者、テスト管理者])
+end ref
+
+alt 権限チェック成功
+  TestGroupRegistApi -> RDS: 入力されたテストグループ情報を登録。
+  note right RDS
+    INSERT INTO tt_test_group
+    (
+      oem,
+      model,
+      event,
+      variation,
+      destination,
+      specs,
+      test_startdate,
+      test_enddate,
+      ng_plan_count,
+      created_by,
+      updated_by,
+    )
+    VALUES
+    (
+      入力されたOEM,
+      入力された機種,
+      入力されたイベント,
+      入力されたバリエーション,
+      入力された仕向,
+      入力された制御仕様名,
+      入力された試験予定期間_開始日,
+      入力された試験予定期間_終了日,
+      入力された不具合予定数,
+      トークンに保存されたユーザID,
+      トークンに保存されたユーザID,
+    )
+    RETURNING id;
+  end note
+
+  alt 登録成功
+    RDS --> TestGroupRegistApi: テストグループIDを返却。
+    
+  else 登録失敗
+    RDS --> TestGroupRegistApi: エラーを返却。
+    TestGroupRegistApi --> TestGroupRegist: 500 Internal Server Error
+    TestGroupRegist --> User: 以下のエラーメッセージをアラートで表示。
+    note right User
+      「テストグループ登録に失敗しました。再度お試しください。」
+    end note
+  end
+
+  loop タグの数繰り返す
+    TestGroupRegistApi -> RDS: 入力されたタグからタグIDを取得。
+    note right RDS
+      SELECT 
+        id
+      FROM mt_tags
+      WHERE
+        name = 入力されたタグ;
+    end note
+
+    alt 取得成功
+      RDS --> TestGroupRegistApi: タグIDを返却。
+    else 取得失敗
+      RDS --> TestGroupRegistApi: エラーを返却。
+      TestGroupRegistApi --> TestGroupRegist: 500 Internal  Server Error
+      TestGroupRegist --> User: 以下のエラーメッセージをアラートで表示。
+      note right User
+        「テストグループ登録に失敗しました。再度お試しください。」
+      end note
+    end
+    TestGroupRegistApi -> RDS: テストグループタグ関連情報を登録する。
+    note right RDS
+      INSERT INTO tt_test_group_tags
+      (
+        test_group_id,
+        tag_id,
+        test_role
+      )
+      VALUES
+      (
+        取得したテストグループID,
+        取得したタグID,
+        リクエストパラメータのtest_role
+      );
+    end note
+  end
+
+  alt 登録成功
+    RDS --> TestGroupRegistApi: 登録件数を返却。
+    TestGroupRegistApi --> TestGroupRegist: 201 Created
+    TestGroupRegist --> User: テストグループ一覧へ遷移する。
+  else 登録失敗
+    RDS --> TestGroupRegistApi: エラーを返却。
+    TestGroupRegistApi --> TestGroupRegist: 500 Internal Server Error
+    TestGroupRegist --> User: 以下のエラーメッセージをアラートで表示。
+    note right User
+      「テストグループ登録に失敗しました。再度お試しください。」
+    end note
+  end
+else トークン無し
+  TestGroupRegistApi --> TestGroupRegist: 401 Unauthorized
+  TestGroupRegist -> TestGroupRegist: 保存された情報を削除。
+  TestGroupRegist --> User: ログイン画面へリダイレクト。
+else 権限チェック失敗
+  TestGroupRegistApi --> TestGroupRegist: 403 Forbidden
+  TestGroupRegist --> User: 権限エラーを表示。
+else リクエストパラメータ不正
+  TestGroupRegistApi --> TestGroupRegist: 400 Bad Request
+  TestGroupRegist --> User: パラメータエラーを表示。
+end
+@enduml

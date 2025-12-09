@@ -1,0 +1,17 @@
+@startuml
+scale max 3000 height
+title 初期表示時シーケンス図
+
+actor "ログインユーザ" as User
+participant "パスワード変更画面" as PasswordChange
+
+User -> PasswordChange: パスワード変更画面へアクセス。
+PasswordChange -> PasswordChange: ブラウザからJWTトークンを取得。
+
+alt トークン無し
+  PasswordChange --> User: ログイン画面へリダイレクト。
+else トークン記載のuser_roleが0(システム管理者)、1(テスト管理者)、2(一般)以外の場合
+  PasswordChange --> User: 権限エラーを表示。
+end
+PasswordChange --> User: パスワード変更画面を表示。
+@enduml

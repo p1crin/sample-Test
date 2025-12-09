@@ -1,0 +1,42 @@
+@startuml JWTトークン生成
+autonumber
+participant "CredentialsProvider" as Provider
+participant "AuthAPI" as AuthAPI
+participant "NextAuth.js\nCallbacks" as Callbacks
+participant "NextAuth.js\nClient" as NextAuthClient
+participant "画面" as Screen
+participant "Browser\nCookie" as Cookie
+
+Provider -> AuthAPI: return user\n{ id, email, user_role, department, company }
+deactivate Provider
+activate AuthAPI
+
+AuthAPI -> Callbacks: jwt callback({ token, user })
+activate Callbacks
+Callbacks -> Callbacks: token.sub = user.id.toString()
+Callbacks -> Callbacks: token.email = user.email
+Callbacks -> Callbacks: token.user_role = user.user_role
+Callbacks -> Callbacks: token.department = user.department
+Callbacks -> Callbacks: token.company = user.company
+Callbacks -> AuthAPI: return token
+deactivate Callbacks
+
+AuthAPI -> AuthAPI: JWTトークン生成\n署名: NEXTAUTH_SECRET\n有効期限: 30日
+
+AuthAPI -> Callbacks: session callback({ session, token })
+activate Callbacks
+Callbacks -> Callbacks: session.user.id = parseInt(token.sub)
+Callbacks -> Callbacks: session.user.email = token.email
+Callbacks -> Callbacks: session.user.user_role = token.user_role
+Callbacks -> Callbacks: session.user.department = token.department
+Callbacks -> Callbacks: session.user.company = token.company
+Callbacks -> AuthAPI: return session
+deactivate Callbacks
+
+AuthAPI -> Cookie: Set-Cookie:\nnext-auth.session-token=<JWT>\nHttpOnly; Secure; SameSite=Lax
+deactivate AuthAPI
+
+Cookie -> NextAuthClient: Cookie保存完了
+NextAuthClient -> Screen: 認証成功
+Screen -> Screen: router.push('/test-groups')
+@enduml

@@ -1,0 +1,47 @@
+@startuml テストグループ一覧画面
+autonumber
+actor "ログインユーザー" as User
+participant "Page\n(/testGroup)" as Page
+participant "Container\n(TestGroupList)" as Container
+participant "API\n(/api/test-groups)" as API
+participant "ErrorPage\n(error.tsx)" as ErrorPage
+
+User -> Page: 画面アクセス
+activate Page
+Page -> Page: getServerSession()で認証確認
+alt 未認証
+    Page -> User: Unauthorized エラー発生
+else 認証済み
+    Page -> Container: render
+    activate Container
+    Container -> API: GET /api/test-groups
+    activate API
+    API -> API: JWTトークン検証
+    API -> API: ユーザー権限確認
+    alt 管理者またはテスト管理者
+        API -> API: SELECT * FROM tt_test_groups\nWHERE is_deleted = FALSE
+        API -> Container: 200 OK\n{ success: true, data: [...] }
+    else 一般ユーザー
+        API -> API: SELECT tg.* FROM tt_test_groups tg\nJOIN tt_test_group_tags tgt\nON tg.test_group_id = tgt.test_group_id\nJOIN mt_user_tags ut\nON tgt.tag_id = ut.tag_id\nWHERE ut.user_id = $1
+        API -> Container: 200 OK\n{ success: true, data: [...] }
+    end
+    deactivate API
+    Container -> Container: apiError = null\nstate更新
+    Container -> User: テストグループ一覧表示
+    deactivate Container
+end
+
+alt APIエラーが発生した場合
+    Container -> Container: apiError = Error\nthrow apiError
+    Container -> ErrorPage: error boundary キャッチ
+    activate ErrorPage
+    alt 403 Forbidden
+        ErrorPage -> User: 403 エラー画面表示\n（アクセス権限がありません）
+    else 500 Internal Server Error
+        ErrorPage -> User: 500 エラー画面表示\n（エラーが発生しました）
+    end
+    deactivate ErrorPage
+end
+
+deactivate Page
+@enduml

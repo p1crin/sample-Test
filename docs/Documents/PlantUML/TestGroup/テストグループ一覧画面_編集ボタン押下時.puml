@@ -1,0 +1,11 @@
+@startuml
+scale max 3000 height
+title 編集ボタン押下時シーケンス図
+
+actor "ログインユーザ" as User
+participant "テストグループ一覧画面" as TestGroup
+participant "テストグループ編集画面" as TestGroupEdit
+
+User -> TestGroup: 編集ボタン押下
+TestGroup -> TestGroupEdit: 選択したIDをクエリパラメータに保存し、\nテストグループ編集画面へ遷移する。
+@enduml

@@ -1,0 +1,11 @@
+@startuml
+scale max 3000 height
+title 複製ボタン押下時シーケンス図
+
+actor "ログインユーザ" as User
+participant "テストグループ一覧画面" as TestGroup
+participant "テストグループ複製画面" as TestGroupCopy
+
+User -> TestGroup: 複製ボタン押下
+TestGroup -> TestGroupCopy: 選択したIDをクエリパラメータに保存し、\nテストグループ複製画面へ遷移する。
+@enduml

@@ -1,0 +1,736 @@
+@startuml テストケース管理システム - 全画面シーケンス図
+scale max 3000 height
+title テストケース管理システム - 全画面シーケンス図
+
+actor ユーザー as User
+participant "ブラウザ" as Browser
+participant "フロントエンド\n(Client Component)" as Frontend
+participant "NextAuth.js\nClient" as NextAuthClient
+participant "API\n/api/auth/*" as AuthAPI
+participant "API\n/api/test-groups/*" as TestGroupAPI
+participant "API\n/api/test-groups/*/cases/*" as TestCaseAPI
+participant "API\n/api/users/*" as UserAPI
+participant "AWS S3" as S3
+participant "Database\n(PostgreSQL)" as DB
+
+== 1. ログイン画面 ==
+User -> Browser: ログイン画面アクセス\n(http://localhost:3000/login)
+Browser -> Frontend: ページリクエスト (LoginPage)
+activate Frontend
+
+Frontend -> NextAuthClient: useSession()
+activate NextAuthClient
+NextAuthClient --> Frontend: セッション状態確認
+deactivate NextAuthClient
+
+alt 既にログイン済み
+    Frontend -> Browser: /test-groupsにリダイレクト
+    Browser --> User: テストグループ一覧画面表示
+else 未ログイン
+    Frontend --> Browser: ログインフォーム表示
+    deactivate Frontend
+    Browser --> User: メールアドレス・パスワード入力フォーム
+end
+
+User -> Browser: メールアドレス・パスワード入力\n「ログイン」ボタンクリック
+Browser -> Frontend: フォーム送信
+activate Frontend
+
+Frontend -> NextAuthClient: signIn('credentials', { email, password })
+activate NextAuthClient
+
+NextAuthClient -> AuthAPI: POST /api/auth/callback/credentials
+activate AuthAPI
+
+AuthAPI -> DB: ユーザー検索\nSELECT * FROM mt_users\nWHERE email = $1 AND is_deleted = FALSE
+activate DB
+DB --> AuthAPI: ユーザー情報\n(id, email, user_role, password_hash)
+deactivate DB
+
+AuthAPI -> AuthAPI: パスワード検証\nbcrypt.compare(password, hash)
+
+alt パスワード一致
+    AuthAPI -> AuthAPI: JWTトークン生成\n(user_id, email, user_role含む)
+    AuthAPI --> NextAuthClient: 200 OK\n{ user: {...}, token: "..." }
+    deactivate AuthAPI
+
+    NextAuthClient -> NextAuthClient: セッション保存\n(JWT in cookie)
+    NextAuthClient --> Frontend: 認証成功
+    deactivate NextAuthClient
+
+    Frontend -> Browser: /test-groupsにリダイレクト
+    deactivate Frontend
+    Browser --> User: テストグループ一覧画面表示
+else パスワード不一致
+    AuthAPI --> NextAuthClient: 401 Unauthorized
+    deactivate AuthAPI
+    NextAuthClient --> Frontend: 認証失敗
+    deactivate NextAuthClient
+    Frontend -> Browser: エラーメッセージ表示
+    deactivate Frontend
+    Browser --> User: エラー表示
+end
+
+== 2. テストグループ一覧画面 ==
+User -> Browser: テストグループ一覧アクセス\n(/test-groups)
+Browser -> Frontend: ページリクエスト
+activate Frontend
+
+Frontend -> NextAuthClient: useSession()
+activate NextAuthClient
+NextAuthClient --> Frontend: セッション情報取得
+deactivate NextAuthClient
+
+alt 未認証
+    Frontend -> Browser: /loginにリダイレクト
+    Browser --> User: ログイン画面表示
+else 認証済み
+    Frontend -> TestGroupAPI: GET /api/test-groups
+    activate TestGroupAPI
+
+    TestGroupAPI -> TestGroupAPI: JWTトークン検証
+    TestGroupAPI -> DB: テストグループ取得\n(ユーザーの権限に応じたフィルタ)
+    activate DB
+
+    alt 管理者・テスト管理者
+        DB --> TestGroupAPI: 全テストグループ
+    else 一般ユーザー
+        DB --> TestGroupAPI: 割り当てられたテストグループのみ
+    end
+    deactivate DB
+
+    TestGroupAPI --> Frontend: 200 OK\n{ testGroups: [...] }
+    deactivate TestGroupAPI
+
+    Frontend -> Browser: テストグループ一覧表示
+    deactivate Frontend
+    Browser --> User: テストグループ一覧\n(OEM, Model, Event, 進捗率等)
+end
+
+User -> Browser: 「新規作成」ボタンクリック
+note right
+  管理者・テスト管理者のみ
+  表示されるボタン
+end note
+Browser --> User: テストグループ作成画面へ遷移
+
+== 3. テストグループ作成画面 ==
+User -> Browser: テストグループ作成画面アクセス\n(/test-groups/new)
+Browser -> Frontend: ページリクエスト
+activate Frontend
+
+Frontend -> NextAuthClient: useSession()
+activate NextAuthClient
+NextAuthClient --> Frontend: セッション情報取得\n(user_role確認)
+deactivate NextAuthClient
+
+alt 権限なし (一般ユーザー)
+    Frontend -> Browser: /test-groupsにリダイレクト
+    Browser --> User: テストグループ一覧へ戻る
+else 権限あり (管理者・テスト管理者)
+    Frontend --> Browser: フォーム表示
+    deactivate Frontend
+    Browser --> User: OEM, Model, Event等の\n入力フォーム表示
+end
+
+User -> Browser: フォーム入力\n(OEM, Model, Event, Tags等)\n「作成」ボタンクリック
+Browser -> Frontend: フォーム送信
+activate Frontend
+
+Frontend -> TestGroupAPI: POST /api/test-groups\n{ oem, model, event, tags, ... }
+activate TestGroupAPI
+
+TestGroupAPI -> TestGroupAPI: JWTトークン検証\n権限チェック (user_role === 0 || 1)
+
+alt 権限なし
+    TestGroupAPI --> Frontend: 403 Forbidden
+    Frontend -> Browser: エラー表示
+    deactivate Frontend
+    Browser --> User: 権限エラー
+else 権限あり
+    TestGroupAPI -> DB: BEGIN TRANSACTION
+    activate DB
+
+    TestGroupAPI -> DB: INSERT INTO tt_test_groups\n(oem, model, event, ...)
+    DB --> TestGroupAPI: test_group_id
+
+    TestGroupAPI -> DB: INSERT INTO tt_test_group_tags\n(test_group_id, tag_id, test_role)\n※タグごとに複数行
+
+    TestGroupAPI -> DB: COMMIT
+    deactivate DB
+
+    TestGroupAPI --> Frontend: 201 Created\n{ testGroupId: ... }
+    deactivate TestGroupAPI
+
+    Frontend -> Browser: /test-groupsにリダイレクト
+    deactivate Frontend
+    Browser --> User: テストグループ一覧に戻る\n(新規作成されたグループが表示)
+end
+
+== 4. テストグループ編集画面 ==
+User -> Browser: テストグループ編集画面アクセス\n(/test-groups/[groupId]/edit)
+Browser -> Frontend: ページリクエスト
+activate Frontend
+
+Frontend -> TestGroupAPI: GET /api/test-groups/[groupId]
+activate TestGroupAPI
+
+TestGroupAPI -> TestGroupAPI: JWTトークン検証\n権限チェック (アクセス可能か)
+
+TestGroupAPI -> DB: SELECT test_group情報 + tags
+activate DB
+DB --> TestGroupAPI: テストグループ詳細
+deactivate DB
+
+TestGroupAPI --> Frontend: 200 OK\n{ testGroup: {...}, tags: [...] }
+deactivate TestGroupAPI
+
+Frontend --> Browser: フォーム表示 (現在の値を入力済み)
+deactivate Frontend
+Browser --> User: 編集フォーム表示
+
+User -> Browser: フォーム編集\n「更新」ボタンクリック
+Browser -> Frontend: フォーム送信
+activate Frontend
+
+Frontend -> TestGroupAPI: PUT /api/test-groups/[groupId]\n{ oem, model, tags, ... }
+activate TestGroupAPI
+
+TestGroupAPI -> TestGroupAPI: JWTトークン検証\n権限チェック (編集権限あるか)
+
+TestGroupAPI -> DB: BEGIN TRANSACTION
+activate DB
+
+TestGroupAPI -> DB: UPDATE tt_test_groups\nSET oem=$1, model=$2, ...\nWHERE test_group_id=$n
+
+TestGroupAPI -> DB: DELETE FROM tt_test_group_tags\nWHERE test_group_id=$1
+
+TestGroupAPI -> DB: INSERT INTO tt_test_group_tags\n(新しいタグ情報)
+
+TestGroupAPI -> DB: COMMIT
+deactivate DB
+
+TestGroupAPI --> Frontend: 200 OK
+deactivate TestGroupAPI
+
+Frontend -> Browser: /test-groupsにリダイレクト
+deactivate Frontend
+Browser --> User: テストグループ一覧に戻る
+
+== 5. テストケース一覧画面 ==
+User -> Browser: テストケース一覧アクセス\n(/test-groups/[groupId]/cases)
+Browser -> Frontend: ページリクエスト
+activate Frontend
+
+Frontend -> TestGroupAPI: GET /api/test-groups/[groupId]
+activate TestGroupAPI
+TestGroupAPI -> DB: テストグループ情報取得
+activate DB
+DB --> TestGroupAPI: テストグループ詳細
+deactivate DB
+TestGroupAPI --> Frontend: 200 OK
+deactivate TestGroupAPI
+
+Frontend -> TestCaseAPI: GET /api/test-groups/[groupId]/cases
+activate TestCaseAPI
+
+TestCaseAPI -> TestCaseAPI: JWTトークン検証\n権限チェック (閲覧権限あるか)
+
+TestCaseAPI -> DB: SELECT tt_test_cases + contents
+activate DB
+DB --> TestCaseAPI: テストケース一覧\n(TID, layers, purpose, test_case数)
+deactivate DB
+
+TestCaseAPI --> Frontend: 200 OK\n{ testCases: [...] }
+deactivate TestCaseAPI
+
+Frontend --> Browser: テストケース一覧表示
+deactivate Frontend
+Browser --> User: TID, Layer構造, 目的,\nテストケース数等のテーブル表示
+
+User -> Browser: 「新規登録」ボタンクリック
+note right
+  設計者ロール (test_role=1)
+  を持つユーザーのみ表示
+end note
+Browser --> User: テストケース作成画面へ遷移
+
+== 6. テストケース作成画面 ==
+User -> Browser: テストケース作成画面アクセス\n(/test-groups/[groupId]/cases/new)
+Browser -> Frontend: ページリクエスト
+activate Frontend
+
+Frontend -> NextAuthClient: useSession()
+activate NextAuthClient
+NextAuthClient --> Frontend: セッション情報取得
+deactivate NextAuthClient
+
+Frontend -> TestGroupAPI: GET /api/test-groups/[groupId]
+activate TestGroupAPI
+TestGroupAPI -> DB: 権限確認\n(test_role = 1 か確認)
+activate DB
+DB --> TestGroupAPI: 権限情報
+deactivate DB
+
+alt 設計者ロールなし
+    TestGroupAPI --> Frontend: 403 Forbidden
+    deactivate TestGroupAPI
+    Frontend -> Browser: エラー表示
+    deactivate Frontend
+    Browser --> User: 権限エラー
+else 設計者ロールあり
+    TestGroupAPI --> Frontend: 200 OK
+    deactivate TestGroupAPI
+
+    Frontend --> Browser: フォーム表示
+    deactivate Frontend
+    Browser --> User: TID, Layer, Purpose等の\n入力フォーム + 動的テスト内容フォーム
+end
+
+User -> Browser: フォーム入力\n(TID, layers, purpose, test_contents[])\n「作成」ボタンクリック
+Browser -> Frontend: フォーム送信
+activate Frontend
+
+alt ファイルあり (test_case_files)
+    Frontend -> TestCaseAPI: POST /api/s3-presigned-url\n{ fileName, fileType }
+    activate TestCaseAPI
+    TestCaseAPI -> S3: createPresignedPost()
+    activate S3
+    S3 --> TestCaseAPI: { url, fields }
+    deactivate S3
+    TestCaseAPI --> Frontend: 200 OK\n{ url, fields }
+    deactivate TestCaseAPI
+
+    Frontend -> S3: POST (multipart/form-data)\n署名付きアップロード
+    activate S3
+    S3 --> Frontend: 204 No Content
+    deactivate S3
+
+    Frontend -> Frontend: S3パスを取得\n(fields.key)
+end
+
+Frontend -> TestCaseAPI: POST /api/test-groups/[groupId]/cases\n{ tid, layers, purpose, contents[], file_paths }
+activate TestCaseAPI
+
+TestCaseAPI -> TestCaseAPI: JWTトークン検証\n権限チェック (設計者ロール)
+
+TestCaseAPI -> DB: BEGIN TRANSACTION
+activate DB
+
+TestCaseAPI -> DB: INSERT INTO tt_test_cases\n(test_group_id, tid, layers, purpose, ...)
+DB --> TestCaseAPI: test_case_id
+
+TestCaseAPI -> DB: INSERT INTO tt_test_contents\n(test_case_id, test_case_no, test_case, ...)\n※複数行
+note right
+  test_contents[] 配列の
+  各要素を1行ずつINSERT
+end note
+
+alt ファイルパスあり
+    TestCaseAPI -> DB: INSERT INTO tt_test_case_files\n(test_case_id, file_path)
+end
+
+TestCaseAPI -> DB: COMMIT
+deactivate DB
+
+TestCaseAPI --> Frontend: 201 Created
+deactivate TestCaseAPI
+
+Frontend -> Browser: /test-groups/[groupId]/casesにリダイレクト
+deactivate Frontend
+Browser --> User: テストケース一覧に戻る
+
+== 7. テストケース編集画面 ==
+User -> Browser: テストケース編集画面アクセス\n(/test-groups/[groupId]/cases/[tid]/edit)
+Browser -> Frontend: ページリクエスト
+activate Frontend
+
+Frontend -> TestCaseAPI: GET /api/test-groups/[groupId]/cases/[tid]
+activate TestCaseAPI
+
+TestCaseAPI -> DB: SELECT test_case + contents + files
+activate DB
+DB --> TestCaseAPI: テストケース詳細
+deactivate DB
+
+TestCaseAPI --> Frontend: 200 OK\n{ testCase: {...}, contents: [...], files: [...] }
+deactivate TestCaseAPI
+
+Frontend --> Browser: フォーム表示 (現在値を入力済み)
+deactivate Frontend
+Browser --> User: 編集フォーム表示
+
+User -> Browser: フォーム編集\n「更新」ボタンクリック
+Browser -> Frontend: フォーム送信
+activate Frontend
+
+Frontend -> TestCaseAPI: PUT /api/test-groups/[groupId]/cases/[tid]\n{ tid, layers, contents[], ... }
+activate TestCaseAPI
+
+TestCaseAPI -> TestCaseAPI: JWTトークン検証\n権限チェック (設計者ロール)
+
+TestCaseAPI -> DB: BEGIN TRANSACTION
+activate DB
+
+TestCaseAPI -> DB: UPDATE tt_test_cases\nSET layers=$1, purpose=$2, ...\nWHERE test_case_id=$n
+
+TestCaseAPI -> DB: DELETE FROM tt_test_contents\nWHERE test_case_id=$1
+
+TestCaseAPI -> DB: INSERT INTO tt_test_contents\n(新しいtest_contents)
+
+TestCaseAPI -> DB: COMMIT
+deactivate DB
+
+TestCaseAPI --> Frontend: 200 OK
+deactivate TestCaseAPI
+
+Frontend -> Browser: /test-groups/[groupId]/casesにリダイレクト
+deactivate Frontend
+Browser --> User: テストケース一覧に戻る
+
+== 8. テスト結果一覧画面 ==
+User -> Browser: テスト結果一覧アクセス\n(/test-groups/[groupId]/cases/[tid]/results)
+Browser -> Frontend: ページリクエスト
+activate Frontend
+
+Frontend -> TestCaseAPI: GET /api/test-groups/[groupId]/cases/[tid]
+activate TestCaseAPI
+TestCaseAPI -> DB: テストケース情報取得
+activate DB
+DB --> TestCaseAPI: テストケース詳細
+deactivate DB
+TestCaseAPI --> Frontend: 200 OK
+deactivate TestCaseAPI
+
+Frontend -> TestCaseAPI: GET /api/test-groups/[groupId]/cases/[tid]/results
+activate TestCaseAPI
+
+TestCaseAPI -> TestCaseAPI: JWTトークン検証\n権限チェック (閲覧権限あるか)
+
+TestCaseAPI -> DB: SELECT tt_test_contents\nLEFT JOIN tt_test_results\n(最新のjudgment, execution_date, executor等)
+activate DB
+DB --> TestCaseAPI: テスト結果一覧\n(test_case_no, judgment, history_count)
+deactivate DB
+
+TestCaseAPI --> Frontend: 200 OK\n{ results: [...] }
+deactivate TestCaseAPI
+
+Frontend --> Browser: テスト結果一覧表示
+deactivate Frontend
+Browser --> User: テストケース番号, 判定結果,\n実施日, 実施者, 履歴数等のテーブル
+
+User -> Browser: 「結果登録」ボタンクリック
+note right
+  実施者ロール (test_role=2)
+  を持つユーザーのみ表示
+end note
+Browser --> User: テスト結果登録画面へ遷移
+
+== 9. テスト結果登録画面 ==
+User -> Browser: テスト結果登録画面アクセス\n(/test-groups/[groupId]/cases/[tid]/[testCaseNo]/results/new)
+Browser -> Frontend: ページリクエスト
+activate Frontend
+
+Frontend -> TestCaseAPI: GET /api/test-groups/[groupId]/cases/[tid]
+activate TestCaseAPI
+TestCaseAPI -> DB: テストケース情報 + 権限確認
+activate DB
+DB --> TestCaseAPI: テストケース詳細 + 権限情報
+deactivate DB
+
+alt 実施者ロールなし
+    TestCaseAPI --> Frontend: 403 Forbidden
+    deactivate TestCaseAPI
+    Frontend -> Browser: エラー表示
+    deactivate Frontend
+    Browser --> User: 権限エラー
+else 実施者ロールあり
+    TestCaseAPI --> Frontend: 200 OK
+    deactivate TestCaseAPI
+
+    Frontend --> Browser: フォーム表示
+    deactivate Frontend
+    Browser --> User: 結果, 判定, バージョン情報,\nエビデンスファイル等の入力フォーム
+end
+
+User -> Browser: フォーム入力\n(result, judgment, versions, evidences[])\n「登録」ボタンクリック
+Browser -> Frontend: フォーム送信
+activate Frontend
+
+loop 各エビデンスファイル
+    Frontend -> TestCaseAPI: POST /api/s3-presigned-url\n{ fileName, fileType }
+    activate TestCaseAPI
+    TestCaseAPI -> S3: createPresignedPost()
+    activate S3
+    S3 --> TestCaseAPI: { url, fields }
+    deactivate S3
+    TestCaseAPI --> Frontend: 200 OK
+    deactivate TestCaseAPI
+
+    Frontend -> S3: POST (multipart/form-data)\n署名付きアップロード
+    activate S3
+    S3 --> Frontend: 204 No Content
+    deactivate S3
+end
+
+Frontend -> TestCaseAPI: POST /api/test-groups/[groupId]/cases/[tid]/[testCaseNo]/results\n{ result, judgment, versions, evidence_paths[] }
+activate TestCaseAPI
+
+TestCaseAPI -> TestCaseAPI: JWTトークン検証\n権限チェック (実施者ロール)
+
+TestCaseAPI -> DB: BEGIN TRANSACTION
+activate DB
+
+TestCaseAPI -> DB: SELECT history_count FROM tt_test_results\nWHERE test_content_id=$1
+DB --> TestCaseAPI: current_history_count (またはNULL)
+
+alt 初回登録
+    TestCaseAPI -> DB: INSERT INTO tt_test_results\n(test_content_id, result, judgment, history_count=1, ...)
+else 更新
+    TestCaseAPI -> DB: UPDATE tt_test_results\nSET result=$1, judgment=$2, history_count=history_count+1, ...\nWHERE test_content_id=$n
+end
+
+TestCaseAPI -> DB: INSERT INTO tt_test_results_history\n(test_content_id, history_count, result, judgment, ...)
+note right
+  履歴テーブルに結果を保存
+  (履歴番号はインクリメント)
+end note
+
+loop 各エビデンスファイル
+    TestCaseAPI -> DB: INSERT INTO tt_test_evidences\n(test_content_id, file_path)
+end
+
+TestCaseAPI -> DB: COMMIT
+deactivate DB
+
+TestCaseAPI --> Frontend: 201 Created
+deactivate TestCaseAPI
+
+Frontend -> Browser: /test-groups/[groupId]/cases/[tid]/resultsにリダイレクト
+deactivate Frontend
+Browser --> User: テスト結果一覧に戻る\n(新規登録された結果が表示)
+
+== 10. レポート・集計画面 ==
+User -> Browser: レポート画面アクセス\n(/test-groups/[groupId]/report)
+Browser -> Frontend: ページリクエスト
+activate Frontend
+
+Frontend -> TestGroupAPI: GET /api/test-groups/[groupId]
+activate TestGroupAPI
+TestGroupAPI -> DB: テストグループ情報取得
+activate DB
+DB --> TestGroupAPI: テストグループ詳細
+deactivate DB
+TestGroupAPI --> Frontend: 200 OK
+deactivate TestGroupAPI
+
+Frontend -> TestGroupAPI: GET /api/test-groups/[groupId]/report-data
+activate TestGroupAPI
+
+TestGroupAPI -> TestGroupAPI: JWTトークン検証\n権限チェック (閲覧権限あるか)
+
+TestGroupAPI -> DB: 集計クエリ実行
+activate DB
+note right of DB
+  SELECT COUNT(*) AS total_cases
+  FROM tt_test_contents
+  WHERE is_target = TRUE
+
+  SELECT COUNT(*) AS ok_cases
+  FROM tt_test_results r
+  JOIN tt_test_contents c ON r.test_content_id = c.test_content_id
+  WHERE c.is_target = TRUE AND r.judgment = 1
+
+  SELECT execution_date, COUNT(*) AS ng_count
+  FROM tt_test_results r
+  JOIN tt_test_contents c ON r.test_content_id = c.test_content_id
+  WHERE c.is_target = TRUE AND r.judgment = 0
+  GROUP BY execution_date
+  ORDER BY execution_date
+end note
+
+DB --> TestGroupAPI: 集計データ\n(total, ok, ng, progress_rate, bug_curve)
+deactivate DB
+
+TestGroupAPI --> Frontend: 200 OK\n{ totalCases, okCases, ngCases, progressRate, bugCurve: [...] }
+deactivate TestGroupAPI
+
+Frontend -> Frontend: Rechartsでグラフ生成\n(円グラフ, 折れ線グラフ)
+
+Frontend --> Browser: レポート表示
+deactivate Frontend
+Browser --> User: 進捗状況, OK/NG割合,\nバグ曲線グラフ等
+
+== 11. ユーザー管理画面 (管理者のみ) ==
+User -> Browser: ユーザー管理画面アクセス\n(/users)
+Browser -> Frontend: ページリクエスト
+activate Frontend
+
+Frontend -> NextAuthClient: useSession()
+activate NextAuthClient
+NextAuthClient --> Frontend: セッション情報取得\n(user_role確認)
+deactivate NextAuthClient
+
+alt 管理者でない (user_role !== 0)
+    Frontend -> Browser: /test-groupsにリダイレクト
+    deactivate Frontend
+    Browser --> User: テストグループ一覧へ戻る
+else 管理者
+    Frontend -> UserAPI: GET /api/users
+    activate UserAPI
+
+    UserAPI -> UserAPI: JWTトークン検証\n権限チェック (user_role === 0)
+
+    UserAPI -> DB: SELECT mt_users + tags
+    activate DB
+    DB --> UserAPI: ユーザー一覧\n(email, user_role, department, tags)
+    deactivate DB
+
+    UserAPI --> Frontend: 200 OK\n{ users: [...] }
+    deactivate UserAPI
+
+    Frontend --> Browser: ユーザー一覧表示
+    deactivate Frontend
+    Browser --> User: ユーザーID, Email, Role,\nDepartment, Tags等のテーブル
+end
+
+User -> Browser: 「新規登録」ボタンクリック
+Browser --> User: ユーザー作成画面へ遷移
+
+== 12. ユーザー作成画面 (管理者のみ) ==
+User -> Browser: ユーザー作成画面アクセス\n(/users/new)
+Browser -> Frontend: ページリクエスト
+activate Frontend
+
+Frontend -> NextAuthClient: useSession()
+activate NextAuthClient
+NextAuthClient --> Frontend: セッション情報取得
+deactivate NextAuthClient
+
+alt 管理者でない
+    Frontend -> Browser: /test-groupsにリダイレクト
+    deactivate Frontend
+    Browser --> User: 権限エラー
+else 管理者
+    Frontend --> Browser: フォーム表示
+    deactivate Frontend
+    Browser --> User: Email, Password, Role,\nDepartment, Tags等の入力フォーム
+end
+
+User -> Browser: フォーム入力\n(email, password, user_role, tags[])\n「作成」ボタンクリック
+Browser -> Frontend: フォーム送信
+activate Frontend
+
+Frontend -> UserAPI: POST /api/users\n{ email, password, user_role, department, tags }
+activate UserAPI
+
+UserAPI -> UserAPI: JWTトークン検証\n権限チェック (user_role === 0)
+
+UserAPI -> UserAPI: bcrypt.hash(password)
+
+UserAPI -> DB: BEGIN TRANSACTION
+activate DB
+
+UserAPI -> DB: INSERT INTO mt_users\n(email, password_hash, user_role, department, ...)
+DB --> UserAPI: user_id
+
+loop 各タグ (存在しなければ作成)
+    UserAPI -> DB: SELECT tag_id FROM mt_tags\nWHERE tag_name=$1
+    alt タグが存在しない
+        UserAPI -> DB: INSERT INTO mt_tags (tag_name)
+        DB --> UserAPI: 新しいtag_id
+    end
+
+    UserAPI -> DB: INSERT INTO mt_user_tags\n(user_id, tag_id)
+end
+
+UserAPI -> DB: COMMIT
+deactivate DB
+
+UserAPI --> Frontend: 201 Created\n{ userId: ... }
+deactivate UserAPI
+
+Frontend -> Browser: /usersにリダイレクト
+deactivate Frontend
+Browser --> User: ユーザー一覧に戻る\n(新規作成されたユーザーが表示)
+
+== 13. ユーザー編集画面 (管理者のみ) ==
+User -> Browser: ユーザー編集画面アクセス\n(/users/[userId]/edit)
+Browser -> Frontend: ページリクエスト
+activate Frontend
+
+Frontend -> UserAPI: GET /api/users/[userId]
+activate UserAPI
+
+UserAPI -> UserAPI: JWTトークン検証\n権限チェック (user_role === 0)
+
+UserAPI -> DB: SELECT user情報 + tags
+activate DB
+DB --> UserAPI: ユーザー詳細
+deactivate DB
+
+UserAPI --> Frontend: 200 OK\n{ user: {...}, tags: [...] }
+deactivate UserAPI
+
+Frontend --> Browser: フォーム表示 (現在値を入力済み)
+deactivate Frontend
+Browser --> User: 編集フォーム表示\n(パスワードは空欄)
+
+User -> Browser: フォーム編集\n「更新」ボタンクリック
+Browser -> Frontend: フォーム送信
+activate Frontend
+
+Frontend -> UserAPI: PUT /api/users/[userId]\n{ email, password, user_role, tags }
+activate UserAPI
+
+UserAPI -> UserAPI: JWTトークン検証\n権限チェック (user_role === 0)
+
+alt パスワード変更あり
+    UserAPI -> UserAPI: bcrypt.hash(new_password)
+end
+
+UserAPI -> DB: BEGIN TRANSACTION
+activate DB
+
+UserAPI -> DB: UPDATE mt_users\nSET email=$1, user_role=$2, ...\nWHERE user_id=$n
+
+alt パスワード変更あり
+    UserAPI -> DB: UPDATE mt_users\nSET password_hash=$1\nWHERE user_id=$2
+end
+
+UserAPI -> DB: DELETE FROM mt_user_tags\nWHERE user_id=$1
+
+UserAPI -> DB: INSERT INTO mt_user_tags\n(新しいタグ情報)
+
+UserAPI -> DB: COMMIT
+deactivate DB
+
+UserAPI --> Frontend: 200 OK
+deactivate UserAPI
+
+Frontend -> Browser: /usersにリダイレクト
+deactivate Frontend
+Browser --> User: ユーザー一覧に戻る
+
+== 14. ログアウト ==
+User -> Browser: ヘッダーの「ログアウト」ボタンクリック
+Browser -> Frontend: ログアウト処理
+activate Frontend
+
+Frontend -> NextAuthClient: signOut()
+activate NextAuthClient
+
+NextAuthClient -> AuthAPI: POST /api/auth/signout
+activate AuthAPI
+AuthAPI -> AuthAPI: セッション削除\n(Cookie削除)
+AuthAPI --> NextAuthClient: 200 OK
+deactivate AuthAPI
+
+NextAuthClient --> Frontend: ログアウト完了
+deactivate NextAuthClient
+
+Frontend -> Browser: /loginにリダイレクト
+deactivate Frontend
+Browser --> User: ログイン画面表示
+
+@enduml
