@@ -142,7 +142,7 @@ export function TestGroupEditFormContainer({ groupId }: TestGroupEditFormContain
       clientLogger.error('TestGroupEditFormContainer', 'データ保存失敗', {
         error: err instanceof Error ? err.message : String(err),
       });
-      setLoadError(err instanceof Error ? err.message : '予期せぬエラーが発生しました');
+      setApiError(err instanceof Error ? err : new Error(String(err)));
     } finally {
       setIsLoading(false);
     }

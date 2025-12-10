@@ -1,6 +1,7 @@
 import { Suspense } from 'react';
 import { getServerSession } from 'next-auth';
 import { canModifyTestGroup } from '@/app/lib/auth';
+import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { TestGroupEditFormContainer } from './_components/TestGroupEditFormContainer';
 
 type Props = {
@@ -12,7 +13,7 @@ export default async function TestGroupEditPage({ params }: Props) {
   const decodedGroupId = Number(decodeURIComponent(groupId));
 
   // サーバー側で権限チェック
-  const session = await getServerSession();
+  const session = await getServerSession(authOptions);
 
   // 認証確認
   if (!session?.user) {

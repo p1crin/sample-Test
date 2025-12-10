@@ -6,15 +6,19 @@ import { logDatabaseQuery, logAPIEndpoint, QueryTimer } from '@/utils/database-l
 import { formatDate } from '@/utils/date-formatter';
 import type { Prisma } from '@/generated/prisma/client';
 
-// GET /api/test-groups - アクセス可能なテストグループを取得
+// GET /api/test-groups - アクセス可能なテストグループを取得（動的権限チェック）
 export async function GET(req: NextRequest) {
   const apiTimer = new QueryTimer();
   let statusCode = 200;
 
   try {
+    // 認証確認（ヘルパー関数）
     const user = await requireAuth(req);
 
-    // アクセス可能なテストグループのIDを取得
+    // 動的権限チェック: ユーザーがアクセス可能なテストグループIDを取得
+    // - ADMIN(0): すべてのテストグループにアクセス可能
+    // - TEST_MANAGER(1): 作成したテストグループ + タグで割り当てられたテストグループにアクセス可能
+    // - GENERAL_USER(2): タグで割り当てられたテストグループのみアクセス可能
     const accessibleIds = await getAccessibleTestGroups(user.id, user.user_role);
 
     if (accessibleIds.length === 0) {

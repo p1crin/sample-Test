@@ -274,3 +274,12 @@ export async function getAccessibleTestGroups(
 
   return tags.map((tag) => tag.test_group_id);
 }
+
+// Check if user can access a specific test group
+export async function checkTestGroupAccess(
+  userId: number,
+  userRole: UserRole,
+  testGroupId: number
+): Promise<boolean> {
+  return await canViewTestGroup(userId, userRole, testGroupId);
+}
