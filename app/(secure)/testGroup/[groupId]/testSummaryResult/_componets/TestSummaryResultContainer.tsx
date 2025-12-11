@@ -10,10 +10,10 @@ import Loading from "@/app/loading";
 import { Button } from "@/components/ui/button";
 
 type TestSummaryResultContainerProps = {
-  groupName: string;
+  groupId: number;
 };
 
-export default function TestSummaryResultContainer({ groupName }: TestSummaryResultContainerProps) {
+export default function TestSummaryResultContainer({ groupId }: TestSummaryResultContainerProps) {
   const [menuItems, setMenuItems] = useState<TestSummaryResultListRow[]>([]);
   const [page, setPage] = useState(1);
   const [pageCount, setPageCount] = useState(0);
@@ -30,14 +30,15 @@ export default function TestSummaryResultContainer({ groupName }: TestSummaryRes
   useEffect(() => {
     const getDataCountFunc = async () => {
       try {
-        const result = await getDataCount();
-        if (!result.success || !result.data) {
+        const result = await getDataCount(groupId);
+        if (!result.success) {
           throw new Error('データの取得に失敗しました' + ` (error: ${result.error})`);
         }
-        setPageCount(result.success && result.data ? Math.ceil(result.data / pageSize) : 0);
+        const dataCount = result.data ?? 0;
+        setPageCount(dataCount > 0 ? Math.ceil(dataCount / pageSize) : 0);
       } catch (err) {
-        clientLogger.error('UserListContainer', 'データ取得失敗', {
-          page,
+        clientLogger.error('TestSummaryResultContainer', 'データ取得失敗', {
+          groupId,
           error: err instanceof Error ? err.message : String(err),
         });
         setApiError(err instanceof Error ? err : new Error(String(err)));
@@ -45,21 +46,22 @@ export default function TestSummaryResultContainer({ groupName }: TestSummaryRes
     };
     getDataCountFunc();
 
-  }, []);
+  }, [groupId]);
 
   useEffect(() => {
     let ignore = false;
-    clientLogger.info('UserListContainer', 'データ取得開始', { page });
+    clientLogger.info('TestSummaryResultContainer', 'データ取得開始', { groupId, page });
 
     const getDataListFunc = async () => {
       setLoading(true);
       try {
-        const userData = await getDataList({ page: page });
+        const userData = await getDataList({ groupId, page: page });
         if (!userData.success || !userData.data) {
           throw new Error('データの取得に失敗しました' + ` (error: ${userData.error})`);
         }
         if (!ignore) setMenuItems(userData.data);
-        clientLogger.info('UserListContainer', 'データ取得成功', {
+        clientLogger.info('TestSummaryResultContainer', 'データ取得成功', {
+          groupId,
           page,
           count: userData.data?.length,
         });
@@ -68,7 +70,8 @@ export default function TestSummaryResultContainer({ groupName }: TestSummaryRes
           setMenuItems([]);
           setApiError(err instanceof Error ? err : new Error(String(err)));
         }
-        clientLogger.error('UserListContainer', 'データ取得失敗', {
+        clientLogger.error('TestSummaryResultContainer', 'データ取得失敗', {
+          groupId,
           page,
           error: err instanceof Error ? err.message : String(err),
         });
@@ -80,7 +83,7 @@ export default function TestSummaryResultContainer({ groupName }: TestSummaryRes
     return () => {
       ignore = true;
     };
-  }, [page]);
+  }, [groupId, page]);
 
   const handleSort = (key: keyof TestSummaryResultListRow) => {
     setSortConfig((prev) => {

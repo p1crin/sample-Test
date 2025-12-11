@@ -1,7 +1,11 @@
+'use server';
+
+import { prisma } from '@/app/lib/prisma';
 import serverLogger from '@/utils/server-logger';
 import { TestSummaryResultListRow } from "./_componets/types/test-summary-result-list-row";
 
 interface GetDataListParams {
+  groupId: number;
   page?: number;
 }
 
@@ -11,35 +15,121 @@ export type Result<T> = {
   error?: string;
 };
 
-export async function getDataCount(): Promise<Result<number>> {
+export async function getDataCount(groupId: number): Promise<Result<number>> {
   try {
-    serverLogger.info(`getDataCount Request`);
+    serverLogger.info(`getDataCount Request`, { groupId });
 
-    return { success: true, data: 50 };
+    // Prisma を使用して直接データベースをクエリ
+    const aggregatedData = await prisma.$queryRaw`
+      SELECT
+        tc.first_layer,
+        tc.second_layer,
+        COUNT(*)::integer AS total_items,
+        COALESCE(SUM(CASE WHEN tr.judgment IN ('OK', '参照OK', 'NG') THEN 1 ELSE 0 END), 0)::integer AS completed_items,
+        COALESCE(SUM(CASE WHEN tr.judgment = '未着手' THEN 1 ELSE 0 END), 0)::integer AS not_started_items,
+        COALESCE(SUM(CASE WHEN tr.judgment IN ('保留', 'QA中') THEN 1 ELSE 0 END), 0)::integer AS in_progress_items,
+        COALESCE(SUM(CASE WHEN tr.judgment IN ('OK', '参照OK') THEN 1 ELSE 0 END), 0)::integer AS ok_items,
+        COALESCE(SUM(CASE WHEN tr.judgment = 'NG' THEN 1 ELSE 0 END), 0)::integer AS ng_items,
+        COALESCE(SUM(CASE WHEN tr.judgment = '対象外' THEN 1 ELSE 0 END), 0)::integer AS excluded_items,
+        CASE
+          WHEN COUNT(*) > 0 THEN COALESCE(SUM(CASE WHEN tr.judgment IN ('OK', '参照OK') THEN 1 ELSE 0 END), 0)::float / COUNT(*)
+          ELSE 0
+        END AS ok_rate,
+        CASE
+          WHEN COUNT(*) > 0 THEN COALESCE(SUM(CASE WHEN tr.judgment IN ('OK', '参照OK', 'NG') THEN 1 ELSE 0 END), 0)::float / COUNT(*)
+          ELSE 0
+        END AS progress_rate
+      FROM
+        tt_test_results tr
+      JOIN
+        tt_test_cases tc
+      ON
+        tr.test_group_id = tc.test_group_id AND tr.tid = tc.tid
+      WHERE
+        tr.test_group_id = ${groupId}
+        AND tr.is_deleted = FALSE
+        AND tc.is_deleted = FALSE
+      GROUP BY
+        tc.first_layer, tc.second_layer
+      ORDER BY
+        tc.first_layer, tc.second_layer
+    `;
+
+    const totalCount = (aggregatedData as unknown[]).length;
+    serverLogger.info(`getDataCount Success`, { groupId, totalCount });
+    return { success: true, data: totalCount };
   } catch (error) {
-    console.error('Error fetching data:', error);
-    return { success: false, error: 'Failed to fetch data.' };
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    serverLogger.error('Error fetching data count:', { groupId, error: errorMessage });
+    return { success: false, error: errorMessage };
   }
 }
 
 export async function getDataList(params: GetDataListParams): Promise<Result<TestSummaryResultListRow[]>> {
   try {
-    serverLogger.info(`getDataList Request`, { id: params.page });
+    const { groupId, page = 1 } = params;
+    serverLogger.info(`getDataList Request`, { groupId, page });
 
-    const page = !params.page ? 0 : params.page;
-    const baseId: number = (page - 1) * 10 + 1;
-    const data: TestSummaryResultListRow[] = [
-      { firstLayer: `第1層${baseId}`, secondLayer: `第2層${baseId}`, totalCount: 10, targetCount: 10 - 0, completedCount: 4 + 1, notStartedCount: 2, inProgressCount: 1, okCount: 4, ngCount: 1, excludedCount: 0, okRate: Number((4 / (10 - 0) * 100).toFixed(1)), progressRate: Number(((4 + 1) / (10 - 0) * 100).toFixed(1)) },
-      { firstLayer: `第1層${baseId}`, secondLayer: `第2層${baseId + 1}`, totalCount: 10, targetCount: 10 - 0, completedCount: 4 + 1, notStartedCount: 2, inProgressCount: 1, okCount: 4, ngCount: 1, excludedCount: 0, okRate: Number((4 / (10 - 0) * 100).toFixed(1)), progressRate: Number(((4 + 1) / (10 - 0) * 100).toFixed(1)) },
-      { firstLayer: `第1層${baseId + 1}`, secondLayer: `第2層${baseId}`, totalCount: 20, targetCount: 20 - 0, completedCount: 8 + 2, notStartedCount: 5, inProgressCount: 0, okCount: 8, ngCount: 2, excludedCount: 0, okRate: Number((8 / (20 - 0) * 100).toFixed(1)), progressRate: Number(((8 + 2) / (20 - 0) * 100).toFixed(1)) },
-      { firstLayer: `第1層${baseId + 2}`, secondLayer: `第2層${baseId}`, totalCount: 30, targetCount: 30 - 0, completedCount: 18 + 2, notStartedCount: 5, inProgressCount: 0, okCount: 18, ngCount: 2, excludedCount: 0, okRate: Number((18 / (30 - 0) * 100).toFixed(1)), progressRate: Number(((18 + 2) / (30 - 0) * 100).toFixed(1)) },
-      { firstLayer: `第1層${baseId + 3}`, secondLayer: `第2層${baseId}`, totalCount: 40, targetCount: 40 - 0, completedCount: 28 + 2, notStartedCount: 5, inProgressCount: 0, okCount: 28, ngCount: 2, excludedCount: 0, okRate: Number((28 / (40 - 0) * 100).toFixed(1)), progressRate: Number(((28 + 2) / (40 - 0) * 100).toFixed(1)) },
-      { firstLayer: `第1層${baseId + 4}`, secondLayer: `第2層${baseId}`, totalCount: 50, targetCount: 50 - 0, completedCount: 38 + 2, notStartedCount: 5, inProgressCount: 0, okCount: 38, ngCount: 2, excludedCount: 0, okRate: Number((38 / (50 - 0) * 100).toFixed(1)), progressRate: Number(((38 + 2) / (50 - 0) * 100).toFixed(1)) },
-      { firstLayer: `第1層${baseId + 4}`, secondLayer: `第2層${baseId + 1}`, totalCount: 50, targetCount: 50 - 0, completedCount: 38 + 2, notStartedCount: 5, inProgressCount: 0, okCount: 38, ngCount: 2, excludedCount: 0, okRate: Number((38 / (50 - 0) * 100).toFixed(1)), progressRate: Number(((38 + 2) / (50 - 0) * 100).toFixed(1)) },
-    ];
-    return { success: true, data: data };
+    // Prisma を使用して直接データベースをクエリ
+    const aggregatedData = await prisma.$queryRaw`
+      SELECT
+        tc.first_layer,
+        tc.second_layer,
+        COUNT(*)::integer AS total_items,
+        COALESCE(SUM(CASE WHEN tr.judgment IN ('OK', '参照OK', 'NG') THEN 1 ELSE 0 END), 0)::integer AS completed_items,
+        COALESCE(SUM(CASE WHEN tr.judgment = '未着手' THEN 1 ELSE 0 END), 0)::integer AS not_started_items,
+        COALESCE(SUM(CASE WHEN tr.judgment IN ('保留', 'QA中') THEN 1 ELSE 0 END), 0)::integer AS in_progress_items,
+        COALESCE(SUM(CASE WHEN tr.judgment IN ('OK', '参照OK') THEN 1 ELSE 0 END), 0)::integer AS ok_items,
+        COALESCE(SUM(CASE WHEN tr.judgment = 'NG' THEN 1 ELSE 0 END), 0)::integer AS ng_items,
+        COALESCE(SUM(CASE WHEN tr.judgment = '対象外' THEN 1 ELSE 0 END), 0)::integer AS excluded_items,
+        CASE
+          WHEN COUNT(*) > 0 THEN COALESCE(SUM(CASE WHEN tr.judgment IN ('OK', '参照OK') THEN 1 ELSE 0 END), 0)::float / COUNT(*)
+          ELSE 0
+        END AS ok_rate,
+        CASE
+          WHEN COUNT(*) > 0 THEN COALESCE(SUM(CASE WHEN tr.judgment IN ('OK', '参照OK', 'NG') THEN 1 ELSE 0 END), 0)::float / COUNT(*)
+          ELSE 0
+        END AS progress_rate
+      FROM
+        tt_test_results tr
+      JOIN
+        tt_test_cases tc
+      ON
+        tr.test_group_id = tc.test_group_id AND tr.tid = tc.tid
+      WHERE
+        tr.test_group_id = ${groupId}
+        AND tr.is_deleted = FALSE
+        AND tc.is_deleted = FALSE
+      GROUP BY
+        tc.first_layer, tc.second_layer
+      ORDER BY
+        tc.first_layer, tc.second_layer
+    `;
+
+    // ページネーション処理
+    const pageSize = 10;
+    const offset = (page - 1) * pageSize;
+    const paginatedData = (aggregatedData as any[]).slice(offset, offset + pageSize);
+
+    // データを TestSummaryResultListRow にマッピング
+    const mappedData: TestSummaryResultListRow[] = paginatedData.map((item: any) => ({
+      firstLayer: item.first_layer,
+      secondLayer: item.second_layer,
+      totalCount: item.total_items,
+      targetCount: item.total_items - item.excluded_items,
+      completedCount: item.completed_items,
+      notStartedCount: item.not_started_items,
+      inProgressCount: item.in_progress_items,
+      okCount: item.ok_items,
+      ngCount: item.ng_items,
+      excludedCount: item.excluded_items,
+      okRate: parseFloat((item.ok_rate * 100).toFixed(1)),
+      progressRate: parseFloat((item.progress_rate * 100).toFixed(1)),
+    }));
+
+    return { success: true, data: mappedData };
   } catch (error) {
-    console.error('Error fetching data:', error);
+    serverLogger.error('Error fetching data list:', error instanceof Error ? error.message : String(error));
     return { success: false, error: 'Failed to fetch data.' };
   }
 }
