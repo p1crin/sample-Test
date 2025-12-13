@@ -22,11 +22,8 @@ export function TestSummaryResultList({
   renderActions,
 }: TestSummaryResultListProps) {
   const [items, setItems] = useState<TestSummaryResultListRow[]>([]);
-  const [page, setPage] = useState(1);
-  const [pageCount, setPageCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const pageSize = 10;
 
   // Fetch aggregated data
   useEffect(() => {
@@ -54,8 +51,6 @@ export function TestSummaryResultList({
 
         if (!ignore) {
           const allData = data.data as unknown[];
-          const totalCount = allData.length;
-          setPageCount(totalCount > 0 ? Math.ceil(totalCount / pageSize) : 0);
 
           // Map data to TestSummaryResultListRow format
           const mappedData: TestSummaryResultListRow[] = allData.map((item: unknown) => {
@@ -77,7 +72,6 @@ export function TestSummaryResultList({
           });
 
           setItems(mappedData);
-          setPage(1);
 
           clientLogger.info('TestSummaryResultList', 'データ取得成功', {
             groupId,
@@ -89,7 +83,6 @@ export function TestSummaryResultList({
           const errorMessage = err instanceof Error ? err.message : String(err);
           setError(errorMessage);
           setItems([]);
-          setPageCount(0);
 
           clientLogger.error('TestSummaryResultList', 'データ取得失敗', {
             groupId,
@@ -114,13 +107,12 @@ export function TestSummaryResultList({
     throw new Error(error);
   }
 
-  // Paginate data
-  const startIndex = (page - 1) * pageSize;
-  const endIndex = startIndex + pageSize;
-  const paginatedItems = items.slice(startIndex, endIndex);
+  if (loading) {
+    return Loading();
+  }
 
-  // Sort items
-  const sortedItems = [...paginatedItems];
+  // Sort items (all items, no pagination)
+  const sortedItems = [...items];
   if (sortConfig) {
     sortedItems.sort((a, b) => {
       const key = sortConfig.key;
@@ -133,19 +125,12 @@ export function TestSummaryResultList({
     });
   }
 
-  if (loading) {
-    return Loading();
-  }
-
   return (
     <DataGrid
       items={sortedItems}
       columns={columns}
       sortConfig={sortConfig}
-      page={page}
-      pageCount={pageCount}
       onSort={onSort}
-      onPageChange={setPage}
       renderActions={renderActions}
       isAccordion={true}
     />

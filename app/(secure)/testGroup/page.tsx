@@ -1,7 +1,7 @@
 import { getServerSession } from 'next-auth';
 import UnauthorizedError from '@/components/ui/UnauthorizedError';
 import { TestGroupListContainer } from './_components/TestGroupListContainer';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
+import { authOptions } from '@/app/lib/auth-options';
 
 export default async function TestGroupListPage() {
   const session = await getServerSession(authOptions);
