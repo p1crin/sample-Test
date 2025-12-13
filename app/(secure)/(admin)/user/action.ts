@@ -48,7 +48,7 @@ export async function getDataCount(): Promise<Result<number>> {
     const count = result.data ? result.data.length : 0;
     return { success: true, data: count };
   } catch (error) {
-    serverLogger.error('getDataCount error', error);
+    serverLogger.error('getDataCount error', error instanceof Error ? error : new Error(String(error)));
     return { success: false, error: 'Failed to fetch user count.' };
   }
 }
@@ -93,7 +93,7 @@ export async function getDataList(params: GetDataListParams): Promise<Result<Use
     serverLogger.info('getDataList success', { page, count: users.length });
     return { success: true, data: users };
   } catch (error) {
-    serverLogger.error('getDataList error', error);
+    serverLogger.error('getDataList error', error instanceof Error ? error : new Error(String(error)));
     return { success: false, error: 'Failed to fetch user list.' };
   }
 }
@@ -123,7 +123,7 @@ export async function getTagOptions(): Promise<Result<{ value: string, label: st
 
     return { success: true, data: tagOptions };
   } catch (error) {
-    serverLogger.error('getTagOptions error', error);
+    serverLogger.error('getTagOptions error', error instanceof Error ? error : new Error(String(error)));
     return { success: false, error: 'Failed to fetch tag options.' };
   }
 }

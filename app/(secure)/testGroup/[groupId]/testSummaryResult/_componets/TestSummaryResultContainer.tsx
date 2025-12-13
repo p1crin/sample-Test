@@ -52,7 +52,7 @@ export default function TestSummaryResultContainer({ groupId }: TestSummaryResul
         sortConfig={sortConfig}
         onSort={handleSort}
       />
-      <TestSummaryResultGraph />
+      <TestSummaryResultGraph groupId={groupId} />
       <div className="flex justify-center space-x-4 mt-4">
         <Button type="button" onClick={handleCancel} className="bg-gray-500 hover:bg-gray-400">戻る</Button>
       </div>

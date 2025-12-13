@@ -18,7 +18,7 @@ export async function GET(
       return NextResponse.json({ error: 'アクセス権限がありません' }, { status: 403 });
     }
 
-    // Get test results grouped by test_case_no
+    // Get test results from current results table
     const resultsResult = await query(
       `SELECT *
        FROM tt_test_results
@@ -29,9 +29,20 @@ export async function GET(
 
     const results = getAllRows(resultsResult);
 
+    // Get test results history
+    const historyResult = await query(
+      `SELECT *
+       FROM tt_test_results_history
+       WHERE test_group_id = $1 AND tid = $2 AND is_deleted = FALSE
+       ORDER BY test_case_no, history_count DESC`,
+      [groupId, tid]
+    );
+
+    const history = getAllRows(historyResult);
+
     // Get test contents for all test_case_no
     const testContentsResult = await query(
-      `SELECT test_case_no, test_item, expected_value
+      `SELECT test_case_no, test_case, expected_value
        FROM tt_test_contents
        WHERE test_group_id = $1 AND tid = $2 AND is_deleted = FALSE
        ORDER BY test_case_no`,
@@ -48,62 +59,144 @@ export async function GET(
       return acc;
     }, {});
 
-    // Get evidences for all test_case_no
+    // Get evidences for all test_case_no and history_counts
     const evidencesResult = await query(
       `SELECT *
        FROM tt_test_evidences
        WHERE test_group_id = $1 AND tid = $2 AND is_deleted = FALSE
-       ORDER BY test_case_no, history_count, evidence_no`,
+       ORDER BY test_case_no, history_count DESC, evidence_no ASC`,
       [groupId, tid]
     );
 
     const evidences = getAllRows(evidencesResult);
 
-    // Group evidences by test_case_no and history_count
-    const evidencesByKey = evidences.reduce((acc: Record<string, unknown[]>, evidence: unknown) => {
+    // Group evidences by test_case_no
+    const evidencesByKey: Record<string, unknown[]> = {};
+    evidences.forEach((evidence: unknown) => {
       const e = evidence as Record<string, unknown>;
-      const key = `${e.test_case_no}_${e.history_count}`;
-      if (!acc[key]) {
-        acc[key] = [];
+      const key = e.test_case_no as string | number;
+      if (!evidencesByKey[key]) {
+        evidencesByKey[key] = [];
       }
-      (acc[key] as unknown[]).push(evidence);
-      return acc;
-    }, {});
+      evidencesByKey[key].push(evidence);
+    });
 
-    // Group by test_case_no
-    const groupedResults = results.reduce((acc: Record<string, unknown[]>, result: unknown) => {
+    // Group history by test_case_no
+    const historyByTestCase: Record<string | number, unknown[]> = {};
+    history.forEach((h: unknown) => {
+      const historyRecord = h as Record<string, unknown>;
+      const key = historyRecord.test_case_no as string | number;
+      if (!historyByTestCase[key]) {
+        historyByTestCase[key] = [];
+      }
+      historyByTestCase[key].push(historyRecord);
+    });
+
+    // Build grouped results with history
+    interface ResultWithHistory {
+      latestValidResult: Record<string, unknown>;
+      allHistory: Record<string, unknown>[];
+      historyCounts: number[];
+    }
+
+    const groupedResults: Record<string, ResultWithHistory> = {};
+
+    // Process current results
+    results.forEach((result: unknown) => {
       const r = result as Record<string, unknown>;
       const key = r.test_case_no as string | number;
-      if (!acc[key]) {
-        acc[key] = [];
+
+      if (!groupedResults[key]) {
+        // Get test content for this test case
+        const testContent = (testContentsMap[key] || {}) as Record<string, unknown>;
+
+        // Get the latest evidence download URL if available
+        const latestEvidence = evidencesByKey[key] && evidencesByKey[key].length > 0
+          ? (evidencesByKey[key][0] as Record<string, unknown>)
+          : null;
+
+        const evidenceDownloadUrl = latestEvidence
+          ? `/api/test-groups/${groupId}/cases/${tid}/evidences/${latestEvidence.test_case_no}/${latestEvidence.history_count}/${latestEvidence.evidence_no}?name=${encodeURIComponent(String(latestEvidence.evidence_name || 'evidence'))}`
+          : null;
+
+        // Add evidences and test content to result
+        const resultWithDetails = {
+          ...r,
+          test_case: testContent.test_case || null,
+          expected_value: testContent.expected_value || null,
+          evidence: evidenceDownloadUrl,
+        };
+
+        // Get history for this test case (if any)
+        const testCaseHistory = (historyByTestCase[key] || []) as Record<string, unknown>[];
+
+        // Add test content and evidences to history records
+        const historyWithDetails = testCaseHistory.map((h) => {
+          const historyCount = (h as Record<string, unknown>).history_count as number;
+          // For history items, look for evidence matching this history_count
+          const historyEvidence = evidencesByKey[key]
+            ? evidencesByKey[key].find(
+                (e) => ((e as Record<string, unknown>).history_count as number) === historyCount
+              )
+            : null;
+
+          const historyEvidenceDownloadUrl = historyEvidence
+            ? `/api/test-groups/${groupId}/cases/${tid}/evidences/${historyEvidence.test_case_no}/${historyEvidence.history_count}/${historyEvidence.evidence_no}?name=${encodeURIComponent(String(historyEvidence.evidence_name || 'evidence'))}`
+            : null;
+
+          return {
+            ...h,
+            test_case: testContent.test_case || null,
+            expected_value: testContent.expected_value || null,
+            evidence: historyEvidenceDownloadUrl,
+          };
+        });
+
+        // Determine latest valid result (handling "再実施対象外" fallback)
+        let latestValidResult: Record<string, unknown> = resultWithDetails;
+
+        // If current result is "再実施対象外", try to find a valid result from history
+        const currentJudgment = (r.judgment as string) || '';
+        if (currentJudgment === '再実施対象外' && historyWithDetails.length > 0) {
+          for (let i = 0; i < historyWithDetails.length; i++) {
+            const histResult = historyWithDetails[i] as Record<string, unknown>;
+            const histJudgment = (histResult.judgment as string) || '';
+            if (histJudgment !== '再実施対象外') {
+              latestValidResult = histResult;
+              break;
+            }
+          }
+          // If all history is "再実施対象外", keep the current result (which is also "再実施対象外")
+        }
+
+        // Sort history by history_count ascending (oldest first, newest last for display order)
+        const sortedHistory = [...historyWithDetails].sort((a, b) => {
+          const countA = (a as Record<string, unknown>).history_count as number;
+          const countB = (b as Record<string, unknown>).history_count as number;
+          return countA - countB;
+        });
+
+        const historyCounts = sortedHistory.map((h) => (h as Record<string, unknown>).history_count as number);
+
+        groupedResults[key] = {
+          latestValidResult,
+          allHistory: sortedHistory,
+          historyCounts,
+        };
       }
+    });
 
-      // Get test content for this test case
-      const testContent = (testContentsMap[r.test_case_no as string | number] || {}) as Record<string, unknown>;
-
-      // Add evidences and test content to result
-      const evidenceKey = `${r.test_case_no}_1`; // Use history_count 1 for latest
-      const resultWithDetails = {
-        ...r,
-        test_item: testContent.test_item || null,
-        expected_value: testContent.expected_value || null,
-        evidences: evidencesByKey[evidenceKey] || [],
-      };
-
-      (acc[key] as unknown[]).push(resultWithDetails);
-      return acc;
-    }, {});
-
-    return NextResponse.json({ results: groupedResults });
+    return NextResponse.json({ success: true, results: groupedResults });
   } catch (error) {
-    console.error('GET /api/test-groups/[groupId]/cases/[tid]/results error:', error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('GET /api/test-groups/[groupId]/cases/[tid]/results error:', errorMessage);
 
     if (error instanceof Error && error.message === 'Unauthorized') {
-      return NextResponse.json({ error: '認証が必要です' }, { status: 401 });
+      return NextResponse.json({ success: false, error: '認証が必要です' }, { status: 401 });
     }
 
     return NextResponse.json(
-      { error: 'テスト結果の取得に失敗しました' },
+      { success: false, error: 'テスト結果の取得に失敗しました', details: errorMessage },
       { status: 500 }
     );
   }

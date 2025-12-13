@@ -1,6 +1,6 @@
 import { UserListContainer } from './_components/UserListContainer';
 import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
+import { authOptions } from '@/app/lib/auth-options';
 import { UserRole } from '@/types/database';
 
 export default async function UserListPage() {

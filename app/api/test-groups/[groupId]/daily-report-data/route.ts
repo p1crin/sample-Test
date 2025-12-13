@@ -115,6 +115,7 @@ export async function GET(
 
     const unresolvedDefectsData = await Promise.all(
       unresolved.map(async (u) => {
+        if (!u._max.version) return 0;
         const latestResult = await prisma.tt_test_results.findFirst({
           where: {
             test_group_id: groupId,
@@ -130,22 +131,49 @@ export async function GET(
       })
     );
 
-    const unresolvedDefectsCount = unresolvedDefectsData.reduce((a, b) => a + b, 0);
+    const unresolvedDefectsCount = unresolvedDefectsData.reduce((a: number, b: number) => a + b, 0);
 
-    // Aggregate by execution date
-    const dailyAggregate: Record<string, { ngCount: number; executionDate: Date }> = {};
+    // Aggregate by execution date with cumulative counts
+    interface DailyAggregateData {
+      ngCount: number;
+      executionDate: Date;
+      cumulativeOkCount: number;
+      cumulativeNgCount: number;
+    }
 
+    const dailyAggregate: Record<string, DailyAggregateData> = {};
+    let cumulativeOk = 0;
+    let cumulativeNg = 0;
+
+    // Process results in chronological order to track cumulative counts
     testResults.forEach((result) => {
       const dateKey = result.execution_date ? result.execution_date.toISOString().split('T')[0] : 'unknown';
+
+      // Update cumulative counts
+      if (result.judgment === 'OK' || result.judgment === '参照OK') {
+        cumulativeOk += 1;
+      } else if (result.judgment === 'NG') {
+        cumulativeNg += 1;
+      }
+
+      // Initialize or update daily aggregate
       if (!dailyAggregate[dateKey]) {
         dailyAggregate[dateKey] = {
           ngCount: 0,
           executionDate: result.execution_date || new Date(),
+          cumulativeOkCount: cumulativeOk,
+          cumulativeNgCount: cumulativeNg,
         };
       }
+
+      // Count NG for this day (not cumulative)
       if (result.judgment === 'NG') {
         dailyAggregate[dateKey].ngCount += 1;
       }
+
+      // Update cumulative counts for this date
+      dailyAggregate[dateKey].cumulativeOkCount = cumulativeOk;
+      dailyAggregate[dateKey].cumulativeNgCount = cumulativeNg;
     });
 
     // Calculate dynamic values
@@ -166,14 +194,14 @@ export async function GET(
       const expTerm = Math.exp(-lambda * elapsedDays);
       const predictedRemainingTests = totalTestItems - (totalTestItems * (1 - expTerm) / (1 + 100 * expTerm));
 
-      // テスト残件数(実績) = 総項目数 - OK数
-      const actualRemainingTests = totalTestItems - okCount;
+      // テスト残件数(実績) = 総項目数 - その日までの累計OK数
+      const actualRemainingTests = totalTestItems - data.cumulativeOkCount;
 
       // 不具合摘出数(予測) = 不具合摘出予定数 * (1 - e^(-lambda * 経過日数)) / (1 + 100 * e^(-lambda * 経過日数))
       const predictedDefects = ngPlanCount * (1 - expTerm) / (1 + 100 * expTerm);
 
-      // 不具合摘出数(実績) = 累計のNG数
-      const actualDefects = totalNgCount;
+      // 不具合摘出数(実績) = その日までの累計NG数
+      const actualDefects = data.cumulativeNgCount;
 
       return {
         execution_date: dateKey,
