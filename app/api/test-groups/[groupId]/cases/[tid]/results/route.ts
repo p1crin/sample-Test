@@ -141,7 +141,7 @@ export async function GET(
             : null;
 
           const historyEvidenceDownloadUrl = historyEvidence
-            ? `/api/test-groups/${groupId}/cases/${tid}/evidences/${historyEvidence.test_case_no}/${historyEvidence.history_count}/${historyEvidence.evidence_no}?name=${encodeURIComponent(String(historyEvidence.evidence_name || 'evidence'))}`
+            ? `/api/test-groups/${groupId}/cases/${tid}/evidences/${(historyEvidence as Record<string, unknown>).test_case_no}/${(historyEvidence as Record<string, unknown>).history_count}/${(historyEvidence as Record<string, unknown>).evidence_no}?name=${encodeURIComponent(String((historyEvidence as Record<string, unknown>).evidence_name || 'evidence'))}`
             : null;
 
           return {

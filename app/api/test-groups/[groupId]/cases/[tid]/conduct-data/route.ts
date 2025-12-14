@@ -101,6 +101,7 @@ export async function GET(
         }
 
         historyByCount[hc].push({
+          testCaseNo: testCaseNo,
           testCase: (c.test_case as string) || '',
           expectedValue: (c.expected_value as string) || '',
           result: (hist.result as string) || '',
@@ -125,6 +126,7 @@ export async function GET(
         }
 
         historyByCount[hc].push({
+          testCaseNo: testCaseNo,
           testCase: (c.test_case as string) || '',
           expectedValue: (c.expected_value as string) || '',
           result: (currentResult.result as string) || '',

@@ -2,6 +2,7 @@ import { JudgmentOption } from "@/constants/constants";
 
 // 項目のエンティティ型
 export type TestCaseResultRow = {
+  testCaseNo: number;
   testCase: string;
   expectedValue: string;
   result: string;

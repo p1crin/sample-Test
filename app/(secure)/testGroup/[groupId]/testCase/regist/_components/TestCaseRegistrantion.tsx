@@ -46,7 +46,7 @@ const TestCaseRegistrantion: React.FC = () => {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isTidChecking, setIsTidChecking] = useState(false);
 
-  const handleInputChange = (e: any) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const target = e.target as HTMLInputElement | HTMLTextAreaElement;
     const { name, value } = target;
     setFormData(prev => ({
@@ -60,6 +60,14 @@ const TestCaseRegistrantion: React.FC = () => {
       ...prev,
       [fieldName]: files
     }));
+  };
+
+  // VerticalForm expects a broader onChange type that includes HTMLSelectElement
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement> | { target: { name: string; value: string | string[] } }) => {
+    if (e instanceof Event && 'target' in e) {
+      const target = e.target as HTMLInputElement | HTMLTextAreaElement;
+      handleInputChange(e as React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>);
+    }
   };
 
   const handleTidBlur = async () => {
@@ -100,7 +108,7 @@ const TestCaseRegistrantion: React.FC = () => {
       type: 'text',
       name: 'tid',
       value: formData.tid,
-      onChange: handleInputChange,
+      onChange: handleChange,
       onBlur: handleTidBlur,
       placeholder: '例：1-1-1-1',
       required: true,
@@ -112,7 +120,7 @@ const TestCaseRegistrantion: React.FC = () => {
       type: 'text',
       name: 'firstLayer',
       value: formData.firstLayer,
-      onChange: handleInputChange,
+      onChange: handleChange,
       placeholder: '第1層',
       required: true,
       error: errors.firstLayer
@@ -122,7 +130,7 @@ const TestCaseRegistrantion: React.FC = () => {
       type: 'text',
       name: 'secondLayer',
       value: formData.secondLayer,
-      onChange: handleInputChange,
+      onChange: handleChange,
       placeholder: '第2層',
       required: true,
       error: errors.secondLayer
@@ -132,7 +140,7 @@ const TestCaseRegistrantion: React.FC = () => {
       type: 'text',
       name: 'thirdLayer',
       value: formData.thirdLayer,
-      onChange: handleInputChange,
+      onChange: handleChange,
       placeholder: '第3層',
       required: true,
       error: errors.thirdLayer
@@ -142,7 +150,7 @@ const TestCaseRegistrantion: React.FC = () => {
       type: 'text',
       name: 'fourthLayer',
       value: formData.fourthLayer,
-      onChange: handleInputChange,
+      onChange: handleChange,
       placeholder: '第4層',
       required: true,
       error: errors.fourthLayer
@@ -152,7 +160,7 @@ const TestCaseRegistrantion: React.FC = () => {
       type: 'text',
       name: 'purpose',
       value: formData.purpose,
-      onChange: handleInputChange,
+      onChange: handleChange,
       placeholder: '目的',
       required: true,
       error: errors.purpose
@@ -162,7 +170,7 @@ const TestCaseRegistrantion: React.FC = () => {
       type: 'text',
       name: 'requestId',
       value: formData.requestId,
-      onChange: handleInputChange,
+      onChange: handleChange,
       placeholder: '要求ID',
       required: true,
       error: errors.requestId
@@ -172,7 +180,7 @@ const TestCaseRegistrantion: React.FC = () => {
       type: 'textarea',
       name: 'checkItems',
       value: formData.checkItems,
-      onChange: handleInputChange,
+      onChange: handleChange,
       placeholder: '確認観点',
       required: true,
       error: errors.checkItems
@@ -182,7 +190,7 @@ const TestCaseRegistrantion: React.FC = () => {
       type: 'textarea',
       name: 'testProcedure',
       value: formData.testProcedure,
-      onChange: handleInputChange,
+      onChange: handleChange,
       placeholder: 'テスト手順',
       required: true,
       error: errors.testProcedure

@@ -165,7 +165,7 @@ export async function POST(req: NextRequest) {
       return testCase;
     });
 
-    serverLogger.info('POST /api/test-cases/regist', 'テストケース登録成功', {
+    serverLogger.info('テストケース登録成功', {
       groupId,
       tid,
       userId: user.id,
@@ -177,7 +177,7 @@ export async function POST(req: NextRequest) {
     }, { status: 201 });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : '予期せぬエラーが発生しました';
-    serverLogger.error('POST /api/test-cases/regist', 'テストケース登録失敗', {
+    serverLogger.error('テストケース登録失敗', {
       error: errorMessage,
     });
 
