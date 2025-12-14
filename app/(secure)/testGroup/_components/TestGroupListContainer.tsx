@@ -348,8 +348,9 @@ export function TestGroupListContainer() {
   ];
 
   // 検索フォームのデータが更新されたときに呼び出される
-  const handleFormDataChange = (formData: Record<string, string>) => {
-    setFormValues(formData);
+  const handleFormDataChange = (formData: Record<string, string | string[]>) => {
+    // TestGroupListContainerではstring型のフィールドのみなので、キャストして保存
+    setFormValues(formData as Record<string, string>);
   };
 
   const handleSearch = () => {

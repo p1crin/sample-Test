@@ -8,7 +8,7 @@ import { UserListRow, UserListTableRow } from './types/user-list-row';
 import { UserList } from './UserList';
 import { getDataList, getDataCount, getTagOptions } from '../action';
 import { Button } from '@/components/ui/button';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import ImportButton from '@/components/ui/importButton';
 import ExportButton from '@/components/ui/exportButton';
 import { Modal } from '@/components/ui/modal';
@@ -16,6 +16,9 @@ import SeachForm from '@/components/ui/searchForm';
 import { ROLE_OPTIONS, STATUS_OPTIONS } from '@/constants/constants';
 
 export function UserListContainer() {
+  const router = useRouter();
+  const searchParamsQuery = useSearchParams();
+
   const [tagOptions, setTagOptions] = useState<{ value: string, label: string }[]>([]);
   const [menuItems, setMenuItems] = useState<UserListRow[]>([]);
   const [page, setPage] = useState(1);
@@ -25,8 +28,8 @@ export function UserListContainer() {
     direction: 'asc' | 'desc';
   } | null>(null);
   const [apiError, setApiError] = useState<Error | null>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
   const pageSize = 10;
-  const router = useRouter();
 
   // APIエラーがある場合はスロー（error.tsx がキャッチする）
   if (apiError) {
@@ -36,38 +39,147 @@ export function UserListContainer() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<UserListTableRow | null>(null);
 
+  // フォーム入力値（リアルタイムで変更）
+  const [formValues, setFormValues] = useState<Record<string, string | string[]>>({
+    email: '',
+    name: '',
+    department: '',
+    company: '',
+    role: '',
+    tag: [],
+    status: '',
+  });
+
+  // 検索パラメータ（検索ボタン押下時に更新）
+  const [searchParams, setSearchParams] = useState<Record<string, string | string[]>>({
+    email: '',
+    name: '',
+    department: '',
+    company: '',
+    role: '',
+    tag: [],
+    status: '',
+  });
+
+  // 検索パラメータを含むクエリ文字列を構築（API用）
+  const buildQueryString = (params: Record<string, string | string[]>, pageNum: number = 1) => {
+    const queryParams = new URLSearchParams();
+    queryParams.append('page', String(pageNum));
+    queryParams.append('limit', String(pageSize));
+
+    // 空でない検索パラメータのみ追加
+    Object.entries(params).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        // タグなど配列の場合は複数の値を追加
+        value.forEach(v => {
+          if (v.trim()) {
+            queryParams.append(key, v);
+          }
+        });
+      } else if (typeof value === 'string' && value.trim()) {
+        queryParams.append(key, value);
+      }
+    });
+
+    return queryParams.toString();
+  };
+
+  // URLパラメータを更新する関数（limitは含めない）
+  const updateUrlParams = (newSearchParams: Record<string, string | string[]>, pageNum: number = 1) => {
+    const queryParams = new URLSearchParams();
+    queryParams.append('page', String(pageNum));
+
+    // 空でない検索パラメータのみ追加
+    Object.entries(newSearchParams).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        value.forEach(v => {
+          if (v.trim()) {
+            queryParams.append(key, v);
+          }
+        });
+      } else if (typeof value === 'string' && value.trim()) {
+        queryParams.append(key, value);
+      }
+    });
+
+    const queryString = queryParams.toString();
+    router.push(`/user?${queryString}`);
+    clientLogger.info('UserListContainer', 'URL更新', { pageNum, searchParams: newSearchParams });
+  };
+
+  // URLパラメータをコンポーネント状態に同期する
   useEffect(() => {
+    const params: Record<string, string | string[]> = {
+      email: searchParamsQuery.get('email') || '',
+      name: searchParamsQuery.get('name') || '',
+      department: searchParamsQuery.get('department') || '',
+      company: searchParamsQuery.get('company') || '',
+      role: searchParamsQuery.get('role') || '',
+      tag: searchParamsQuery.getAll('tag') || [],
+      status: searchParamsQuery.get('status') || '',
+    };
+
+    const pageNum = parseInt(searchParamsQuery.get('page') || '1', 10);
+    const hasPageInUrl = searchParamsQuery.get('page') !== null;
+
+    setFormValues(params);
+    setSearchParams(params);
+    setPage(pageNum);
+    setIsInitialized(true);
+
+    // URLにpageパラメータがない場合は、URLを更新（初期表示やサイドバーからの遷移時）
+    if (!hasPageInUrl) {
+      updateUrlParams(params, pageNum);
+    }
+
+    clientLogger.info('UserListContainer', 'URLパラメータ同期完了', { params, pageNum, hasPageInUrl });
+  }, [searchParamsQuery]);
+
+  useEffect(() => {
+    // URLパラメータ同期が完了するまで待つ
+    if (!isInitialized) {
+      return;
+    }
+
     const getDataCountFunc = async () => {
       try {
-        const result = await getDataCount();
+        clientLogger.info('UserListContainer', 'ユーザー数取得開始', { searchParams, isInitialized });
+        const result = await getDataCount(searchParams);
         if (!result.success || !result.data) {
           throw new Error('ユーザー数の取得に失敗しました');
         }
         setPageCount(result.success && result.data ? Math.ceil(result.data / pageSize) : 0);
+        clientLogger.info('UserListContainer', 'ユーザー数取得成功', { count: result.data, searchParams });
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         clientLogger.error('UserListContainer', 'ユーザー数取得失敗', {
-          page,
           error: error.message,
+          searchParams,
         });
         setApiError(error);
       }
     };
     getDataCountFunc();
-  }, []);
+  }, [searchParams, pageSize, isInitialized]);
 
   useEffect(() => {
+    // URLパラメータ同期が完了するまで待つ
+    if (!isInitialized) {
+      return;
+    }
+
     let ignore = false;
-    clientLogger.info('UserListContainer', 'データ取得開始', { page });
+    clientLogger.info('UserListContainer', 'データ取得開始', { page, searchParams, isInitialized });
 
     const getDataListFunc = async () => {
       try {
-        const userData = await getDataList({ page: page });
+        clientLogger.info('UserListContainer', 'ユーザーリスト取得開始', { page, searchParams });
+        const userData = await getDataList({ page, searchParams });
         if (!userData.success || !userData.data) {
           throw new Error('データの取得に失敗しました' + ` (error: ${userData.error})`);
         }
         if (!ignore) setMenuItems(userData.data);
-        clientLogger.info('UserListContainer', 'データ取得成功', {
+        clientLogger.info('UserListContainer', 'ユーザーリスト取得成功', {
           page,
           count: userData.data?.length,
         });
@@ -85,7 +197,7 @@ export function UserListContainer() {
     return () => {
       ignore = true;
     };
-  }, [page]);
+  }, [page, pageSize, searchParams, isInitialized]);
 
   useEffect(() => {
     async function fetchTagOptions() {
@@ -175,7 +287,7 @@ export function UserListContainer() {
       label: 'ID (メールアドレス)',
       type: 'email',
       name: 'email',
-      value: '',
+      value: formValues.email || '',
       onChange: () => { },
       placeholder: 'ID (メールアドレス)'
     },
@@ -183,7 +295,7 @@ export function UserListContainer() {
       label: '氏名',
       type: 'text',
       name: 'name',
-      value: '',
+      value: formValues.name || '',
       onChange: () => { },
       placeholder: '氏名'
     },
@@ -191,7 +303,7 @@ export function UserListContainer() {
       label: '部署',
       type: 'text',
       name: 'department',
-      value: '',
+      value: formValues.department || '',
       onChange: () => { },
       placeholder: '部署'
     },
@@ -199,7 +311,7 @@ export function UserListContainer() {
       label: '会社名',
       type: 'text',
       name: 'company',
-      value: '',
+      value: formValues.company || '',
       onChange: () => { },
       placeholder: '会社名'
     },
@@ -207,7 +319,7 @@ export function UserListContainer() {
       label: '権限',
       type: 'select',
       name: 'role',
-      value: '',
+      value: formValues.role || '',
       onChange: () => { },
       placeholder: '権限',
       options: Object.values(ROLE_OPTIONS).map(role => ({
@@ -219,7 +331,7 @@ export function UserListContainer() {
       label: 'タグ',
       type: 'tag',
       name: 'tag',
-      value: '',
+      value: formValues.tag || [],
       onChange: () => { },
       placeholder: 'タグ',
       options: tagOptions
@@ -228,7 +340,7 @@ export function UserListContainer() {
       label: 'ステータス',
       type: 'select',
       name: 'status',
-      value: '',
+      value: formValues.status || '',
       onChange: () => { },
       placeholder: 'ステータス',
       options: Object.values(STATUS_OPTIONS).map(role => ({
@@ -238,14 +350,28 @@ export function UserListContainer() {
     },
   ];
 
+  // 検索フォームのデータが更新されたときに呼び出される
+  const handleFormDataChange = (formData: Record<string, string | string[]>) => {
+    setFormValues(formData);
+  };
+
   const handleSearch = () => {
-    // 検索処理をここに記述
-    console.log('検索クエリ:', FormData);
+    // 検索ボタン押下時、フォーム値を検索パラメータに設定してURLを更新
+    setSearchParams(formValues);
+    setPage(1); // ページを1にリセット
+    updateUrlParams(formValues, 1);
+    clientLogger.info('UserListContainer', '検索実行', { formValues });
+  };
+
+  // ページ変更時にURLも更新
+  const handlePageChange = (pageNum: number) => {
+    setPage(pageNum);
+    updateUrlParams(searchParams, pageNum);
   };
 
   return (
     <div>
-      <SeachForm fields={fields} onClick={handleSearch} />
+      <SeachForm fields={fields} values={formValues} onClick={handleSearch} onFormDataChange={handleFormDataChange} />
       <div className="text-right space-x-2 pb-2">
         <Button variant="default">
           <Link href="/user/regist">
@@ -262,7 +388,7 @@ export function UserListContainer() {
         page={page}
         pageCount={pageCount}
         onSort={handleSort}
-        onPageChange={setPage}
+        onPageChange={handlePageChange}
         renderActions={renderActions}
       />
       <Modal open={isModalOpen} onClose={() => setIsModalOpen(false)}>

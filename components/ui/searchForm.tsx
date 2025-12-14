@@ -10,11 +10,11 @@ interface SearchFormProps {
   /** フォームフィールドのプロパティの配列 */
   fields: FormFieldProps[];
   /** フォームの初期値 (オプション) */
-  values?: Record<string, string>;
+  values?: Record<string, string | string[]>;
   /** 検索ボタンがクリックされたときに呼び出される関数 */
   onClick: () => void;
   /** 検索フォームの値が変更されたときに呼び出される関数 */
-  onFormDataChange?: (formData: Record<string, string>) => void;
+  onFormDataChange?: (formData: Record<string, string | string[]>) => void;
 }
 
 const SEARCH_FORM_STYLE = "flex";
@@ -27,7 +27,7 @@ const SEARCH_BUTTON_STYLE = "text-right pb-2 ml-4";
  * @returns {JSX.Element} 検索フォームのJSX要素
  */
 export default function SeachForm({ fields, values, onClick, onFormDataChange }: SearchFormProps) {
-  const [formData, setFormData] = React.useState<Record<string, string>>(
+  const [formData, setFormData] = React.useState<Record<string, string | string[]>>(
     values || fields.reduce((acc, field) => ({ ...acc, [field.name]: field.value ?? '' }), {})
   );
 
@@ -46,10 +46,9 @@ export default function SeachForm({ fields, values, onClick, onFormDataChange }:
   const handleInputChange = (field: FormFieldProps, e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement> | { target: { name: string; value: string | string[] } }) => {
     const target = e.target as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | { name: string; value: string | string[] };
     const { name, value } = target;
-    const stringValue = typeof value === 'string' ? value : Array.isArray(value) ? value.join(',') : '';
     const updatedFormData = {
       ...formData,
-      [name]: stringValue
+      [name]: value
     };
     setFormData(updatedFormData);
     // フォーム値が変更されたときに親コンポーネントに通知
@@ -65,7 +64,7 @@ export default function SeachForm({ fields, values, onClick, onFormDataChange }:
           <FormField
             key={index}
             {...field}
-            value={formData[field.name] || ''}
+            value={formData[field.name] !== undefined ? formData[field.name] : (Array.isArray(field.value) ? [] : '')}
             onChange={(e) => handleInputChange(field, e)} />
         ))}
       </div>
