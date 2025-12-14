@@ -216,7 +216,7 @@ const TestCaseRegistrantion: React.FC = () => {
     // バリデーション
     const validationData = {
       ...formData,
-      testContents: testContents.filter(tc => tc.testCase.trim() !== '' && tc.expectedValue.trim() !== ''),
+      testContents,
     };
 
     const validationResult = testCaseRegistSchema.safeParse(validationData);

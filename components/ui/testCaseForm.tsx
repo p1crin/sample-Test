@@ -153,34 +153,34 @@ const TestCaseForm: React.FC<TestCaseFormProps> = ({ value, onChange, errors = {
         const expectedValueError = errors[`testContents[${index}].expectedValue`];
 
         return (
-          <div key={testCase.id} className={`w-full justify-center mb-2`}>
-            <div className={`flex items-center mb-2 w-full justify-center`}>
+          <div key={testCase.id} className="w-full mb-6">
+            <div className="flex items-start gap-2 w-full justify-center">
               <input
                 type="checkbox"
                 checked={testCase.selected}
                 onChange={(e) => handleChange(testCase.id, 'selected', e.target.checked)}
-                className="accent-[#FF5611] w-1/18"
+                className="accent-[#FF5611] w-1/18 mt-2.5 flex-shrink-0"
               />
-              <span className="w-1/18 text-center">{index + 1}</span>
-              <div className="flex flex-col w-2/3 mr-2">
+              <span className="w-1/18 text-center mt-2.5 flex-shrink-0">{index + 1}</span>
+              <div className="flex flex-col flex-1">
                 <input
                   type="text"
                   placeholder="テストケース"
                   value={testCase.testCase}
                   onChange={(e) => handleChange(testCase.id, 'testCase', e.target.value)}
-                  className={`${formFieldStyle} ${testCaseError ? 'border-red-500' : ''}`}
+                  className={`h-10 rounded-md border bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${testCaseError ? 'border-red-500' : 'border-input'}`}
                 />
                 {testCaseError && (
                   <span className="text-red-500 text-sm mt-1">{testCaseError}</span>
                 )}
               </div>
-              <div className="flex flex-col w-2/3">
+              <div className="flex flex-col flex-1">
                 <input
                   type="text"
                   placeholder="期待値"
                   value={testCase.expectedValue}
                   onChange={(e) => handleChange(testCase.id, 'expectedValue', e.target.value)}
-                  className={`${formFieldStyle} ${expectedValueError ? 'border-red-500' : ''}`}
+                  className={`h-10 rounded-md border bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${expectedValueError ? 'border-red-500' : 'border-input'}`}
                 />
                 {expectedValueError && (
                   <span className="text-red-500 text-sm mt-1">{expectedValueError}</span>
@@ -189,7 +189,7 @@ const TestCaseForm: React.FC<TestCaseFormProps> = ({ value, onChange, errors = {
               <select
                 value={testCase.excluded ? '対象外' : '対象'}
                 onChange={(e) => handleChange(testCase.id, 'excluded', e.target.value === '対象外')}
-                className="accent-[#FF5611] w-1/12 group flex h-10 select-none items-center justify-center rounded-lg border border-zinc-100 bg-white leading-8 shadow-[0_-1px_0_0px_#d4d4d8_inset,0_0_0_1px_#f4f4f5_inset,0_0.5px_0_1.5px_#fff_inset] hover:bg-zinc-50 hover:via-zinc-900 hover:to-zinc-800 active:shadow-[-1px_0px_1px_0px_#e4e4e7_inset,1px_0px_1px_0px_#e4e4e7_inset,0px_0.125rem_1px_0px_#d4d4d8_inset]"
+                className="accent-[#FF5611] w-1/12 h-10 select-none rounded-lg border border-zinc-100 bg-white shadow-[0_-1px_0_0px_#d4d4d8_inset,0_0_0_1px_#f4f4f5_inset,0_0.5px_0_1.5px_#fff_inset] hover:bg-zinc-50 hover:via-zinc-900 hover:to-zinc-800 active:shadow-[-1px_0px_1px_0px_#e4e4e7_inset,1px_0px_1px_0px_#e4e4e7_inset,0px_0.125rem_1px_0px_#d4d4d8_inset] flex-shrink-0"
               >
                 <option value="対象">対象</option>
                 <option value="対象外">対象外</option>
@@ -197,7 +197,7 @@ const TestCaseForm: React.FC<TestCaseFormProps> = ({ value, onChange, errors = {
               <button
                 type="button"
                 onClick={() => handleRemoveRow(testCase.id)}
-                className="group flex h-10 w-1/36 select-none items-center justify-center rounded-lg border border-zinc-100 bg-white leading-8 text-red-500 shadow-[0_-1px_0_0px_#d4d4d8_inset,0_0_0_1px_#f4f4f5_inset,0_0.5px_0_1.5px_#fff_inset] hover:bg-zinc-50 hover:via-zinc-900 hover:to-zinc-800 active:shadow-[-1px_0px_1px_0px_#e4e4e7_inset,1px_0px_1px_0px_#e4e4e7_inset,0px_0.125rem_1px_0px_#d4d4d8_inset]"
+                className="group flex h-10 w-1/36 select-none items-center justify-center rounded-lg border border-zinc-100 bg-white leading-8 text-red-500 shadow-[0_-1px_0_0px_#d4d4d8_inset,0_0_0_1px_#f4f4f5_inset,0_0.5px_0_1.5px_#fff_inset] hover:bg-zinc-50 hover:via-zinc-900 hover:to-zinc-800 active:shadow-[-1px_0px_1px_0px_#e4e4e7_inset,1px_0px_1px_0px_#e4e4e7_inset,0px_0.125rem_1px_0px_#d4d4d8_inset] flex-shrink-0"
               >
                 ✕
               </button>
