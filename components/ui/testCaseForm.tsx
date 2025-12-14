@@ -12,11 +12,13 @@ type TestCase = {
 
 type TestCaseFormProps = {
   value?: { testCase: string; expectedValue: string; excluded: boolean }[];
+  onChange?: (testCases: { testCase: string; expectedValue: string; excluded: boolean }[]) => void;
+  errors?: Record<string, string>;
 };
 
 const formFieldStyle = "flex h-10 w-2/3 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
 
-const TestCaseForm: React.FC<TestCaseFormProps> = ({ value }) => {
+const TestCaseForm: React.FC<TestCaseFormProps> = ({ value, onChange, errors = {} }) => {
   const initialTestCases = value || [];
   const [testCases, setTestCases] = useState<TestCase[]>(initialTestCases.map((testCase, index) => ({
     id: Date.now() + index,
@@ -41,31 +43,49 @@ const TestCaseForm: React.FC<TestCaseFormProps> = ({ value }) => {
     }
   }, [value]);
 
+  // 親コンポーネントに変更を通知するヘルパー関数
+  const notifyParent = (newTestCases: TestCase[]) => {
+    if (onChange && isFormVisible) {
+      const dataToReturn = newTestCases.map(tc => ({
+        testCase: tc.testCase,
+        expectedValue: tc.expectedValue,
+        excluded: tc.excluded,
+      }));
+      onChange(dataToReturn);
+    }
+  };
+
   const handleAddRow = () => {
-    setTestCases([
+    const newTestCases = [
       ...testCases,
       { id: Date.now(), testCase: '', expectedValue: '', excluded: false, selected: true },
-    ]);
+    ];
+    setTestCases(newTestCases);
+    notifyParent(newTestCases);
     setTimeout(() => {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, 100);
   };
 
   const handleRemoveRow = (id: number) => {
-    setTestCases(testCases.filter((testCase) => testCase.id !== id));
+    const newTestCases = testCases.filter((testCase) => testCase.id !== id);
+    setTestCases(newTestCases);
+    notifyParent(newTestCases);
   };
 
   const handleChange = (id: number, field: string, value: string | boolean) => {
-    setTestCases(
-      testCases.map((testCase) =>
-        testCase.id === id ? { ...testCase, [field]: value } : testCase
-      )
+    const newTestCases = testCases.map((testCase) =>
+      testCase.id === id ? { ...testCase, [field]: value } : testCase
     );
+    setTestCases(newTestCases);
+    notifyParent(newTestCases);
   };
 
   const handleAllCheckedChange = (checked: boolean) => {
     setAllChecked(checked);
-    setTestCases(testCases.map(testCase => ({ ...testCase, selected: checked })));
+    const newTestCases = testCases.map(testCase => ({ ...testCase, selected: checked }));
+    setTestCases(newTestCases);
+    notifyParent(newTestCases);
   };
 
   const handleBulkInput = (field: 'testCase' | 'expectedValue' | 'excluded') => {
@@ -75,12 +95,15 @@ const TestCaseForm: React.FC<TestCaseFormProps> = ({ value }) => {
   };
 
   const handleBulkSubmit = () => {
+    let newTestCases: TestCase[];
     if (bulkField === 'excluded') {
       const isExcluded = bulkValue === '対象外';
-      setTestCases(testCases.map(testCase => testCase.selected ? { ...testCase, excluded: isExcluded } : testCase));
+      newTestCases = testCases.map(testCase => testCase.selected ? { ...testCase, excluded: isExcluded } : testCase);
     } else {
-      setTestCases(testCases.map(testCase => testCase.selected ? { ...testCase, [bulkField]: bulkValue } : testCase));
+      newTestCases = testCases.map(testCase => testCase.selected ? { ...testCase, [bulkField]: bulkValue } : testCase);
     }
+    setTestCases(newTestCases);
+    notifyParent(newTestCases);
     setIsDialogOpen(false);
   };
 
@@ -125,46 +148,63 @@ const TestCaseForm: React.FC<TestCaseFormProps> = ({ value }) => {
         </span>
         <span className="w-1/36 text-center"></span>
       </div>
-      {isFormVisible && testCases.map((testCase, index) => (
-        <div key={testCase.id} className={`flex items-center mb-4 w-full justify-center`}>
-          <input
-            type="checkbox"
-            checked={testCase.selected}
-            onChange={(e) => handleChange(testCase.id, 'selected', e.target.checked)}
-            className="accent-[#FF5611] w-1/18"
-          />
-          <span className="w-1/18 text-center">{index + 1}</span>
-          <input
-            type="text"
-            placeholder="テストケース"
-            value={testCase.testCase}
-            onChange={(e) => handleChange(testCase.id, 'testCase', e.target.value)}
-            className={`${formFieldStyle} mr-2`}
-          />
-          <input
-            type="text"
-            placeholder="期待値"
-            value={testCase.expectedValue}
-            onChange={(e) => handleChange(testCase.id, 'expectedValue', e.target.value)}
-            className={`${formFieldStyle}`}
-          />
-          <select
-            value={testCase.excluded ? '対象外' : '対象'}
-            onChange={(e) => handleChange(testCase.id, 'excluded', e.target.value === '対象外')}
-            className="accent-[#FF5611] w-1/12 group flex h-10 select-none items-center justify-center rounded-lg border border-zinc-100 bg-white leading-8 shadow-[0_-1px_0_0px_#d4d4d8_inset,0_0_0_1px_#f4f4f5_inset,0_0.5px_0_1.5px_#fff_inset] hover:bg-zinc-50 hover:via-zinc-900 hover:to-zinc-800 active:shadow-[-1px_0px_1px_0px_#e4e4e7_inset,1px_0px_1px_0px_#e4e4e7_inset,0px_0.125rem_1px_0px_#d4d4d8_inset]"
-          >
-            <option value="対象">対象</option>
-            <option value="対象外">対象外</option>
-          </select>
-          <button
-            type="button"
-            onClick={() => handleRemoveRow(testCase.id)}
-            className="group flex h-10 w-1/36 select-none items-center justify-center rounded-lg border border-zinc-100 bg-white leading-8 text-red-500 shadow-[0_-1px_0_0px_#d4d4d8_inset,0_0_0_1px_#f4f4f5_inset,0_0.5px_0_1.5px_#fff_inset] hover:bg-zinc-50 hover:via-zinc-900 hover:to-zinc-800 active:shadow-[-1px_0px_1px_0px_#e4e4e7_inset,1px_0px_1px_0px_#e4e4e7_inset,0px_0.125rem_1px_0px_#d4d4d8_inset]"
-          >
-            ✕
-          </button>
-        </div>
-      ))}
+      {isFormVisible && testCases.map((testCase, index) => {
+        const testCaseError = errors[`testContents[${index}].testCase`];
+        const expectedValueError = errors[`testContents[${index}].expectedValue`];
+
+        return (
+          <div key={testCase.id} className={`w-full justify-center mb-2`}>
+            <div className={`flex items-center mb-2 w-full justify-center`}>
+              <input
+                type="checkbox"
+                checked={testCase.selected}
+                onChange={(e) => handleChange(testCase.id, 'selected', e.target.checked)}
+                className="accent-[#FF5611] w-1/18"
+              />
+              <span className="w-1/18 text-center">{index + 1}</span>
+              <div className="flex flex-col w-2/3 mr-2">
+                <input
+                  type="text"
+                  placeholder="テストケース"
+                  value={testCase.testCase}
+                  onChange={(e) => handleChange(testCase.id, 'testCase', e.target.value)}
+                  className={`${formFieldStyle} ${testCaseError ? 'border-red-500' : ''}`}
+                />
+                {testCaseError && (
+                  <span className="text-red-500 text-sm mt-1">{testCaseError}</span>
+                )}
+              </div>
+              <div className="flex flex-col w-2/3">
+                <input
+                  type="text"
+                  placeholder="期待値"
+                  value={testCase.expectedValue}
+                  onChange={(e) => handleChange(testCase.id, 'expectedValue', e.target.value)}
+                  className={`${formFieldStyle} ${expectedValueError ? 'border-red-500' : ''}`}
+                />
+                {expectedValueError && (
+                  <span className="text-red-500 text-sm mt-1">{expectedValueError}</span>
+                )}
+              </div>
+              <select
+                value={testCase.excluded ? '対象外' : '対象'}
+                onChange={(e) => handleChange(testCase.id, 'excluded', e.target.value === '対象外')}
+                className="accent-[#FF5611] w-1/12 group flex h-10 select-none items-center justify-center rounded-lg border border-zinc-100 bg-white leading-8 shadow-[0_-1px_0_0px_#d4d4d8_inset,0_0_0_1px_#f4f4f5_inset,0_0.5px_0_1.5px_#fff_inset] hover:bg-zinc-50 hover:via-zinc-900 hover:to-zinc-800 active:shadow-[-1px_0px_1px_0px_#e4e4e7_inset,1px_0px_1px_0px_#e4e4e7_inset,0px_0.125rem_1px_0px_#d4d4d8_inset]"
+              >
+                <option value="対象">対象</option>
+                <option value="対象外">対象外</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => handleRemoveRow(testCase.id)}
+                className="group flex h-10 w-1/36 select-none items-center justify-center rounded-lg border border-zinc-100 bg-white leading-8 text-red-500 shadow-[0_-1px_0_0px_#d4d4d8_inset,0_0_0_1px_#f4f4f5_inset,0_0.5px_0_1.5px_#fff_inset] hover:bg-zinc-50 hover:via-zinc-900 hover:to-zinc-800 active:shadow-[-1px_0px_1px_0px_#e4e4e7_inset,1px_0px_1px_0px_#e4e4e7_inset,0px_0.125rem_1px_0px_#d4d4d8_inset]"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        );
+      })}
       <Button
         type="button"
         onClick={handleShowFormAndAddRow}

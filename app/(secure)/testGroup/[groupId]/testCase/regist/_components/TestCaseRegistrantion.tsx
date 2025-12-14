@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { VerticalForm } from '@/components/ui/verticalForm';
 import FileUploadField from '@/components/ui/FileUploadField';
@@ -46,14 +46,15 @@ const TestCaseRegistrantion: React.FC = () => {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isTidChecking, setIsTidChecking] = useState(false);
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    const target = e.target as HTMLInputElement | HTMLTextAreaElement;
-    const { name, value } = target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
-  };
+  // testCaseForm に渡す value を memoize して、無駄な re-render を防ぐ
+  const testCaseFormValue = useMemo(() =>
+    testContents.map(tc => ({
+      testCase: tc.testCase,
+      expectedValue: tc.expectedValue,
+      excluded: tc.excluded,
+    })),
+    [testContents]
+  );
 
   const handleFileChange = (fieldName: string, files: FileInfo[]) => {
     setFormData(prev => ({
@@ -62,11 +63,25 @@ const TestCaseRegistrantion: React.FC = () => {
     }));
   };
 
+  const handleTestContentsChange = (contents: { testCase: string; expectedValue: string; excluded: boolean }[]) => {
+    setTestContents(contents.map((tc, index) => ({
+      id: Date.now() + index,
+      testCase: tc.testCase,
+      expectedValue: tc.expectedValue,
+      excluded: tc.excluded,
+      selected: true,
+    })));
+  };
+
   // VerticalForm expects a broader onChange type that includes HTMLSelectElement
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement> | { target: { name: string; value: string | string[] } }) => {
-    if (e instanceof Event && 'target' in e) {
+    if ('target' in e && 'name' in e.target) {
       const target = e.target as HTMLInputElement | HTMLTextAreaElement;
-      handleInputChange(e as React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>);
+      const { name, value } = target;
+      setFormData(prev => ({
+        ...prev,
+        [name]: value
+      }));
     }
   };
 
@@ -201,15 +216,22 @@ const TestCaseRegistrantion: React.FC = () => {
     // バリデーション
     const validationData = {
       ...formData,
-      testContents: testContents.filter(tc => tc.testCase || tc.expectedValue),
+      testContents: testContents.filter(tc => tc.testCase.trim() !== '' && tc.expectedValue.trim() !== ''),
     };
 
     const validationResult = testCaseRegistSchema.safeParse(validationData);
     if (!validationResult.success) {
       const newErrors: Record<string, string> = {};
       validationResult.error.errors.forEach(err => {
-        const fieldPath = err.path[0] as string;
-        newErrors[fieldPath] = err.message;
+        // testContents[index].fieldName の形式でエラーキーを作成
+        if (err.path[0] === 'testContents' && typeof err.path[1] === 'number') {
+          const rowIndex = err.path[1];
+          const fieldName = err.path[2] as string;
+          newErrors[`testContents[${rowIndex}].${fieldName}`] = err.message;
+        } else {
+          const fieldPath = err.path[0] as string;
+          newErrors[fieldPath] = err.message;
+        }
       });
       setErrors(newErrors);
       return;
@@ -317,11 +339,7 @@ const TestCaseRegistrantion: React.FC = () => {
       <div className="mb-6">
         <h2 className="text-lg font-bold mb-4">テスト内容</h2>
         <div className="bg-gray-50 p-4 rounded-md flex justify-center">
-          <TestCaseForm value={testContents.map(tc => ({
-            testCase: tc.testCase,
-            expectedValue: tc.expectedValue,
-            excluded: tc.excluded,
-          }))} />
+          <TestCaseForm value={testCaseFormValue} onChange={handleTestContentsChange} errors={errors} />
         </div>
         {errors.testContents && (
           <div className="text-red-500 text-sm mt-2">{errors.testContents}</div>

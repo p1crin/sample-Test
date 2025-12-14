@@ -145,20 +145,25 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // tt_test_contents に登録
+      // tt_test_contents に登録（テストケースと期待値が両方入力されているもののみ）
       if (testContents && testContents.length > 0) {
+        let testCaseNo = 1;
         for (let i = 0; i < testContents.length; i++) {
           const tc = testContents[i];
-          await tx.tt_test_contents.create({
-            data: {
-              test_group_id: groupId,
-              tid,
-              test_case_no: i + 1,
-              test_case: tc.testCase,
-              expected_value: tc.expectedValue,
-              is_target: !tc.excluded,
-            },
-          });
+          // テストケースと期待値が両方入力されている場合のみ登録
+          if (tc.testCase && tc.testCase.trim() !== '' && tc.expectedValue && tc.expectedValue.trim() !== '') {
+            await tx.tt_test_contents.create({
+              data: {
+                test_group_id: groupId,
+                tid,
+                test_case_no: testCaseNo,
+                test_case: tc.testCase,
+                expected_value: tc.expectedValue,
+                is_target: !tc.excluded,
+              },
+            });
+            testCaseNo++;
+          }
         }
       }
 

@@ -178,7 +178,13 @@ export async function PUT(
       );
     }
 
-    if (contents.some((tc: unknown) => !(tc as Record<string, unknown>).test_case)) {
+    // Check that all contents have both test_case and expected_value
+    if (contents.some((tc: unknown) => {
+      const record = tc as Record<string, unknown>;
+      const testCase = String(record.test_case || '').trim();
+      const expectedValue = String(record.expected_value || '').trim();
+      return testCase === '' || expectedValue === '';
+    })) {
       statusCode = 400;
       logAPIEndpoint({
         method: 'PUT',
@@ -186,10 +192,10 @@ export async function PUT(
         userId: user.id,
         statusCode,
         executionTime: apiTimer.elapsed(),
-        error: 'Validation error: test_case required in all contents',
+        error: 'Validation error: test_case and expected_value required in all contents',
       });
       return NextResponse.json(
-        { error: 'すべてのテストケース内容を入力してください' },
+        { error: 'テストケースと期待値の両方を入力してください' },
         { status: 400 }
       );
     }

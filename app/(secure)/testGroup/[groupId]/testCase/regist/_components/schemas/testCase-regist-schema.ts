@@ -39,20 +39,13 @@ export const testCaseRegistSchema = z.object({
     .min(1, { message: 'データフローは必須項目です' }),
   testContents: z.array(z.object({
     id: z.number(),
-    testCase: z.string(),
-    expectedValue: z.string(),
+    testCase: z.string()
+      .refine(tc => tc.trim() !== '', { message: 'テストケースは必須です' }),
+    expectedValue: z.string()
+      .refine(ev => ev.trim() !== '', { message: '期待値は必須です' }),
     excluded: z.boolean(),
     selected: z.boolean(),
-  })).optional(),
-}).refine((data) => {
-  // テスト内容が1件以上表示されている場合、全て記入されているか確認
-  if (data.testContents && data.testContents.length > 0) {
-    return data.testContents.every(tc => tc.testCase.trim() !== '' && tc.expectedValue.trim() !== '');
-  }
-  return true;
-}, {
-  message: 'テスト内容が表示されている場合、テストケースと期待値の両方を記入してください',
-  path: ['testContents'],
+  })).min(1, { message: 'テスト内容は最低1件必要です' }),
 });
 
 export type TestCaseRegistFormData = z.infer<typeof testCaseRegistSchema>;
