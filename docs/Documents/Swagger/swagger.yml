@@ -858,28 +858,19 @@ paths:
           schema:
             type: string
           description: 会社名で検索
-        - name: user_role
-          in: query
-          schema:
-            type: integer
-          description: 権限で検索
-        - name: status
-          in: query
-          schema:
-            type: boolean
-          description: ステータスで検索
-        - name: department
+        - name: role
           in: query
           schema:
             type: string
-          description: 部署で検索
-        - name: tag_name
+            enum: ["システム管理者", "テスト管理者", "一般"]
+          description: 権限で検索
+        - name: tag
           in: query
           schema:
             type: array
             items:
               type: string
-            description: タグ名で検索
+          description: タグで検索（複数指定可能）
         - name: page
           in: query
           schema:
@@ -1998,14 +1989,22 @@ paths:
         "403":
           $ref: "#/components/responses/Forbidden"
 
-  /test-groups/{groupId}/report-graph:
+  /test-groups/{groupId}/daily-report-data:
     get:
       tags:
         - Reports
       summary: 日次レポートグラフデータ取得
-      description: 日次のレポートグラフデータを取得
+      description: |
+        日次のレポートグラフデータを取得
+        テスト進捗の予測値と実績値、NG数の推移などを計算して返却
       security:
         - bearerAuth: []
+      parameters:
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: integer
       responses:
         "200":
           description: 成功
@@ -2082,7 +2081,7 @@ paths:
       description: |
         S3に保存されたファイルの署名付きダウンロードURLを取得
       security:
-        - cookieAuth: []
+        - bearerAuth: []
       parameters:
         - name: file_path
           in: query
