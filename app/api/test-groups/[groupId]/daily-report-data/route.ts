@@ -5,10 +5,27 @@ import { QueryTimer, logAPIEndpoint } from '@/utils/database-logger';
 
 // 型定義
 interface DailyAggregateData {
-  ngCount: number; // その日のNG数（Daily）
-  cumulativeOkCount: number; // その日時点の累計OK数（実績）
-  cumulativeNgCount: number; // その日時点の累計NG数（実績）
-  unresolvedNgCount: number; // その日時点の未解決不具合数（日毎の最新試験結果がNGとなっている件数）
+  dailyOkCount: number; // その日消化件数（実績）
+  dailyDefectCount: number; // その日不具合摘出件数（実績）
+  dailyResolvedCount: number; // その日解決不具合数（実績）
+  cumulativeOkCount: number; // その日時点の累計OK数
+  cumulativeDefectCount: number; // その日時点の累計NG数（不具合摘出件数累計）
+  cumulativeResolvedCount: number; // その日時点の累計解決件数
+}
+
+interface DailyOkCountRow {
+  execution_date: string;
+  daily_ok_count: number;
+}
+
+interface DailyDefectRow {
+  first_ng_date: string;
+  daily_new_defects: number;
+}
+
+interface DailyResolvedRow {
+  resolved_date: string;
+  daily_resolved_count: number;
 }
 
 // JSTの日付文字列を生成するヘルパー関数
@@ -70,28 +87,7 @@ export async function GET(
       );
     }
 
-    // --- 1. 履歴データ（グラフ描画用）の取得 ---
-    // ★tt_test_results_historyから全履歴を取得する
-    const historicalActivities = await prisma.tt_test_results_history.findMany({
-      where: {
-        test_group_id: groupId,
-        is_deleted: false,
-      },
-      select: {
-        execution_date: true,
-        judgment: true,
-        tid: true,
-        test_case_no: true,
-        version: true,
-        history_count: true,
-      },
-      orderBy: [
-        { execution_date: 'asc' },
-        { history_count: 'asc' } // 同日実行はhistory_count順
-      ],
-    });
-
-    // --- 2. 総テスト項目数の取得（分母）---
+    // --- 1. 総テスト項目数の取得（分母）---
     const totalTestItems = await prisma.tt_test_contents.count({
       where: {
         test_group_id: groupId,
@@ -99,181 +95,161 @@ export async function GET(
       },
     });
 
-    // --- 4. 日次データの集計（日付の連続性を担保） ---
-    // ★修正: ユニークなテストケース単位でカウント（複数実行の重複排除）
-    const dailyAggregate: Record<string, DailyAggregateData> = {};
+    // --- 2. 3つのシンプルなSQLクエリで日次データを取得 ---
+    // 1. テスト消化件数（実績）：その日にOK（または参照OK）になった件数
+    const dailyOkCounts = await prisma.$queryRaw<DailyOkCountRow[]>`
+      SELECT
+        TO_CHAR(execution_date, 'YYYY-MM-DD') as execution_date,
+        COUNT(*) as daily_ok_count
+      FROM tt_test_results_history
+      WHERE test_group_id = ${groupId}
+        AND (judgment = 'OK' OR judgment = '参照OK')
+        AND is_deleted = false
+      GROUP BY execution_date
+      ORDER BY execution_date;
+    `;
 
-    // その日時点での、各テストケースの最新判定状態を追跡
-    const testcaseStatusMap = new Map<string, {judgment: string, date: string}>();
+    // 2. 不具合摘出件数（実績）：そのテストケースで初めてNGが出た日の件数
+    const dailyDefects = await prisma.$queryRaw<DailyDefectRow[]>`
+      SELECT
+        TO_CHAR(first_ng_date, 'YYYY-MM-DD') as first_ng_date,
+        COUNT(*) as daily_new_defects
+      FROM (
+        SELECT
+          tid,
+          test_case_no,
+          MIN(execution_date) as first_ng_date
+        FROM tt_test_results_history
+        WHERE test_group_id = ${groupId}
+          AND judgment = 'NG'
+          AND is_deleted = false
+        GROUP BY tid, test_case_no
+      ) AS first_ng_table
+      GROUP BY first_ng_date
+      ORDER BY first_ng_date;
+    `;
 
-    // ★修正: NG判定を受けたことのあるテストケースを追跡（不具合摘出数(実績)の累計用）
-    const testcasesEverNg = new Set<string>();
+    // 3. 解決不具合数：前回NGだったものが今回OKになった日
+    const dailyResolved = await prisma.$queryRaw<DailyResolvedRow[]>`
+      SELECT
+        TO_CHAR(h_now.execution_date, 'YYYY-MM-DD') as resolved_date,
+        COUNT(*) as daily_resolved_count
+      FROM tt_test_results_history h_now
+      JOIN tt_test_results_history h_prev ON
+        h_now.tid = h_prev.tid AND
+        h_now.test_case_no = h_prev.test_case_no AND
+        h_now.test_group_id = h_prev.test_group_id
+      WHERE h_now.test_group_id = ${groupId}
+        AND (h_now.judgment = 'OK' OR h_now.judgment = '参照OK')
+        AND h_prev.judgment = 'NG'
+        AND h_now.history_count = h_prev.history_count + 1
+        AND h_now.is_deleted = false
+      GROUP BY h_now.execution_date
+      ORDER BY h_now.execution_date;
+    `;
 
-    // ★優先順序: テスト結果の実施日範囲 > 試験予定期間
+    // --- 3. 日付範囲を決定 ---
+    // テスト実施日範囲を取得（存在する場合）
+    const allDates = [
+      ...dailyOkCounts.map(r => r.execution_date),
+      ...dailyDefects.map(r => r.first_ng_date),
+      ...dailyResolved.map(r => r.resolved_date),
+    ];
+
     let startDate: Date;
     let endDate: Date;
 
-    // テスト結果の実施日範囲を取得（存在する場合）
-    // ★大量データ対応: スプレッド演算子の代わりにループで最小値・最大値を取得（スタックオーバーフロー防止）
-    let hasExecutionDates = false;
-    let minTime = Infinity;
-    let maxTime = -Infinity;
-
-    historicalActivities.forEach(r => {
-      if (r.execution_date) {
-        hasExecutionDates = true;
-        const time = new Date(r.execution_date).getTime();
-        minTime = Math.min(minTime, time);
-        maxTime = Math.max(maxTime, time);
-      }
-    });
-
-    if (hasExecutionDates) {
-      // テスト結果がある場合はその範囲を使用
-      startDate = new Date(minTime);
-      endDate = new Date(maxTime);
+    if (allDates.length > 0) {
+      const dates = allDates.map(d => new Date(d + 'T00:00:00Z'));
+      startDate = new Date(Math.min(...dates.map(d => d.getTime())));
+      endDate = new Date(Math.max(...dates.map(d => d.getTime())));
     } else {
-      // テスト結果がない場合は試験予定期間を使用（フォールバック）
+      // データがない場合は試験予定期間を使用
       startDate = testGroup.test_startdate ? new Date(testGroup.test_startdate) : new Date();
       endDate = testGroup.test_enddate ? new Date(testGroup.test_enddate) : new Date();
     }
 
     const today = new Date();
-    // 終了日または今日のうち早い方まで集計する
     const maxDate = endDate < today ? endDate : today;
 
-    // 日付をまたぐたびに、前日の累積値を保持するための変数
-    let lastDateKey = '';
+    // --- 4. SQLクエリの結果をMapに変換（高速ルックアップ用）---
+    // BigIntをNumberに変換
+    const dailyOkMap = new Map<string, number>(
+      dailyOkCounts.map(r => [r.execution_date, Number(r.daily_ok_count)])
+    );
+    const dailyDefectMap = new Map<string, number>(
+      dailyDefects.map(r => [r.first_ng_date, Number(r.daily_new_defects)])
+    );
+    const dailyResolvedMap = new Map<string, number>(
+      dailyResolved.map(r => [r.resolved_date, Number(r.daily_resolved_count)])
+    );
 
-    // 開始日から最大日付までループし、日付の連続性を担保する
+    // --- 5. 日次データの集計（日付の連続性を担保、累計を計算）---
+    const dailyAggregate: Record<string, DailyAggregateData> = {};
+    let cumulativeOk = 0;
+    let cumulativeDefect = 0;
+    let cumulativeResolved = 0;
+
+    // 開始日から最大日付までループ
     for (let d = new Date(startDate); d <= maxDate; d.setDate(d.getDate() + 1)) {
-
       const dateKey = toJSTDateString(d);
 
-      const todaysResults = historicalActivities.filter(r =>
-        r.execution_date && toJSTDateString(r.execution_date) === dateKey
-      );
+      const dailyOk = dailyOkMap.get(dateKey) || 0;
+      const dailyDefect = dailyDefectMap.get(dateKey) || 0;
+      const dailyResolved = dailyResolvedMap.get(dateKey) || 0;
 
-      let dailyNgCount = 0;
-      let dailyOkCount = 0;
+      cumulativeOk += dailyOk;
+      cumulativeDefect += dailyDefect;
+      cumulativeResolved += dailyResolved;
 
-      // この日の活動実績を処理（ユニークなテストケース単位で状態を更新）
-      todaysResults.forEach((result) => {
-        const key = `${result.tid}_${result.test_case_no}`;
-        const existing = testcaseStatusMap.get(key);
-
-        // より新しい実行結果で上書き
-        // result.execution_dateはDate型またはstring型、existing.dateはstring型の日付（yyyy-mm-dd形式）
-        // どちらも日付のみで比較できるよう、toJSTDateStringで揃える
-        if (
-          !existing ||
-          toJSTDateString(result.execution_date!) >= toJSTDateString(new Date(existing.date))
-        ) {
-          // ★修正: NG判定を記録（NG判定を受けたテストケースは「不具合摘出数」に累計される）
-          if (result.judgment === 'NG') {
-            testcasesEverNg.add(key);
-          }
-
-          testcaseStatusMap.set(key, { judgment: result.judgment!, date: dateKey });
-
-          // 状態遷移をカウント（前日との差分）
-          if (existing) {
-            // 以前の判定
-            if (existing.judgment === 'OK' || existing.judgment === '参照OK') {
-              // 前日はOKだったが、今日NGに変わった場合はNG増加
-              if (result.judgment === 'NG') {
-                dailyNgCount += 1;
-              }
-            } else if (existing.judgment === 'NG') {
-              // 前日NGだったが、今日OKに修正された場合はOK増加
-              if (result.judgment === 'OK' || result.judgment === '参照OK') {
-                dailyOkCount += 1;
-              }
-            } else {
-              // 前日は未実施だった
-              if (result.judgment === 'OK' || result.judgment === '参照OK') {
-                dailyOkCount += 1;
-              } else if (result.judgment === 'NG') {
-                dailyNgCount += 1;
-              }
-            }
-          } else {
-            // 初めての実行
-            if (result.judgment === 'OK' || result.judgment === '参照OK') {
-              dailyOkCount += 1;
-            } else if (result.judgment === 'NG') {
-              dailyNgCount += 1;
-            }
-          }
-        }
-      });
-
-      // その日時点での累計OK数を計算
-      let cumulativeOk = 0;
-      testcaseStatusMap.forEach(status => {
-        if (status.judgment === 'OK' || status.judgment === '参照OK') {
-          cumulativeOk += 1;
-        }
-      });
-
-      // ★修正: 不具合摘出数(実績) = NG判定を受けたことのあるテストケース数（累計）
-      // この日時点までにNG判定を受けたことのあるテストケース数
-      const cumulativeNg = testcasesEverNg.size;
-
-      // その日時点での未解決不具合数（日毎の最新試験結果がNGとなっている件数）
-      let unresolvedNgCount = 0;
-      testcaseStatusMap.forEach(status => {
-        if (status.judgment === 'NG') {
-          unresolvedNgCount += 1;
-        }
-      });
-
-      // 集計データを格納（実績がない日も前日の累積値を引き継ぐ）
       dailyAggregate[dateKey] = {
-        ngCount: dailyNgCount,
+        dailyOkCount: dailyOk,
+        dailyDefectCount: dailyDefect,
+        dailyResolvedCount: dailyResolved,
         cumulativeOkCount: cumulativeOk,
-        cumulativeNgCount: cumulativeNg,
-        unresolvedNgCount: unresolvedNgCount,
+        cumulativeDefectCount: cumulativeDefect,
+        cumulativeResolvedCount: cumulativeResolved,
       };
-
-      lastDateKey = dateKey;
     }
 
 
-    // --- 5. 予測曲線と最終データの計算 ---
-    const totalTestDays = Math.max(1, Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+    // --- 6. 予測曲線と最終データの計算 ---
+    const totalTestDays = Math.max(1, Math.ceil((maxDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1);
     const ngPlanCount = testGroup.ng_plan_count || 0;
 
     const dailyReportData = Object.entries(dailyAggregate).map(([dateKey, data]) => {
-      const currentDate = new Date(dateKey);
+      const currentDate = new Date(dateKey + 'T00:00:00Z');
       const elapsedDays = Math.max(1, Math.ceil((currentDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)));
 
       // Formula parameters (S-Curve)
-      const lambda = 0.35 * (31 / totalTestDays); // マジックナンバーだが、元のロジックを維持
+      const lambda = 0.35 * (31 / totalTestDays);
       const expTerm = Math.exp(-lambda * elapsedDays);
 
       // 予測曲線: テスト残件数(予測)
-      // $$ \text{PredictedRemaining} = \text{Total} - \text{Total} \times \frac{1 - e^{-\lambda \cdot \text{ElapsedDays}}}{1 + 100 \cdot e^{-\lambda \cdot \text{ElapsedDays}}} $$ 
       const predictedRemainingTests = totalTestItems - (totalTestItems * (1 - expTerm) / (1 + 100 * expTerm));
 
-      // 実績: テスト残件数(実績) = 総項目数 - その日までの累計OK数（マイナス防止）
+      // 実績: テスト残件数(実績) = 総項目数 - その日までの累計OK数
       const actualRemainingTests = Math.max(0, totalTestItems - data.cumulativeOkCount);
 
       // 予測曲線: 不具合摘出数(予測)
       const predictedDefects = ngPlanCount * (1 - expTerm) / (1 + 100 * expTerm);
 
-      // 実績: 不具合摘出数(実績) = その日までの累計NG数
-      const actualDefects = data.cumulativeNgCount;
+      // 実績: 不具合摘出数(実績累計) = その日までの累計NG数
+      const actualDefects = data.cumulativeDefectCount;
+
+      // 未解決不具合数 = 不具合摘出件数（実績累計）- 解決不具合数累計
+      const unresolvedDefects = Math.max(0, data.cumulativeDefectCount - data.cumulativeResolvedCount);
 
       return {
         execution_date: dateKey,
-        ng_count: data.ngCount,
-        predicted_remaining_tests: predictedRemainingTests,
+        daily_ok_count: data.dailyOkCount,
+        daily_defect_count: data.dailyDefectCount,
+        daily_resolved_count: data.dailyResolvedCount,
+        predicted_remaining_tests: Math.round(predictedRemainingTests * 10) / 10,
         actual_remaining_tests: actualRemainingTests,
-        predicted_defects: predictedDefects,
+        predicted_defects: Math.round(predictedDefects * 10) / 10,
         actual_defects: actualDefects,
-        // ★修正: 日毎の最新試験結果がNGとなっている件数（その日時点での値）
-        unresolved_defects: data.unresolvedNgCount,
+        unresolved_defects: unresolvedDefects,
         test_startdate: testGroup.test_startdate,
         test_enddate: testGroup.test_enddate,
         ng_plan_count: ngPlanCount,

@@ -35,7 +35,7 @@ ChartJS.register(
  */
 interface DailyReportData {
   execution_date: string; // YYYY-MM-DD形式の実行日付
-  ng_count: number; // その日のNG数（Daily）
+  daily_defect_count: number; // その日の不具合摘出数（Daily）
   predicted_remaining_tests: number; // テスト残件数(予測)
   actual_remaining_tests: number; // テスト残件数(実績)
   predicted_defects: number; // 不具合摘出数(予測)
@@ -153,7 +153,7 @@ export default function TestSummaryResultGraph({ groupId }: TestSummaryResultGra
       {
         type: 'bar' as const,
         label: 'NG数',
-        data: data.map((d) => d.ng_count),
+        data: data.map((d) => d.daily_defect_count),
         backgroundColor: 'rgba(34, 85, 34, 0.9)',
         borderColor: 'rgba(34, 85, 34, 1)',
         borderWidth: 1,
