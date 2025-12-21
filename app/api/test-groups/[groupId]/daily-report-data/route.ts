@@ -28,6 +28,11 @@ interface DailyResolvedRow {
   daily_resolved_count: number;
 }
 
+// S-Curve formula parameters (予測曲線の計算用パラメータ)
+const LAMBDA_BASE = 0.35;      // Curve steepness coefficient (曲線の傾き係数)
+const REFERENCE_DAYS = 31;     // Standard month for normalization (正規化用の標準月日数)
+const DECAY_FACTOR = 100;      // Exponential decay sensitivity (指数減衰の感度)
+
 // JSTの日付文字列を生成するヘルパー関数
 const toJSTDateString = (date: Date): string => {
   // ISO形式（UTC）に変換後、日本のタイムゾーン(+09:00)を考慮して日付キーを生成
@@ -43,16 +48,23 @@ export async function GET(
 ) {
   const apiTimer = new QueryTimer();
   let statusCode = 200;
+  let user;
 
   try {
-    const user = await requireAuth(req);
+    user = await requireAuth(req);
     const { groupId: groupIdParam } = await params;
     const groupId = parseInt(groupIdParam, 10);
 
     if (isNaN(groupId)) {
-      // (エラーハンドリングは省略せず維持)
       statusCode = 400;
-      // logAPIEndpoint({ /* ... */ });
+      logAPIEndpoint({
+        method: 'GET',
+        endpoint: '/api/test-groups/[groupId]/daily-report-data',
+        userId: user.id,
+        statusCode,
+        executionTime: apiTimer.elapsed(),
+        error: 'Invalid group ID',
+      });
       return NextResponse.json(
         { success: false, error: 'グループIDが無効です' },
         { status: 400 }
@@ -62,9 +74,15 @@ export async function GET(
     // Check permission
     const canView = await canViewTestGroup(user.id, user.user_role, groupId);
     if (!canView) {
-      // (権限チェックも省略せず維持)
       statusCode = 403;
-      // logAPIEndpoint({ /* ... */ });
+      logAPIEndpoint({
+        method: 'GET',
+        endpoint: '/api/test-groups/[groupId]/daily-report-data',
+        userId: user.id,
+        statusCode,
+        executionTime: apiTimer.elapsed(),
+        error: 'Insufficient permissions',
+      });
       return NextResponse.json(
         { success: false, error: 'アクセス権限がありません' },
         { status: 403 }
@@ -78,9 +96,15 @@ export async function GET(
     });
 
     if (!testGroup || testGroup.is_deleted) {
-      // (グループ存在チェックも省略せず維持)
       statusCode = 404;
-      // logAPIEndpoint({ /* ... */ });
+      logAPIEndpoint({
+        method: 'GET',
+        endpoint: '/api/test-groups/[groupId]/daily-report-data',
+        userId: user.id,
+        statusCode,
+        executionTime: apiTimer.elapsed(),
+        error: 'Test group not found',
+      });
       return NextResponse.json(
         { success: false, error: 'テストグループが見つかりません' },
         { status: 404 }
@@ -190,8 +214,8 @@ export async function GET(
     let cumulativeDefect = 0;
     let cumulativeResolved = 0;
 
-    // 開始日から最大日付までループ
-    for (let d = new Date(startDate); d <= maxDate; d.setDate(d.getDate() + 1)) {
+    // 開始日から最大日付までループ（イミュータブルなアプローチ）
+    for (let d = new Date(startDate); d <= maxDate; d = new Date(d.getTime() + 24 * 60 * 60 * 1000)) {
       const dateKey = toJSTDateString(d);
 
       const dailyOk = dailyOkMap.get(dateKey) || 0;
@@ -222,17 +246,17 @@ export async function GET(
       const elapsedDays = Math.max(1, Math.ceil((currentDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)));
 
       // Formula parameters (S-Curve)
-      const lambda = 0.35 * (31 / totalTestDays);
+      const lambda = LAMBDA_BASE * (REFERENCE_DAYS / totalTestDays);
       const expTerm = Math.exp(-lambda * elapsedDays);
 
       // 予測曲線: テスト残件数(予測)
-      const predictedRemainingTests = totalTestItems - (totalTestItems * (1 - expTerm) / (1 + 100 * expTerm));
+      const predictedRemainingTests = totalTestItems - (totalTestItems * (1 - expTerm) / (1 + DECAY_FACTOR * expTerm));
 
       // 実績: テスト残件数(実績) = 総項目数 - その日までの累計OK数
       const actualRemainingTests = Math.max(0, totalTestItems - data.cumulativeOkCount);
 
       // 予測曲線: 不具合摘出数(予測)
-      const predictedDefects = ngPlanCount * (1 - expTerm) / (1 + 100 * expTerm);
+      const predictedDefects = ngPlanCount * (1 - expTerm) / (1 + DECAY_FACTOR * expTerm);
 
       // 実績: 不具合摘出数(実績累計) = その日までの累計NG数
       const actualDefects = data.cumulativeDefectCount;
@@ -256,19 +280,33 @@ export async function GET(
       };
     });
 
-    // (ロギングと成功レスポンスは省略せず維持)
     statusCode = 200;
-    // logAPIEndpoint({ /* ... */ });
+    logAPIEndpoint({
+      method: 'GET',
+      endpoint: '/api/test-groups/[groupId]/daily-report-data',
+      userId: user.id,
+      statusCode,
+      executionTime: apiTimer.elapsed(),
+      dataSize: dailyReportData.length,
+    });
 
     return NextResponse.json({
       success: true,
       data: dailyReportData,
     });
   } catch (error) {
-    // (エラーハンドリングは省略せず維持)
     const isUnauthorized = error instanceof Error && error.message === 'Unauthorized';
     statusCode = isUnauthorized ? 401 : 500;
-    // logAPIEndpoint({ /* ... */ });
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    logAPIEndpoint({
+      method: 'GET',
+      endpoint: '/api/test-groups/[groupId]/daily-report-data',
+      userId: user?.id,
+      statusCode,
+      executionTime: apiTimer.elapsed(),
+      error: errorMessage,
+    });
 
     if (isUnauthorized) {
       return NextResponse.json(

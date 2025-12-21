@@ -1,6 +1,6 @@
 'use client';
 import clientLogger from '@/utils/client-logger';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { TestCaseResult } from './TestCaseResult';
 import { TestCaseResultRow } from './types/testCase-result-list-row';
 import { TestCaseDetailRow } from './types/testCase-detail-list-row';
@@ -9,15 +9,13 @@ import { RootState } from '@/stores/store';
 import { useSelector } from 'react-redux';
 import Loading from '@/app/loading';
 import { usePathname, useRouter } from 'next/navigation';
-import { READMINE_URL } from '@/constants/constants';
-import { Column } from '@/components/datagrid/DataGrid';
-import {
-  TableBody,
-  TableRow,
-  TableCell,
-  TableHeader,
-  Table
-} from '@/components/ui/table';
+import { READMINE_URL, JUDGMENT_OPTIONS, JudgmentOption } from '@/constants/constants';
+import { Column, DataGrid } from '@/components/datagrid/DataGrid';
+
+// Type guard for judgment validation
+const isValidJudgment = (value: unknown): value is JudgmentOption => {
+  return typeof value === 'string' && Object.values(JUDGMENT_OPTIONS).includes(value as JudgmentOption);
+};
 
 const labels = {
   tid: { name: "TID", type: "text" as 'text' },
@@ -181,49 +179,42 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
     return result[snakeCase];
   };
 
-  // Helper function to extract filename from evidence URL
-  const getEvidenceFilename = (evidence: unknown): string => {
-    if (!evidence) return '';
-    const evidenceStr = String(evidence);
+  // Build organized data structure for rendering
+  const getOrganizedResultsByHistoryCount = useMemo(() => {
+    const historyCountsSet = new Set<number>();
+    const resultsByHistoryCount: Record<number, Map<string, Record<string, unknown>>> = {};
 
-    // Check if there's a query parameter with the filename
-    const urlObj = new URL(evidenceStr, window.location.origin);
-    const nameParam = urlObj.searchParams.get('name');
-    if (nameParam) {
-      return decodeURIComponent(nameParam);
-    }
+    // Collect all history counts and organize data
+    Object.entries(resultsWithHistory).forEach(([testCaseNo, data]) => {
+      const rwh = data as ResultWithHistory;
 
-    // Fallback to extracting from path
-    return evidenceStr.split('/').pop() || evidenceStr;
-  };
-
-  // Helper function to render note with ticket links
-  const renderNoteWithTicketLinks = (text: unknown): React.ReactNode => {
-    if (!text) return '';
-
-    const noteStr = String(text);
-    // Split by #数値 pattern, keeping the delimiters
-    const parts = noteStr.split(/(#\d+)/);
-
-    return parts.map((part, index) => {
-      // Check if part matches #数値 pattern
-      if (part.match(/^#\d+$/)) {
-        const ticketId = part.substring(1); // Remove # to get the number
-        return (
-          <a
-            key={index}
-            href={`${READMINE_URL}${ticketId}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-500 hover:underline"
-          >
-            {part}
-          </a>
-        );
+      // Add latest valid result
+      historyCountsSet.add(0); // 0 represents "最新"
+      if (!resultsByHistoryCount[0]) {
+        resultsByHistoryCount[0] = new Map();
       }
-      return <span key={index}>{part}</span>;
+      resultsByHistoryCount[0].set(testCaseNo, rwh.latestValidResult);
+
+      // Add all history entries
+      rwh.allHistory.forEach((histItem) => {
+        const hc = (histItem as Record<string, unknown>).history_count as number;
+        historyCountsSet.add(hc);
+        if (!resultsByHistoryCount[hc]) {
+          resultsByHistoryCount[hc] = new Map();
+        }
+        resultsByHistoryCount[hc].set(testCaseNo, histItem);
+      });
     });
-  };
+
+    // Sort history counts: 0 (最新) first, then descending
+    const sortedHistoryCounts = Array.from(historyCountsSet).sort((a, b) => {
+      if (a === 0) return -1;
+      if (b === 0) return 1;
+      return b - a;
+    });
+
+    return { sortedHistoryCounts, resultsByHistoryCount };
+  }, [resultsWithHistory]);
 
   return (
     <div className='space-y-4'>
@@ -249,38 +240,7 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
         <div className="space-y-6">
           {Object.entries(resultsWithHistory).length > 0 ? (
             (() => {
-              // Group results by history_count to build sections
-              const historyCountsSet = new Set<number>();
-              const resultsByHistoryCount: Record<number, Map<string, Record<string, unknown>>> = {};
-
-              // Collect all history counts and organize data
-              Object.entries(resultsWithHistory).forEach(([testCaseNo, data]) => {
-                const rwh = data as ResultWithHistory;
-
-                // Add latest valid result
-                historyCountsSet.add(0); // 0 represents "最新"
-                if (!resultsByHistoryCount[0]) {
-                  resultsByHistoryCount[0] = new Map();
-                }
-                resultsByHistoryCount[0].set(testCaseNo, rwh.latestValidResult);
-
-                // Add all history entries
-                rwh.allHistory.forEach((histItem) => {
-                  const hc = (histItem as Record<string, unknown>).history_count as number;
-                  historyCountsSet.add(hc);
-                  if (!resultsByHistoryCount[hc]) {
-                    resultsByHistoryCount[hc] = new Map();
-                  }
-                  resultsByHistoryCount[hc].set(testCaseNo, histItem);
-                });
-              });
-
-              // Sort history counts: 0 (最新) first, then descending
-              const sortedHistoryCounts = Array.from(historyCountsSet).sort((a, b) => {
-                if (a === 0) return -1;
-                if (b === 0) return 1;
-                return b - a;
-              });
+              const { sortedHistoryCounts, resultsByHistoryCount } = getOrganizedResultsByHistoryCount;
 
               // Render sections
               return sortedHistoryCounts.map((historyCount) => {
@@ -290,6 +250,32 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
                   (a, b) => parseInt(a, 10) - parseInt(b, 10)
                 );
                 const isExpanded = expandedSections.has(historyCount);
+
+                // Build items for DataGrid
+                const sectionItems: TestCaseResultRow[] = sortedTestCaseNos.map((testCaseNo) => {
+                  const result = testCasesData.get(testCaseNo) as Record<string, unknown>;
+                  const judgmentValue = getResultValue(result, 'judgment');
+                  const judgment = isValidJudgment(judgmentValue) ? judgmentValue : JUDGMENT_OPTIONS.EMPTY;
+
+                  const evidenceValue = getResultValue(result, 'evidence') as string;
+                  const evidence = evidenceValue ? [evidenceValue] : null;
+
+                  return {
+                    historyCount: historyCount,
+                    testCaseNo: parseInt(testCaseNo, 10),
+                    testCase: (getResultValue(result, 'testCase') as string) || '',
+                    expectedValue: (getResultValue(result, 'expectedValue') as string) || '',
+                    result: (getResultValue(result, 'result') as string) || '',
+                    judgment: judgment,
+                    softwareVersion: (getResultValue(result, 'softwareVersion') as string) || '',
+                    hardwareVersion: (getResultValue(result, 'hardwareVersion') as string) || '',
+                    comparatorVersion: (getResultValue(result, 'comparatorVersion') as string) || '',
+                    executionDate: (getResultValue(result, 'executionDate') as string) || '',
+                    executor: (getResultValue(result, 'executor') as string) || '',
+                    evidence: evidence,
+                    note: (getResultValue(result, 'note') as string) || '',
+                  };
+                });
 
                 return (
                   <div key={historyCount} className="border rounded-lg p-4 bg-gray-50">
@@ -305,70 +291,10 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
                     </button>
                     {isExpanded && (
                       <div className="overflow-x-auto mt-4">
-                        <Table>
-                          <TableHeader>
-                            <TableRow className="bg-gray-100">
-                              <TableCell className="px-4 py-2 font-semibold text-sm w-12">No</TableCell>
-                              {columns.map((col) => (
-                                <TableCell key={String(col.key)} className="px-4 py-2 font-semibold text-sm">
-                                  {col.header}
-                                </TableCell>
-                              ))}
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {sortedTestCaseNos.map((testCaseNo, rowIndex) => {
-                              const result = testCasesData.get(testCaseNo) as Record<string, unknown>;
-                              return (
-                                <TableRow key={testCaseNo}>
-                                  <TableCell className="px-4 py-2 text-sm w-12 font-medium">{rowIndex + 1}</TableCell>
-                                  {columns.map((col) => {
-                                    const value = getResultValue(result, col.key as string);
-                                    let displayValue = '';
-
-                                    if (col.key === 'executionDate' && value) {
-                                      displayValue = new Date(value as string).toLocaleDateString('ja-JP');
-                                    } else if (col.key === 'evidence') {
-                                      displayValue = (value as string) || '';
-                                    } else {
-                                      displayValue = String(value || '');
-                                    }
-
-                                    return (
-                                      <TableCell key={String(col.key)} className="px-4 py-2 text-sm">
-                                        {col.key === 'evidence' && displayValue ? (
-                                          <a
-                                            href={displayValue}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="text-blue-500 hover:underline break-words"
-                                          >
-                                            {getEvidenceFilename(displayValue)}
-                                          </a>
-                                        ) : col.key === 'note' ? (
-                                          <span className="break-words">
-                                            {renderNoteWithTicketLinks(displayValue)}
-                                          </span>
-                                        ) : col.isLink ? (
-                                          <a
-                                            href={col.linkPrefix ? `${col.linkPrefix}${displayValue}` : displayValue}
-                                            target={col.isExlink ? '_blank' : undefined}
-                                            rel={col.isExlink ? 'noopener noreferrer' : undefined}
-                                            className="text-blue-500 hover:underline break-words"
-                                          >
-                                            {displayValue}
-                                          </a>
-                                        ) : (
-                                          <span className="break-words">{displayValue}</span>
-                                        )}
-                                      </TableCell>
-                                    );
-                                  })}
-                                </TableRow>
-                              );
-                            })}
-                          </TableBody>
-                        </Table>
+                        <DataGrid<TestCaseResultRow>
+                          items={sectionItems}
+                          columns={columns}
+                        />
                       </div>
                     )}
                   </div>

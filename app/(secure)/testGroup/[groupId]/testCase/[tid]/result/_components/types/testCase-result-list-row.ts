@@ -14,6 +14,7 @@ export type TestCaseResultRow = {
   executor: string;
   evidence: string[] | File | null;
   note: string;
+  historyCount?: number; // 追跡用（オプション）
 };
 
 // 項目作成時の入力型
