@@ -67,7 +67,7 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
     { key: 'executionDate', header: '実施日' },
     { key: 'executor', header: '実施者' },
     { key: 'evidence', header: 'エビデンス', isImg: true },
-    { key: 'note', header: '備考欄', isLink: true, isExlink: true, linkPrefix: READMINE_URL },
+    { key: 'note', header: '備考欄', isLink: true, isExlink: true, linkPrefix: READMINE_URL, linkPattern: /#\d+/g },
   ];
 
   useEffect(() => {
