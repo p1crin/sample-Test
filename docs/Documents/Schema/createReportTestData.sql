@@ -249,22 +249,35 @@ last_execution AS (
     FROM execution_log
     GROUP BY content_id
 ),
+first_execution_per_content AS (
+    -- 各テスト内容について、初回実行日を決定
+    SELECT
+        content_id,
+        MIN(execution_date) as first_execution_date
+    FROM execution_log
+    GROUP BY content_id
+),
 final_state AS (
     -- 各テスト内容の最終状態を決定
+    -- History #1の判定に基づいて最終状態を決定
     SELECT
-        le.content_id,
+        fepc.content_id,
         CASE
-            -- NG判定を受けたことがあり、かつ解決済み
-            WHEN nl.content_id IS NOT NULL AND rl.ng_sequence IS NOT NULL THEN '参照OK'
-            -- NG判定を受けたが未解決
-            WHEN nl.content_id IS NOT NULL THEN 'NG'
-            -- NG判定を受けたことがない
+            -- 1回目でOK/参照OKなら、その判定が最終状態
+            WHEN (fepc.content_id % 6) = 0 THEN 'OK'
+            WHEN (fepc.content_id % 6) = 1 THEN '参照OK'
+            -- 1回目でNGで、History #2で解決済み → 参照OK
+            WHEN (fepc.content_id % 6) = 2 THEN '参照OK'
+            -- 1回目で保留で、History #2でOK → OK
+            WHEN (fepc.content_id % 6) = 3 THEN 'OK'
+            -- 1回目でQA中で、History #2がNG、History #3で解決済み → 参照OK
+            WHEN (fepc.content_id % 6) = 4 THEN '参照OK'
+            -- 1回目で未着手で、History #2でOK → OK
             ELSE 'OK'
         END as final_judgment,
         le.last_date
     FROM last_execution le
-    LEFT JOIN ng_list nl ON le.content_id = nl.content_id
-    LEFT JOIN resolved_list rl ON nl.ng_sequence = rl.ng_sequence
+    JOIN first_execution_per_content fepc ON le.content_id = fepc.content_id
 )
 INSERT INTO tt_test_results (
     test_group_id,
@@ -377,17 +390,19 @@ first_execution_per_content AS (
 first_executions AS (
     -- 各テスト内容の初回実行（history_count=1として記録）
     -- NOTE: content_id ごとに 1 つのレコードのみ（主キー制約により）
+    -- 判定バリエーション：content_id % 6 により判定を割り当て
     SELECT
         fepc.content_id,
         fepc.first_execution_date,
         CASE
-            WHEN fnd.content_id IS NOT NULL THEN 'NG'
-            ELSE 'OK'
+            WHEN (fepc.content_id % 6) = 0 THEN 'OK'           -- 1回目でOK→以降は再実施対象外
+            WHEN (fepc.content_id % 6) = 1 THEN '参照OK'       -- 1回目で参照OK→以降は再実施対象外
+            WHEN (fepc.content_id % 6) = 2 THEN 'NG'           -- 1回目でNG→2回目で解決
+            WHEN (fepc.content_id % 6) = 3 THEN '保留'         -- 1回目で保留→2回目で再テスト
+            WHEN (fepc.content_id % 6) = 4 THEN 'QA中'         -- 1回目でQA中→2回目で再テスト
+            ELSE '未着手'                                        -- 1回目で未着手→2回目で実施
         END as judgment
     FROM first_execution_per_content fepc
-    LEFT JOIN first_ng_dates fnd ON
-        fepc.content_id = fnd.content_id AND
-        fepc.first_execution_date = fnd.first_ng_date
 )
 INSERT INTO tt_test_results_history (
     test_group_id,
@@ -425,46 +440,61 @@ SELECT
     false
 FROM first_executions fe
 UNION ALL
--- History #2: 初めてNG判定を受けた日
+-- History #2: 2回目実行（1回目の判定に応じて異なる処理）
 SELECT
     currval('tt_test_groups_id_seq'),
-    '1-01-' || LPAD(((nl.content_id / 10)::int / 6 + 1)::text, 2, '0') || '-' || LPAD((((nl.content_id / 10)::int % 6) + 1)::text, 2, '0'),
-    ((nl.content_id % 10) + 1)::int,
+    '1-01-' || LPAD(((fe.content_id / 10)::int / 6 + 1)::text, 2, '0') || '-' || LPAD((((fe.content_id / 10)::int % 6) + 1)::text, 2, '0'),
+    ((fe.content_id % 10) + 1)::int,
     2,
-    'NG',
-    'NG',
+    CASE
+        -- 1回目でOK/参照OKなら再実施対象外（resultはOK固定）
+        WHEN fe.judgment IN ('OK', '参照OK') THEN 'OK'
+        -- その他なら新たな判定を割り当て
+        WHEN (fe.content_id % 6) = 2 AND fe.judgment = 'NG' THEN 'OK'        -- NG→OK解決
+        WHEN (fe.content_id % 6) = 3 AND fe.judgment = '保留' THEN 'OK'      -- 保留→OK
+        WHEN (fe.content_id % 6) = 4 AND fe.judgment = 'QA中' THEN 'NG'      -- QA中→NG（NG判定）
+        ELSE 'OK'
+    END as result,
+    CASE
+        -- 1回目でOK/参照OKなら再実施対象外
+        WHEN fe.judgment IN ('OK', '参照OK') THEN '再実施対象外'
+        -- その他なら新たな判定を割り当て
+        WHEN (fe.content_id % 6) = 2 AND fe.judgment = 'NG' THEN '参照OK'     -- NG→OK解決
+        WHEN (fe.content_id % 6) = 3 AND fe.judgment = '保留' THEN 'OK'      -- 保留→OK
+        WHEN (fe.content_id % 6) = 4 AND fe.judgment = 'QA中' THEN 'NG'      -- QA中→NG
+        ELSE 'OK'
+    END as judgment,
     'v3.1.0',
     'HW-v1.2',
     'CMP-v2.0',
-    fnd.first_ng_date,
-    CASE WHEN nl.content_id % 2 = 0 THEN 'Engineer A' ELSE 'Engineer B' END,
-    'History #2 - First NG judgment for content ' || nl.content_id,
+    (fe.first_execution_date + INTERVAL '1 day')::date,
+    CASE WHEN fe.content_id % 2 = 0 THEN 'Engineer A' ELSE 'Engineer B' END,
+    'History #2 - Second execution for content ' || fe.content_id || ' - First judgment was: ' || fe.judgment,
     NOW(),
     NOW(),
     false
-FROM ng_list nl
-JOIN first_ng_dates fnd ON nl.content_id = fnd.content_id
-WHERE fnd.first_ng_date = (SELECT MIN(first_ng_date) FROM first_ng_dates WHERE content_id = nl.content_id)
+FROM first_executions fe
 UNION ALL
--- History #3: NG→参照OKへの解決
+-- History #3: 3回目実行（QA中がNGになったケースの解決）
+-- (content_id % 6) = 4 の場合、History #2がNG → History #3で参照OKへ解決
 SELECT
     currval('tt_test_groups_id_seq'),
-    '1-01-' || LPAD(((nl.content_id / 10)::int / 6 + 1)::text, 2, '0') || '-' || LPAD((((nl.content_id / 10)::int % 6) + 1)::text, 2, '0'),
-    ((nl.content_id % 10) + 1)::int,
+    '1-01-' || LPAD(((fe.content_id / 10)::int / 6 + 1)::text, 2, '0') || '-' || LPAD((((fe.content_id / 10)::int % 6) + 1)::text, 2, '0'),
+    ((fe.content_id % 10) + 1)::int,
     3,
     'OK',
     '参照OK',
     'v3.1.0',
     'HW-v1.2',
     'CMP-v2.0',
-    rl.resolve_date,
-    CASE WHEN nl.content_id % 2 = 0 THEN 'Engineer A' ELSE 'Engineer B' END,
-    'History #3 - NG resolved to 参照OK for content ' || nl.content_id,
+    (fe.first_execution_date + INTERVAL '2 days')::date,
+    CASE WHEN fe.content_id % 2 = 0 THEN 'Engineer A' ELSE 'Engineer B' END,
+    'History #3 - QA中のNG判定が解決され参照OK for content ' || fe.content_id,
     NOW(),
     NOW(),
     false
-FROM ng_list nl
-JOIN resolved_list rl ON nl.ng_sequence = rl.ng_sequence;
+FROM first_executions fe
+WHERE (fe.content_id % 6) = 4;
 
 -- ========================================
 -- 7. テストエビデンス作成
