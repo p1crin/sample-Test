@@ -1,0 +1,9 @@
+{
+  "name": "ProofLink",
+  "short_name": "ProofLink",
+  "description": "ProofLink",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#3f51b5"
+}

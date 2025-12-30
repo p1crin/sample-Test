@@ -13,7 +13,8 @@ export type Result<T> = {
 
 export async function saveData(params: UserEditFormState): Promise<Result<number>> {
   try {
-    serverLogger.info(`saveData Resquest`, { params });
+    const { file: _file, ...paramsWithoutFile } = params;
+    serverLogger.info(`saveData Resquest`, { params: paramsWithoutFile, file: _file?.name });
 
     // TODO 保存処理
 

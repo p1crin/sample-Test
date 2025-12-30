@@ -1,17 +1,20 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { useSession } from 'next-auth/react';
-import clientLogger from '@/utils/client-logger';
 import { Column } from '@/components/datagrid/DataGrid';
-import { TestGroupListRow } from '../../_components/types/testGroup-list-row';
-import { TestGroupList } from './TestGroupList';
 import { Button } from '@/components/ui/button';
-import { useRouter, useSearchParams } from 'next/navigation';
+import Loading from '@/components/ui/loading';
 import { Modal } from '@/components/ui/modal';
 import SeachForm from '@/components/ui/searchForm';
-import React from 'react';
+import { fetchData } from '@/utils/api';
+import clientLogger from '@/utils/client-logger';
+import { formatDateJST } from '@/utils/date-formatter';
+import { buildQueryString, updateUrlParams } from '@/utils/queryUtils';
+import { useSession } from 'next-auth/react';
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { TestGroupListRow } from '../../_components/types/testGroup-list-row';
+import { TestGroupList } from './TestGroupList';
 
 export function TestGroupListContainer() {
   const router = useRouter();
@@ -22,29 +25,29 @@ export function TestGroupListContainer() {
   const [page, setPage] = useState(1);
   const [pageCount, setPageCount] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
+  const [totalTestCase, setTotalTestCase] = useState(0);
   const [sortConfig, setSortConfig] = useState<{
     key: keyof TestGroupListRow;
     direction: 'asc' | 'desc';
   } | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const pageSize = 10;
-
-  // 権限チェック: TEST_MANAGER(1)またはADMIN(0)のみが編集・削除・複製可能
-  const canEdit = session?.user?.user_role !== undefined && session.user.user_role <= 1;
+  const pagepath = '/testGroup';
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isdelModalOpen, setIsDelModalOpen] = useState(false);
+  const [delLoading, setDelLoading] = useState(false);
+  const [modalMessage, setModalMessage] = useState('');
   const [selectedTestGroup, setSelectedTestGroup] = useState<TestGroupListRow | null>(null);
   const [newid, setNewid] = useState<number | null>(null);
   const [modalContent, setModalContent] = useState<'initial' | 'confirm'>('initial');
-  const [apiError, setApiError] = useState<Error | null>(null);
+  const [testGroupLoading, setTestGroupLoading] = useState(false);
 
-  // APIエラーがある場合はスロー（error.tsx がキャッチする）
-  if (apiError) {
-    throw apiError;
-  }
+  // 権限チェック: テスト管理者(1)または管理者(0)のみが編集・削除・複製可能
+  const canEdit = session?.user?.user_role !== undefined && session.user.user_role <= 1;
 
   // フォーム入力値（リアルタイムで変更）
-  const [formValues, setFormValues] = useState<Record<string, string>>({
+  const [formValues, setFormValues] = useState<Record<string, string | string[]>>({
     oem: '',
     model: '',
     event: '',
@@ -53,46 +56,13 @@ export function TestGroupListContainer() {
   });
 
   // 検索パラメータ（検索ボタン押下時に更新）
-  const [searchParams, setSearchParams] = useState<Record<string, string>>({
+  const [searchParams, setSearchParams] = useState<Record<string, string | string[]>>({
     oem: '',
     model: '',
     event: '',
     variation: '',
     destination: '',
   });
-
-  // 検索パラメータを含むクエリ文字列を構築（API用、limitを含む）
-  const buildQueryString = (params: Record<string, string>, pageNum: number = 1) => {
-    const queryParams = new URLSearchParams();
-    queryParams.append('page', String(pageNum));
-    queryParams.append('limit', String(pageSize));
-
-    // 空でない検索パラメータのみ追加
-    Object.entries(params).forEach(([key, value]) => {
-      if (value.trim()) {
-        queryParams.append(key, value);
-      }
-    });
-
-    return queryParams.toString();
-  };
-
-  // URLパラメータを更新する関数（limitは含めない）
-  const updateUrlParams = (newSearchParams: Record<string, string>, pageNum: number = 1) => {
-    const queryParams = new URLSearchParams();
-    queryParams.append('page', String(pageNum));
-
-    // 空でない検索パラメータのみ追加
-    Object.entries(newSearchParams).forEach(([key, value]) => {
-      if (value.trim()) {
-        queryParams.append(key, value);
-      }
-    });
-
-    const queryString = queryParams.toString();
-    router.push(`/testGroup?${queryString}`);
-    clientLogger.info('TestGroupListContainer', 'URL更新', { pageNum, searchParams: newSearchParams });
-  };
 
   // URLパラメータをコンポーネント状態に同期する
   useEffect(() => {
@@ -114,10 +84,8 @@ export function TestGroupListContainer() {
 
     // URLにpageパラメータがない場合は、URLを更新（初期表示やサイドバーからの遷移時）
     if (!hasPageInUrl) {
-      updateUrlParams(params, pageNum);
+      updateUrlParams(router, params, pagepath, pageNum);
     }
-
-    clientLogger.info('TestGroupListContainer', 'URLパラメータ同期完了', { params, pageNum, hasPageInUrl });
   }, [searchParamsQuery]);
 
   useEffect(() => {
@@ -126,81 +94,49 @@ export function TestGroupListContainer() {
       return;
     }
 
-    const getDataCountFunc = async () => {
+    let ignore = false;
+
+    const getDataFunc = async () => {
       try {
-        clientLogger.info('TestGroupListContainer', 'テスト数取得開始', { searchParams, isInitialized });
-        const queryString = buildQueryString(searchParams, 1);
-        const response = await fetch(`/api/test-groups?${queryString}`);
-
-        if (!response.ok) {
-          throw new Error(`API error: ${response.status}`);
-        }
-
-        const result = await response.json();
+        clientLogger.debug('テストグループ一覧画面', 'テストグループリスト取得開始', { page, searchParams });
+        setTestGroupLoading(true);
+        const queryString = buildQueryString(searchParams, page, pageSize);
+        const result = await fetchData(`/api/test-groups?${queryString}`);
         const count = result.totalCount || (result.data ? result.data.length : 0);
-
         setTotalCount(count);
         setPageCount(Math.ceil(count / pageSize));
-        clientLogger.info('TestGroupListContainer', 'テスト数取得成功', { count, searchParams });
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        clientLogger.error('TestGroupListContainer', 'テスト数取得失敗', {
-          error: error.message,
-          searchParams,
-        });
-        setApiError(error);
-      }
-    };
-    getDataCountFunc();
-  }, [searchParams, pageSize, isInitialized]);
-
-  useEffect(() => {
-    // URLパラメータ同期が完了するまで待つ
-    if (!isInitialized) {
-      return;
-    }
-
-    let ignore = false;
-    clientLogger.info('TestGroupListContainer', 'データ取得開始', { page, searchParams, isInitialized });
-
-    const getDataListFunc = async () => {
-      try {
-        clientLogger.info('TestGroupListContainer', 'リスト取得開始', { page, searchParams });
-        const queryString = buildQueryString(searchParams, page);
-        const response = await fetch(`/api/test-groups?${queryString}`);
-
-        if (!response.ok) {
-          throw new Error(`API error: ${response.status}`);
-        }
-
-        const result = await response.json();
-
-        if (!Array.isArray(result.data)) {
-          throw new Error('Invalid API response');
-        }
 
         if (!ignore) {
-          setMenuItems(result.data);
-          // TODO:IDの最大値＋１は事故る気がするので将来的にはシーケンス管理しているID表から発行したい。
-          // ID発酵処理はテストグループ複製画面で実行する想定。
-          const latestId = Math.max(...result.data.map((item: { id: unknown }) => item.id as number));
+          // 日付をフォーマット（日本時間）
+          const formattedTestGroups = result.data.map((group: typeof result.data[0]) => ({
+            ...group,
+            created_at: formatDateJST(group.created_at),
+            updated_at: formatDateJST(group.updated_at),
+          }));
+          setMenuItems(formattedTestGroups);
+          const latestId = Math.max(...result.data.map((item: { id: number }) => item.id));
           setNewid(latestId + 1);
         }
-        clientLogger.info('TestGroupListContainer', 'リスト取得成功', {
+        clientLogger.debug('テストグループ一覧画面', 'テストグループリスト取得成功', {
           page,
           count: result.data?.length,
+          result: result.data
         });
-      } catch (err) {
+      } catch (err: unknown) {
         if (!ignore) setMenuItems([]);
-        const error = err instanceof Error ? err : new Error(String(err));
-        clientLogger.error('TestGroupListContainer', 'リスト取得失敗', {
-          page,
-          error: error.message,
-        });
-        if (!ignore) setApiError(error);
+        if (err instanceof Error) {
+          clientLogger.error('テストグループ一覧画面', 'テストグループリスト取得失敗', {
+            page,
+            error: err.message,
+          });
+        }
+      } finally {
+        if (!ignore) {
+          setTestGroupLoading(false);
+        }
       }
     };
-    getDataListFunc();
+    getDataFunc();
     return () => {
       ignore = true;
     };
@@ -236,23 +172,19 @@ export function TestGroupListContainer() {
 
   const toTestGroupEditPage = (id: number) => {
     // テストグループ編集画面への遷移処理
+    clientLogger.info('テストグループ一覧画面', '編集ボタン押下', { id });
     router.push(`/testGroup/${id}/edit`);
   };
 
-  const testGroupDelete = () => {
-    if (selectedTestGroup) {
-      console.log("テストグループ削除", selectedTestGroup.id);
-      setIsModalOpen(false);
-    }
-  };
-
   const toTestSummaryResultPage = (id: number) => {
-    // テストグループ編集画面への遷移処理
+    // テストグループ集計画面への遷移処理
+    clientLogger.info('テストグループ一覧画面', '集計ボタン押下', { id });
     router.push(`/testGroup/${id}/testSummaryResult`);
   };
 
   const toTestGroupCopyPage = (id: number) => {
     // テストグループ複製画面への遷移処理
+    clientLogger.info('テストグループ一覧画面', '複製ボタン押下', { id });
     router.push(`/testGroup/${id}/copy`);
   }
 
@@ -261,18 +193,15 @@ export function TestGroupListContainer() {
       <Button
         onClick={() => toTestGroupEditPage(item.id)}
         disabled={!canEdit}
-        title={!canEdit ? '編集権限がありません' : '編集'}
       >
         編集
       </Button>
       <Button
         onClick={() => {
           setSelectedTestGroup(item);
-          setIsModalOpen(true);
-          setModalContent('initial');
+          getTotalTestCase(item.id);
         }}
         disabled={!canEdit}
-        title={!canEdit ? '削除権限がありません' : '削除'}
       >
         削除
       </Button>
@@ -284,7 +213,6 @@ export function TestGroupListContainer() {
       <Button
         onClick={() => toTestGroupCopyPage(item.id)}
         disabled={!canEdit}
-        title={!canEdit ? '複製権限がありません' : '複製'}
       >
         複製
       </Button>
@@ -347,76 +275,154 @@ export function TestGroupListContainer() {
     },
   ];
 
+  const getTotalTestCase = async (id: number) => {
+
+    clientLogger.info('テストグループ一覧画面', '削除ボタン押下', { id: id });
+
+    try {
+      const result = await fetchData(`/api/test-groups/${id}/cases`);
+      setTotalTestCase(result.totalCount);
+      setIsModalOpen(true);
+      setModalContent('initial');
+    } catch (error) {
+      clientLogger.error('TestGroupListContainer', '関連テストグループケース件数取得エラー', { error });
+    }
+  }
+
   // 検索フォームのデータが更新されたときに呼び出される
   const handleFormDataChange = (formData: Record<string, string | string[]>) => {
-    // TestGroupListContainerではstring型のフィールドのみなので、キャストして保存
-    setFormValues(formData as Record<string, string>);
+    setFormValues(formData);
   };
 
   const handleSearch = () => {
     // 検索ボタン押下時、フォーム値を検索パラメータに設定してURLを更新
     setSearchParams(formValues);
     setPage(1); // ページを1にリセット
-    updateUrlParams(formValues, 1);
-    clientLogger.info('TestGroupListContainer', '検索実行', { formValues });
+    updateUrlParams(router, formValues, pagepath, 1);
+    clientLogger.info('テストグループ一覧画面', '検索ボタン押下', { formValues });
   };
 
   // ページ変更時にURLも更新
   const handlePageChange = (pageNum: number) => {
     setPage(pageNum);
-    updateUrlParams(searchParams, pageNum);
+    updateUrlParams(router, searchParams, pagepath, pageNum);
   };
 
   const handleAddTestGroup = () => {
-    // テストグループ追加処理をここに記述
-    console.log('テストグループ新規作成');
+    clientLogger.info('テストグループ一覧画面', 'テストグループ新規作成ボタン押下');
+    router.push(`testGroup/regist`);
+  };
+
+  const handleDeleteTestGroup = async () => {
+    if (selectedTestGroup === null) {
+      throw new Error('groupId is NULL');
+    }
+
+    try {
+      setDelLoading(true);
+      const response = await fetch(`/api/test-groups/${selectedTestGroup.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          id: selectedTestGroup.id
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        clientLogger.info('TestGroupListContainer', 'テストグループ削除成功', { groupId: selectedTestGroup.id });
+        //テストグループ一覧再描画
+        const queryString = buildQueryString(searchParams, 1, pageSize);
+        const newList = await fetchData(`/api/test-groups?${queryString}`);
+        const count = newList.totalCount || (newList.data ? newList.data.length : 0);
+        setTotalCount(count);
+        setPageCount(Math.ceil(count / pageSize));
+        setMenuItems(newList.data);
+
+        setModalMessage('テストグループを削除しました');
+        setIsDelModalOpen(true);
+      } else {
+        clientLogger.error('TestGroupListContainer', 'テストグループ削除失敗', { error: result.error });
+        setModalMessage(result.error?.message || 'テストグループの削除に失敗しました');
+        setIsDelModalOpen(true);
+      }
+    } catch (error) {
+      clientLogger.error('TestGroupListContainer', 'テストグループ削除エラー', { error });
+      setModalMessage(error instanceof Error ? error.message : 'エラーが発生しました');
+      setIsDelModalOpen(true);
+    } finally {
+      setDelLoading(false);
+    }
   };
 
   return (
     <div>
-      <SeachForm fields={fields} values={formValues} onClick={handleSearch} onFormDataChange={handleFormDataChange} />
-      <div className="text-right pb-2">
-        <Button onClick={handleAddTestGroup} variant="default">
-          <Link href="/testGroup/regist">
-            テストグループ新規登録
-          </Link>
-        </Button>
-      </div>
-      <TestGroupList
-        items={sortedItems}
-        columns={columns}
-        sortConfig={sortConfig}
-        page={page}
-        pageCount={pageCount}
-        onSort={handleSort}
-        onPageChange={handlePageChange}
-        renderActions={renderActions}
+      {/* テストグループデータ削除中の表示 */}
+      <Loading
+        isLoading={delLoading || testGroupLoading}
+        message={delLoading ? "データ削除中..." : "データ読み込み中..."}
+        size="md"
       />
-      <Modal open={isModalOpen} onClose={() => setIsModalOpen(false)}>
-        <p className="mb-8 text-red-600 font-bold text-center">
-          {modalContent === 'initial'
-            ? (
-              <>
-                本当にこのテストグループを削除しますか？<br />
-                この操作は取り消せません。削除すると、関連する20件のテストケースが失われます。
-              </>
-            )
-            : "本当に削除しますか？"}
+      {!delLoading && !testGroupLoading && (
+        <>
+          <SeachForm fields={fields} values={formValues} onClick={handleSearch} onFormDataChange={handleFormDataChange} />
+          <div className="text-right pb-2">
+            <Button onClick={handleAddTestGroup} disabled={!canEdit}>
+              テストグループ新規登録
+            </Button>
+          </div>
+          <TestGroupList
+            items={sortedItems}
+            columns={columns}
+            sortConfig={sortConfig}
+            page={page}
+            pageCount={pageCount}
+            onSort={handleSort}
+            onPageChange={handlePageChange}
+            renderActions={renderActions}
+          />
+          <Modal open={isModalOpen} onClose={() => setIsModalOpen(false)}>
+            <p className="mb-8 text-red-600 font-bold text-center">
+              {modalContent === 'initial'
+                ? (
+                  <>
+                    本当にこのテストグループを削除しますか？<br />
+                    この操作は取り消せません。削除すると、関連する{totalTestCase}件のテストケースが失われます。
+                  </>
+                )
+                : "本当に削除しますか？"}
+            </p>
+            {selectedTestGroup && (
+              <p className="mb-8 text-red-600 font-bold text-center">
+                対象テストグループID: {selectedTestGroup.id}
+              </p>
+            )}
+            <div className="flex justify-center space-x-10">
+              <Button className="w-24 bg-red-600 text-white" onClick={() => {
+                if (modalContent === 'initial') {
+                  setModalContent('confirm');
+                } else {
+                  setIsModalOpen(false);
+                  handleDeleteTestGroup();
+                }
+              }}>削除</Button>
+              <Button className="w-24 bg-gray-500 hover:bg-gray-400" onClick={() => setIsModalOpen(false)}>
+                閉じる
+              </Button>
+            </div>
+          </Modal>
+        </>
+      )}
+
+      <Modal open={isdelModalOpen} onClose={() => setIsDelModalOpen(false)}>
+        <p className="mb-8 text-black font-bold text-center">
+          {modalMessage}
         </p>
-        {selectedTestGroup && (
-          <p className="mb-8 text-red-600 font-bold text-center">
-            対象テストグループID: {selectedTestGroup.id}
-          </p>
-        )}
-        <div className="flex justify-center space-x-10">
-          <Button className="w-24 bg-red-600 text-white" onClick={() => {
-            if (modalContent === 'initial') {
-              setModalContent('confirm');
-            } else {
-              testGroupDelete();
-            }
-          }}>削除</Button>
-          <Button className="w-24 bg-gray-500 hover:bg-gray-400" onClick={() => setIsModalOpen(false)}>
+        <div className="flex justify-center">
+          <Button className="w-24 bg-gray-500 hover:bg-gray-400" onClick={() => setIsDelModalOpen(false)}>
             閉じる
           </Button>
         </div>

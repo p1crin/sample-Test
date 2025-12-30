@@ -1,10 +1,12 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { STATUS_OPTIONS } from '@/constants/constants';
+import { fetchData } from '@/utils/api';
 import clientLogger from '@/utils/client-logger';
+import { useEffect, useState } from 'react';
+import { saveData } from '../action';
 import { userEditSchema } from './schemas/user-edit-schema';
-import { UserEditForm } from './UserEditForm';
 import type { UserEditChangeData, UserEditFormState } from './UserEditForm';
-import { getData, saveData } from '../action';
+import { UserEditForm } from './UserEditForm';
 
 type UserEditFormContainerProps = {
   id: number;
@@ -13,26 +15,16 @@ type UserEditFormContainerProps = {
 export function UserEditFormContainer({ id }: UserEditFormContainerProps) {
   const [errors, setErrors] = useState<Record<string, string[]>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [apiError, setApiError] = useState<Error | null>(null);
-
-  if (apiError) throw apiError;
-
-  // 初期データ
-  const initialForm: UserEditFormState = {
+  const [form, setForm] = useState<UserEditFormState>({
     name: '',
     email: '',
-    role: '一般',
+    user_role: '',
     department: '',
     company: '',
-    tag: '',
-    status: true,
-  };
-
-  const [form, setForm] = useState<UserEditFormState>(initialForm);
-
-  const handleClear = () => {
-    setForm(initialForm);
-  };
+    password: '',
+    tags: [] as string[],
+    status: '',
+  });
 
   const handleChange = (e: UserEditChangeData) => {
     const { name, value, type } = e.target;
@@ -81,21 +73,33 @@ export function UserEditFormContainer({ id }: UserEditFormContainerProps) {
   useEffect(() => {
     const getDataFunc = async () => {
       try {
-        const userData = await getData({ id: id });
+        const userData = await fetchData(`/api/users/${id}`);
+
         if (!userData.success || !userData.data) {
           throw new Error('データの取得に失敗しました' + ` (error: ${userData.error})`);
         }
-        setForm(userData.data);
-        clientLogger.info('UserEditFormContainer', 'データ取得成功', { data: userData.data.name });
+
+        const getEditData = userData.data;
+        const formingEdit: UserEditFormState = {
+          name: getEditData.name,
+          email: getEditData.email,
+          user_role: getEditData.user_role,
+          department: getEditData.department,
+          company: getEditData.company,
+          password: '',
+          tags: getEditData.userTags,
+          status: getEditData.status ? STATUS_OPTIONS.ENABLE : STATUS_OPTIONS.DISABLE
+        }
+        setForm(formingEdit);
+
+        clientLogger.info('ユーザ編集画面', 'データ取得成功', { data: userData.data.name });
       } catch (err) {
-        clientLogger.error('UserEditFormContainer', 'データ取得失敗', {
+        clientLogger.error('ユーザ編集画面', 'データ取得失敗', {
           error: err instanceof Error ? err.message : String(err),
         });
-        setApiError(err instanceof Error ? err : new Error(String(err)));
       }
     };
     getDataFunc();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // 空の依存配列で、マウント時に一度だけ実行
 
   return (
@@ -105,7 +109,6 @@ export function UserEditFormContainer({ id }: UserEditFormContainerProps) {
         form={form}
         errors={errors}
         onChange={handleChange}
-        onClear={handleClear}
         onSubmit={handleSubmit}
       />
       {loadError && (

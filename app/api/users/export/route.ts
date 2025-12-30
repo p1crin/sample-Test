@@ -1,83 +1,140 @@
-import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/app/lib/auth';
-import { query } from '@/app/lib/db';
+import { prisma } from '@/app/lib/prisma';
+import { ERROR_MESSAGES } from '@/constants/errorMessages';
+import { STATUS_CODES } from '@/constants/statusCodes';
+import { logAPIEndpoint, logDatabaseQuery, QueryTimer } from "@/utils/database-logger";
+import { NextRequest, NextResponse } from 'next/server';
 
-// GET /api/users/export - Export users to CSV
+// GET /api/users/export - ユーザエクスポート
 export async function GET(req: NextRequest) {
+  const apiTimer = new QueryTimer();
+  const user = await requireAdmin(req);
   try {
-    await requireAdmin(req);
+    const queryTimer = new QueryTimer();
 
-    // Fetch all users with their tags
-    const usersResult = await query(
-      `SELECT
-        u.id,
-        u.email,
-        u.user_role,
-        u.department,
-        u.company,
-        ARRAY_AGG(t.name) FILTER (WHERE t.name IS NOT NULL) as tags
-       FROM mt_users u
-       LEFT JOIN mt_user_tags ut ON u.id = ut.user_id
-       LEFT JOIN mt_tags t ON ut.tag_id = t.id AND t.is_deleted = FALSE
-       WHERE u.is_deleted = FALSE
-       GROUP BY u.id, u.email, u.user_role, u.department, u.company
-       ORDER BY u.id ASC`
-    );
+    // 全ユーザーとそのタグを取得
+    const users = await prisma.mt_users.findMany({
+      select: {
+        id: true,
+        email: true,
+        user_role: true,
+        department: true,
+        company: true,
+        is_deleted: true,
+        name: true,
+        mt_user_tags: {
+          select: {
+            mt_tags: {
+              select: {
+                name: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        id: 'asc',
+      },
+    });
 
-    const users = usersResult.rows;
+    logDatabaseQuery({
+      operation: 'SELECT',
+      table: 'mt_users',
+      executionTime: queryTimer.elapsed(),
+      rowsReturned: users.length,
+      query: 'findMany',
+      params: [],
+    });
 
-    // Generate CSV content
-    const headers = ['email', 'password', 'user_role', 'department', 'company', 'tags'];
+    // CSVコンテンツを生成
+    const headers = ['ID', 'ID(メールアドレス)', '氏名', 'パスワード', '部署', '会社名', '権限', 'タグ', 'ステータス'];
     const csvRows = [headers.join(',')];
 
     for (const user of users) {
-      const u = user as Record<string, unknown>;
+      const tags = user.mt_user_tags.map(tag => tag.mt_tags.name).filter(Boolean).join(';');
       const row = [
-        escapeCSVField(u.email as string),
-        '', // Password is not exported for security reasons
-        (u.user_role as string).toString(),
-        escapeCSVField((u.department as string) || ''),
-        escapeCSVField((u.company as string) || ''),
-        escapeCSVField(u.tags && Array.isArray(u.tags) && u.tags.length > 0 ? (u.tags as string[]).join(',') : ''),
+        user.id.toString(),
+        escapeCSVField(user.email),
+        escapeCSVField(user.name || ''),
+        '', // セキュリティのためパスワードはエクスポートしない
+        escapeCSVField(user.department || ''),
+        escapeCSVField(user.company || ''),
+        user.user_role.toString(),
+        escapeCSVField(tags),
+        user.is_deleted ? '1' : '0',
       ];
       csvRows.push(row.join(','));
     }
 
-    const csvContent = csvRows.join('\n');
+    const csvContent = '\uFEFF' + csvRows.join('\n'); // BOMを追加
 
-    // Return CSV as downloadable file
+    logAPIEndpoint({
+      method: 'GET',
+      endpoint: '/api/users/export',
+      userId: user.id,
+      statusCode: STATUS_CODES.OK,
+      executionTime: apiTimer.elapsed(),
+      dataSize: users.length,
+    });
+
+    // CSVをダウンロード可能なファイルとして返す
     return new NextResponse(csvContent, {
-      status: 200,
+      status: STATUS_CODES.OK,
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',
-        'Content-Disposition': `attachment; filename="users_export_${new Date().toISOString().split('T')[0]}.csv"`,
+        'Content-Disposition': `attachment;`,
       },
     });
   } catch (error) {
     console.error('GET /api/users/export error:', error);
 
     if (error instanceof Error && error.message === 'Unauthorized') {
-      return NextResponse.json({ error: '認証が必要です' }, { status: 401 });
+      logAPIEndpoint({
+        method: 'GET',
+        endpoint: '/api/users/export',
+        userId: user.id,
+        statusCode: STATUS_CODES.UNAUTHORIZED,
+        executionTime: apiTimer.elapsed(),
+        dataSize: 0,
+      });
+      return NextResponse.json({ error: ERROR_MESSAGES.UNAUTHORIZED }, { status: STATUS_CODES.UNAUTHORIZED });
     }
 
     if (error instanceof Error && error.message === 'Forbidden') {
-      return NextResponse.json({ error: '管理者権限が必要です' }, { status: 403 });
+      logAPIEndpoint({
+        method: 'GET',
+        endpoint: '/api/users/export',
+        userId: user.id,
+        statusCode: STATUS_CODES.FORBIDDEN,
+        executionTime: apiTimer.elapsed(),
+        dataSize: 0,
+      });
+      return NextResponse.json({ error: ERROR_MESSAGES.PERMISSION_DENIED }, { status: STATUS_CODES.FORBIDDEN });
     }
 
+    logAPIEndpoint({
+      method: 'GET',
+      endpoint: '/api/users/export',
+      userId: user.id,
+      statusCode: STATUS_CODES.INTERNAL_SERVER_ERROR,
+      executionTime: apiTimer.elapsed(),
+      dataSize: 0,
+    });
+
     return NextResponse.json(
-      { error: 'ユーザーのエクスポートに失敗しました' },
-      { status: 500 }
+      { error: 'ユーザのエクスポートに失敗しました' },
+      { status: STATUS_CODES.INTERNAL_SERVER_ERROR }
     );
   }
 }
 
 /**
- * Escape CSV field (handle commas, quotes, newlines)
+ * CSVフィールドをエスケープ（カンマ、引用符、改行を処理）
  */
 function escapeCSVField(field: string): string {
   if (!field) return '';
 
-  // If field contains comma, quote, or newline, wrap in quotes and escape quotes
+  // フィールドにカンマ、引用符、改行が含まれている場合、引用符で囲み、引用符をエスケープ
   if (field.includes(',') || field.includes('"') || field.includes('\n')) {
     return `"${field.replace(/"/g, '""')}"`;
   }

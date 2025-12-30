@@ -1,9 +1,9 @@
-import { NextRequest } from 'next/server';
-import { getToken } from 'next-auth/jwt';
-import { UserRole, TestRole } from '@/types';
 import { prisma } from '@/app/lib/prisma';
+import { TestRole, UserRole } from '@/types';
+import { getToken } from 'next-auth/jwt';
+import { NextRequest } from 'next/server';
 
-// Session user interface
+// セッションユーザーのインターフェース
 export interface SessionUser {
   id: number;
   email: string;
@@ -12,7 +12,7 @@ export interface SessionUser {
   company?: string;
 }
 
-// Get authenticated user from request
+// リクエストから認証されたユーザーを取得
 export async function getAuthUser(
   req: NextRequest
 ): Promise<SessionUser | null> {
@@ -34,7 +34,7 @@ export async function getAuthUser(
   };
 }
 
-// Require authentication middleware
+// 認証が必要なミドルウェア
 export async function requireAuth(
   req: NextRequest
 ): Promise<SessionUser> {
@@ -47,17 +47,17 @@ export async function requireAuth(
   return user;
 }
 
-// Check if user is admin
+// ユーザーが管理者かどうかをチェック
 export function isAdmin(user: SessionUser): boolean {
   return user.user_role === UserRole.ADMIN;
 }
 
-// Check if user is test manager or admin
+// ユーザーがテストマネージャーまたは管理者かどうかをチェック
 export function isTestManager(user: SessionUser): boolean {
-  return user.user_role === UserRole.TEST_MANAGER || user.user_role === UserRole.ADMIN;
+  return user.user_role === UserRole.TEST_MANAGER;
 }
 
-// Require admin role
+// 管理者ロールが必要
 export async function requireAdmin(req: NextRequest): Promise<SessionUser> {
   const user = await requireAuth(req);
 
@@ -68,7 +68,7 @@ export async function requireAdmin(req: NextRequest): Promise<SessionUser> {
   return user;
 }
 
-// Require test manager or admin role
+// テストマネージャーまたは管理者ロールが必要
 export async function requireTestManager(req: NextRequest): Promise<SessionUser> {
   const user = await requireAuth(req);
 
@@ -79,38 +79,38 @@ export async function requireTestManager(req: NextRequest): Promise<SessionUser>
   return user;
 }
 
-// Check if user has permission to view a test group
+// ユーザーがテストグループを閲覧する権限があるかどうかをチェック
 export async function canViewTestGroup(
   userId: number,
   userRole: UserRole,
   testGroupId: number
 ): Promise<boolean> {
-  // Admins can view all
+  // 管理者はすべて閲覧可能
   if (userRole === UserRole.ADMIN) {
     return true;
   }
 
-  // Check if user created the group
+  // ユーザーがグループを作成または更新したかどうかをチェック
   const group = await prisma.tt_test_groups.findUnique({
     where: { id: testGroupId },
-    select: { created_by: true, is_deleted: true },
+    select: { created_by: true, updated_by: true, is_deleted: true },
   });
 
   if (!group || group.is_deleted) {
     return false;
   }
 
-  // If user created it
-  if (group.created_by === userId.toString()) {
+  // ユーザーがグループを作成または更新した場合
+  if (group.created_by === userId || group.updated_by === userId) {
     return true;
   }
 
-  // Check if user has any test_role assigned via tags
+  // ユーザーがタグを通じてテストロールを持っているかどうかをチェック
   const hasPermission = await hasTestGroupPermission(userId, testGroupId);
   return hasPermission;
 }
 
-// Check if user has any permission on test group (via tags)
+// ユーザーがテストグループに対して何らかの権限を持っているかどうかをチェック（タグを通じて）
 export async function hasTestGroupPermission(
   userId: number,
   testGroupId: number
@@ -131,7 +131,7 @@ export async function hasTestGroupPermission(
   return count > 0;
 }
 
-// Check if user has specific test role on test group
+// ユーザーが特定のテストロールを持っているかどうかをチェック
 export async function hasTestRole(
   userId: number,
   testGroupId: number,
@@ -153,8 +153,8 @@ export async function hasTestRole(
     },
   });
 
-  // Check if user has the required role or a higher privilege role
-  // Designer (1) > Executor (2) > Viewer (3)
+  // ユーザーが必要なロールまたはそれ以上の権限を持っているかどうかをチェック
+  // 設計者 (0) > 実施者 (1) > 閲覧者 (2)
   for (const tag of tags) {
     if (tag.test_role <= requiredRole) {
       return true;
@@ -164,45 +164,60 @@ export async function hasTestRole(
   return false;
 }
 
-// Check if user can edit test cases (requires Designer role)
+// ユーザーがテストケースを編集できるかどうかをチェック（設計者ロールが必要）
 export async function canEditTestCases(
   user: SessionUser,
   testGroupId: number
 ): Promise<boolean> {
-  // Admins can always edit
+  // 管理者は常に編集可能
   if (isAdmin(user)) {
     return true;
   }
 
-  // Check if user has Designer role
+  // ユーザーがグループを作成または更新したかどうかをチェック
+  const group = await prisma.tt_test_groups.findUnique({
+    where: { id: testGroupId },
+    select: { created_by: true, updated_by: true, is_deleted: true },
+  });
+
+  if (!group || group.is_deleted) {
+    return false;
+  }
+
+  // ユーザーがグループを作成または更新した場合
+  if (group.created_by === user.id || group.updated_by === user.id) {
+    return true;
+  }
+
+  // ユーザーが設計者ロールを持っているかどうかをチェック
   return await hasTestRole(user.id, testGroupId, TestRole.DESIGNER);
 }
 
-// Check if user can execute tests (requires Executor role)
+// ユーザーがテストを実行できるかどうかをチェック（実施者ロールが必要）
 export async function canExecuteTests(
   user: SessionUser,
   testGroupId: number
 ): Promise<boolean> {
-  // Admins can always execute
+  // 管理者は常に実行可能
   if (isAdmin(user)) {
     return true;
   }
 
-  // Check if user has Executor role
+  // ユーザーが実施者ロールを持っているかどうかをチェック
   return await hasTestRole(user.id, testGroupId, TestRole.EXECUTOR);
 }
 
-// Check if user can modify test group
+// ユーザーがテストグループを変更できるかどうかをチェック
 export async function canModifyTestGroup(
   user: SessionUser,
   testGroupId: number
 ): Promise<boolean> {
-  // Admins can always modify
+  // 管理者は常に変更可能
   if (isAdmin(user)) {
     return true;
   }
 
-  // Check if user created the group
+  // ユーザーがグループを作成したかどうかをチェック
   const group = await prisma.tt_test_groups.findUnique({
     where: { id: testGroupId },
     select: { created_by: true, is_deleted: true },
@@ -212,15 +227,15 @@ export async function canModifyTestGroup(
     return false;
   }
 
-  return group.created_by === user.id.toString();
+  return group.created_by === user.id;
 }
 
-// Get all test groups accessible by user
+// ユーザーがアクセス可能なすべてのテストグループを取得
 export async function getAccessibleTestGroups(
   userId: number,
   userRole: UserRole
 ): Promise<number[]> {
-  // Admins can access all
+  // 管理者はすべてアクセス可能
   if (userRole === UserRole.ADMIN) {
     const groups = await prisma.tt_test_groups.findMany({
       where: { is_deleted: false },
@@ -229,13 +244,14 @@ export async function getAccessibleTestGroups(
     return groups.map((group) => group.id);
   }
 
-  // Test managers can access groups they created or are assigned to
+  // テスト管理者は自分が作成/更新したグループまたは割り当てられたグループにアクセス可能
   if (userRole === UserRole.TEST_MANAGER) {
     const groups = await prisma.tt_test_groups.findMany({
       where: {
         is_deleted: false,
         OR: [
-          { created_by: userId.toString() },
+          { created_by: userId },
+          { updated_by: userId },
           {
             tt_test_group_tags: {
               some: {
@@ -257,7 +273,7 @@ export async function getAccessibleTestGroups(
     return groups.map((group) => group.id);
   }
 
-  // General users can only access groups they are assigned to
+  // 一般ユーザーは割り当てられたグループにのみアクセス可能
   const tags = await prisma.tt_test_group_tags.findMany({
     where: {
       mt_tags: {
@@ -273,13 +289,4 @@ export async function getAccessibleTestGroups(
   });
 
   return tags.map((tag) => tag.test_group_id);
-}
-
-// Check if user can access a specific test group
-export async function checkTestGroupAccess(
-  userId: number,
-  userRole: UserRole,
-  testGroupId: number
-): Promise<boolean> {
-  return await canViewTestGroup(userId, userRole, testGroupId);
 }

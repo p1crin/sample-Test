@@ -1,18 +1,8 @@
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Select } from '@/components/ui/select';
-import { Toast } from '@/components/ui/toast';
-import { Modal } from '@/components/ui/modal';
-import Link from 'next/link';
-import { useState } from 'react';
-import { Calendar } from '@/components/ui/calendar';
-import clientLogger from '@/utils/client-logger';
-import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
-import { format } from 'date-fns';
 import { TestCaseListRow } from '../../../../_components/types/testCase-list-row';
 import { VerticalForm } from '@/components/ui/verticalForm';
 import { useRouter } from 'next/navigation';
-import TestCaseForm from '@/components/ui/testCaseForm';
+import TestCaseForm from '@/app/(secure)/testGroup/[groupId]/testCase/[tid]/_components/testCaseForm';
 
 export type TestCaseEditFormState = TestCaseListRow;
 
@@ -131,6 +121,7 @@ export function TestCaseEditForm({
       type: 'file',
       name: 'controlSpec',
       value: '',
+      isCopyable: true,
       onChange: () => { },
       placeholder: '制御仕様'
     },
@@ -139,6 +130,7 @@ export function TestCaseEditForm({
       type: 'file',
       name: 'dataFlow',
       value: '',
+      isCopyable: true,
       onChange: () => { },
       placeholder: 'データフロー'
     },
@@ -158,10 +150,11 @@ export function TestCaseEditForm({
     secondLayer: "第2層-1",
     thirdLayer: "第3層-1",
     fourthLayer: "第4層-1",
+    controlSpec: "制御仕様サンプル.png",
+    dataFlow: "データフローサンプル.png",
     checkItems: "確認観点サンプル",
     requestId: "要求ID1",
     purpose: "目的1",
-    dataflow: "dataflow1",
     testProcedure: "テスト手順サンプル"
   };
 
@@ -175,7 +168,6 @@ export function TestCaseEditForm({
       <h1 className="text-lg font-bold">テスト情報</h1>
       <div>
         <VerticalForm fields={fields} values={sampleValue} />
-        <p>{sampleValue.dataflow}</p>
       </div>
       <div className="my-10"></div>
       <h1 className="text-lg font-bold">テスト内容</h1>

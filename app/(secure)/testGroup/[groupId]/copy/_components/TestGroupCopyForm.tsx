@@ -9,6 +9,7 @@ export type TestGroupCopyFormState = CreateTestGroupListRow;
 
 export type TestGroupCopyChangeData = {
   target: {
+    testGroupId: string;
     name: string;
     value: string;
     type: string;
@@ -59,7 +60,7 @@ export function TestGroupCopyForm({
       return `${year}/${month}/${day}`;
     };
     const newTestGroup = {
-      id: 1,
+      testGroupId: 1,
       oem: `OEM1`,
       model: `機種1`,
       destination: `仕向1`,
@@ -68,8 +69,8 @@ export function TestGroupCopyForm({
       specs: `制御仕様名1`,
       testDatespan: `2025-09-09～2025-09-12`,
       ngPlanCount: `30`,
-      created_at: formatDate(new Date()),
-      updated_at: formatDate(new Date())
+      createdAt: formatDate(new Date()),
+      updatedAt: formatDate(new Date())
     };
     setMenuItems([...menuItems, newTestGroup]);
     router.push('/testGroup', { scroll: false });
@@ -142,6 +143,7 @@ export function TestGroupCopyForm({
       type: 'number',
       name: 'ngPlanCount',
       value: '',
+      max: 9999,
       onChange: () => { },
       placeholder: ''
     },

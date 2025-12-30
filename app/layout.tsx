@@ -16,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Testcase DB app',
-  description: 'TBD',
+  title: 'ProofLink',
+  description: 'ProofLink',
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

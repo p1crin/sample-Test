@@ -7,31 +7,25 @@ import type { TestGroupCopyChangeData, TestGroupCopyFormState } from './TestGrou
 import { getData, saveData } from '../action';
 
 type TestGroupCopyFormContainerProps = {
-  groupId: number;
+  testGroupId: number;
 };
 
-export function TestGroupCopyFormContainer({ groupId }: TestGroupCopyFormContainerProps) {
+export function TestGroupCopyFormContainer({ testGroupId }: TestGroupCopyFormContainerProps) {
   const [toastOpen, setToastOpen] = useState(false);
   const [errors, setErrors] = useState<Record<string, string[]>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [apiError, setApiError] = useState<Error | null>(null);
-
-  if (apiError) throw apiError;
 
   // 初期データ
   const initialForm: TestGroupCopyFormState = {
+    testGroupId: 1,
     oem: '',
     model: '',
     destination: '',
     event: '',
     variation: '',
     specs: '',
-    test_startdate: '',
-    test_enddate: '',
-    ngPlanCount: '',
-    designerTag: [],
-    executerTag: [],
-    viewerTag: [],
+    testDatespan: '',
+    ngPlanCount: ''
   };
 
   const [form, setForm] = useState<TestGroupCopyFormState>(initialForm);
@@ -91,17 +85,16 @@ export function TestGroupCopyFormContainer({ groupId }: TestGroupCopyFormContain
   useEffect(() => {
     const getDataFunc = async () => {
       try {
-        const testGroupData = await getData({ groupId: groupId });
+        const testGroupData = await getData({ testGroupId: testGroupId });
         if (!testGroupData.success || !testGroupData.data) {
           throw new Error('データの取得に失敗しました' + ` (error: ${testGroupData.error})`);
         }
         setForm(testGroupData.data);
-        clientLogger.info('TestGroupCopyFormContainer', 'データ取得成功');
+        clientLogger.info('TestGroupCopyFormContainer', 'データ取得成功', { data: testGroupData.data.testGroupId });
       } catch (err) {
         clientLogger.error('TestGroupCopyFormContainer', 'データ取得失敗', {
           error: err instanceof Error ? err.message : String(err),
         });
-        setApiError(err instanceof Error ? err : new Error(String(err)));
       }
     };
     getDataFunc();

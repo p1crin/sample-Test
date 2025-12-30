@@ -1,24 +1,21 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, isAdmin, isTestManager, getAccessibleTestGroups } from '@/app/lib/auth';
+import { getAccessibleTestGroups, isAdmin, isTestManager, requireAuth } from '@/app/lib/auth';
 import { prisma } from '@/app/lib/prisma';
-import serverLogger from '@/utils/server-logger';
-import { logDatabaseQuery, logAPIEndpoint, QueryTimer } from '@/utils/database-logger';
-import { formatDate } from '@/utils/date-formatter';
+import { ERROR_MESSAGES } from '@/constants/errorMessages';
+import { STATUS_CODES } from '@/constants/statusCodes';
 import type { Prisma } from '@/generated/prisma/client';
+import { logAPIEndpoint, logDatabaseQuery, QueryTimer } from '@/utils/database-logger';
+import { handleError } from '@/utils/errorHandler';
+import { NextRequest, NextResponse } from 'next/server';
 
-// GET /api/test-groups - アクセス可能なテストグループを取得（動的権限チェック）
+// GET /api/test-groups - アクセス可能なテストグループを取得
 export async function GET(req: NextRequest) {
   const apiTimer = new QueryTimer();
-  let statusCode = 200;
+  let statusCode = STATUS_CODES.OK;
 
   try {
-    // 認証確認（ヘルパー関数）
     const user = await requireAuth(req);
 
-    // 動的権限チェック: ユーザーがアクセス可能なテストグループIDを取得
-    // - ADMIN(0): すべてのテストグループにアクセス可能
-    // - TEST_MANAGER(1): 作成したテストグループ + タグで割り当てられたテストグループにアクセス可能
-    // - GENERAL_USER(2): タグで割り当てられたテストグループのみアクセス可能
+    // アクセス可能なテストグループのIDを取得
     const accessibleIds = await getAccessibleTestGroups(user.id, user.user_role);
 
     if (accessibleIds.length === 0) {
@@ -26,9 +23,10 @@ export async function GET(req: NextRequest) {
         method: 'GET',
         endpoint: '/api/test-groups',
         userId: user.id,
-        statusCode: 200,
+        statusCode: STATUS_CODES.OK,
         executionTime: apiTimer.elapsed(),
         dataSize: 0,
+        queryParams: new URLSearchParams(req.url.split('?')[1]),
       });
       return NextResponse.json({ success: true, data: [], totalCount: 0 });
     }
@@ -89,6 +87,14 @@ export async function GET(req: NextRequest) {
       };
     }
 
+    logAPIEndpoint({
+      method: 'GET',
+      endpoint: '/api/test-groups',
+      userId: user.id,
+      executionTime: apiTimer.elapsed(),
+      queryParams: searchParams,
+    });
+
     // 合計件数を取得
     const countTimer = new QueryTimer();
     const totalCount = await prisma.tt_test_groups.count({
@@ -98,6 +104,7 @@ export async function GET(req: NextRequest) {
     logDatabaseQuery({
       operation: 'SELECT',
       table: 'tt_test_groups',
+      userId: user.id,
       executionTime: countTimer.elapsed(),
       rowsReturned: 1,
       query: 'COUNT(*)',
@@ -109,7 +116,7 @@ export async function GET(req: NextRequest) {
     const testGroups = await prisma.tt_test_groups.findMany({
       where: whereConditions,
       orderBy: {
-        created_at: 'desc',
+        updated_at: 'desc',
       },
       skip: offset,
       take: limit,
@@ -118,51 +125,32 @@ export async function GET(req: NextRequest) {
     logDatabaseQuery({
       operation: 'SELECT',
       table: 'tt_test_groups',
+      userId: user.id,
       executionTime: dataTimer.elapsed(),
       rowsReturned: testGroups.length,
       query: 'findMany',
       params: [{ skip: offset, take: limit }],
     });
 
-    // 日付をフォーマット（日本時間）
-    const formattedTestGroups = testGroups.map((group: typeof testGroups[0]) => ({
-      ...group,
-      created_at: formatDate(group.created_at, 'YYYY/MM/DD HH:mm:ss'),
-      updated_at: formatDate(group.updated_at, 'YYYY/MM/DD HH:mm:ss'),
-    }));
-
-    statusCode = 200;
+    statusCode = STATUS_CODES.OK;
     logAPIEndpoint({
       method: 'GET',
       endpoint: '/api/test-groups',
       userId: user.id,
       statusCode,
       executionTime: apiTimer.elapsed(),
-      dataSize: formattedTestGroups.length,
+      dataSize: testGroups.length,
+      queryParams: searchParams,
     });
 
-    return NextResponse.json({ success: true, data: formattedTestGroups, totalCount });
+    return NextResponse.json({ success: true, data: testGroups, totalCount });
   } catch (error) {
-    statusCode = error instanceof Error && error.message === 'Unauthorized' ? 401 : 500;
-
-    logAPIEndpoint({
-      method: 'GET',
-      endpoint: '/api/test-groups',
-      statusCode,
-      executionTime: apiTimer.elapsed(),
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
-
-    if (error instanceof Error && error.message === 'Unauthorized') {
-      return NextResponse.json(
-        { error: '認証が必要です' },
-        { status: 401 }
-      );
-    }
-
-    return NextResponse.json(
-      { error: 'テストグループの取得に失敗しました' },
-      { status: 500 }
+    return handleError(
+      error as Error,
+      STATUS_CODES.INTERNAL_SERVER_ERROR,
+      apiTimer,
+      'GET',
+      '/api/test-groups'
     );
   }
 }
@@ -170,25 +158,29 @@ export async function GET(req: NextRequest) {
 // POST /api/test-groups - 新しいテストグループを作成
 export async function POST(req: NextRequest) {
   const apiTimer = new QueryTimer();
-  let statusCode = 201;
+  let statusCode = STATUS_CODES.CREATED;
 
   try {
     const user = await requireAuth(req);
 
     // ユーザーが管理者またはテスト管理者かどうかを確認
     if (!isAdmin(user) && !isTestManager(user)) {
-      statusCode = 403;
+      statusCode = STATUS_CODES.FORBIDDEN;
       logAPIEndpoint({
         method: 'POST',
         endpoint: '/api/test-groups',
         userId: user.id,
         statusCode,
         executionTime: apiTimer.elapsed(),
-        error: 'Permission denied',
+        error: ERROR_MESSAGES.PERMISSION_DENIED,
       });
-      return NextResponse.json(
-        { error: 'テストグループを作成する権限がありません' },
-        { status: 403 }
+
+      return handleError(
+        new Error(ERROR_MESSAGES.PERMISSION_DENIED),
+        STATUS_CODES.FORBIDDEN,
+        apiTimer,
+        'POST',
+        '/api/test-groups'
       );
     }
 
@@ -206,65 +198,73 @@ export async function POST(req: NextRequest) {
       tag_names, // { tag_name, test_role } の配列
     } = body;
 
-    serverLogger.debug('POST /api/test-groups リクエスト', {
-      oem,
-      model,
-      event,
-      variation,
-      destination,
-      tagCount: tag_names?.length || 0,
+    logAPIEndpoint({
+      method: 'POST',
+      endpoint: '/api/test-groups',
+      userId: user.id,
+      executionTime: apiTimer.elapsed(),
+      queryParams: new URLSearchParams(req.url.split('?')[1]),
     });
 
     // 必須フィールドをバリデーション
     if (!oem || !model || !event || !variation || !destination || !specs || !test_startdate || !test_enddate || ng_plan_count === undefined || ng_plan_count === null) {
-      statusCode = 400;
+      statusCode = STATUS_CODES.BAD_REQUEST;
       logAPIEndpoint({
         method: 'POST',
         endpoint: '/api/test-groups',
         userId: user.id,
         statusCode,
         executionTime: apiTimer.elapsed(),
-        error: 'Validation error: Required fields are missing',
+        error: ERROR_MESSAGES.VALIDATION_ERROR_REQUIRED_FIELDS,
       });
-      return NextResponse.json(
-        { success: false, error: { message: 'すべての必須フィールドを入力してください' } },
-        { status: 400 }
+      return handleError(
+        new Error(ERROR_MESSAGES.VALIDATION_ERROR_REQUIRED_FIELDS),
+        STATUS_CODES.BAD_REQUEST,
+        apiTimer,
+        'POST',
+        '/api/test-groups'
       );
     }
 
     // フィールドの文字数をバリデーション
     const maxLength = 255;
     if (oem.length > maxLength || model.length > maxLength || event.length > maxLength ||
-        variation.length > maxLength || destination.length > maxLength) {
-      statusCode = 400;
+      variation.length > maxLength || destination.length > maxLength) {
+      statusCode = STATUS_CODES.BAD_REQUEST;
       logAPIEndpoint({
         method: 'POST',
         endpoint: '/api/test-groups',
         userId: user.id,
         statusCode,
         executionTime: apiTimer.elapsed(),
-        error: 'Validation error: Field length exceeds maximum',
+        error: ERROR_MESSAGES.VALIDATION_ERROR_FIELD_LENGTH,
       });
-      return NextResponse.json(
-        { success: false, error: { message: `OEM、機種、イベント、バリエーション、仕向は${maxLength}文字以内で入力してください` } },
-        { status: 400 }
+      return handleError(
+        new Error(ERROR_MESSAGES.VALIDATION_ERROR_FIELD_LENGTH),
+        STATUS_CODES.BAD_REQUEST,
+        apiTimer,
+        'POST',
+        '/api/test-groups'
       );
     }
 
     // 不具合摘出予定数をバリデーション
     if (typeof ng_plan_count !== 'number' || ng_plan_count < 0 || ng_plan_count > 9999) {
-      statusCode = 400;
+      statusCode = STATUS_CODES.BAD_REQUEST;
       logAPIEndpoint({
         method: 'POST',
         endpoint: '/api/test-groups',
         userId: user.id,
         statusCode,
         executionTime: apiTimer.elapsed(),
-        error: 'Validation error: ng_plan_count out of range',
+        error: ERROR_MESSAGES.VALIDATION_ERROR_NG_PLAN_COUNT,
       });
-      return NextResponse.json(
-        { success: false, error: { message: '不具合摘出予定数は最大9999件です' } },
-        { status: 400 }
+      return handleError(
+        new Error(ERROR_MESSAGES.VALIDATION_ERROR_NG_PLAN_COUNT),
+        STATUS_CODES.BAD_REQUEST,
+        apiTimer,
+        'POST',
+        '/api/test-groups'
       );
     }
 
@@ -273,18 +273,21 @@ export async function POST(req: NextRequest) {
       const startDate = new Date(test_startdate);
       const endDate = new Date(test_enddate);
       if (startDate > endDate) {
-        statusCode = 400;
+        statusCode = STATUS_CODES.BAD_REQUEST;
         logAPIEndpoint({
           method: 'POST',
           endpoint: '/api/test-groups',
           userId: user.id,
           statusCode,
           executionTime: apiTimer.elapsed(),
-          error: 'Validation error: test_startdate must be before test_enddate',
+          error: ERROR_MESSAGES.VALIDATION_ERROR_DATE,
         });
-        return NextResponse.json(
-          { success: false, error: { message: '試験開始日は試験終了日以前である必要があります' } },
-          { status: 400 }
+        return handleError(
+          new Error(ERROR_MESSAGES.VALIDATION_ERROR_DATE),
+          STATUS_CODES.BAD_REQUEST,
+          apiTimer,
+          'POST',
+          '/api/test-groups'
         );
       }
     }
@@ -297,15 +300,15 @@ export async function POST(req: NextRequest) {
         data: {
           oem,
           model,
-          event: event || '',
-          variation: variation || '',
-          destination: destination || '',
-          specs: specs || '',
-          test_startdate: test_startdate ? new Date(test_startdate) : null,
-          test_enddate: test_enddate ? new Date(test_enddate) : null,
-          ng_plan_count: ng_plan_count || 0,
-          created_by: user.id.toString(),
-          updated_by: user.id.toString(),
+          event,
+          variation,
+          destination,
+          specs,
+          test_startdate: new Date(test_startdate),
+          test_enddate: new Date(test_enddate),
+          ng_plan_count,
+          created_by: user.id,
+          updated_by: user.id,
         },
       });
 
@@ -384,7 +387,7 @@ export async function POST(req: NextRequest) {
       return newGroup;
     });
 
-    statusCode = 201;
+    statusCode = STATUS_CODES.CREATED;
     logAPIEndpoint({
       method: 'POST',
       endpoint: '/api/test-groups',
@@ -394,29 +397,14 @@ export async function POST(req: NextRequest) {
       dataSize: 1,
     });
 
-    return NextResponse.json({ success: true, data: testGroup }, { status: 201 });
+    return NextResponse.json({ success: true, data: testGroup }, { status: STATUS_CODES.CREATED });
   } catch (error) {
-    // エラーが認証エラーの場合は401、その他は500
-    statusCode = error instanceof Error && error.message === 'Unauthorized' ? 401 : 500;
-
-    logAPIEndpoint({
-      method: 'POST',
-      endpoint: '/api/test-groups',
-      statusCode,
-      executionTime: apiTimer.elapsed(),
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
-
-    if (error instanceof Error && error.message === 'Unauthorized') {
-      return NextResponse.json(
-        { error: '認証が必要です' },
-        { status: 401 }
-      );
-    }
-
-    return NextResponse.json(
-      { error: 'テストグループの作成に失敗しました' },
-      { status: 500 }
+    return handleError(
+      error as Error,
+      STATUS_CODES.INTERNAL_SERVER_ERROR,
+      apiTimer,
+      'POST',
+      '/api/test-groups'
     );
   }
 }

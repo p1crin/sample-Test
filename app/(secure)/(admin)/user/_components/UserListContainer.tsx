@@ -1,111 +1,69 @@
-// UserListContainer.tsx
-'use client';
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import clientLogger from '@/utils/client-logger';
+"use client"
 import { Column } from '@/components/datagrid/DataGrid';
-import { UserListRow, UserListTableRow } from './types/user-list-row';
-import { UserList } from './UserList';
-import { getDataList, getDataCount, getTagOptions } from '../action';
 import { Button } from '@/components/ui/button';
-import { useRouter, useSearchParams } from 'next/navigation';
-import ImportButton from '@/components/ui/importButton';
 import ExportButton from '@/components/ui/exportButton';
+import ImportButton from '@/components/ui/importButton';
+import Loading from '@/components/ui/loading';
 import { Modal } from '@/components/ui/modal';
 import SeachForm from '@/components/ui/searchForm';
 import { ROLE_OPTIONS, STATUS_OPTIONS } from '@/constants/constants';
+import { STATUS_CODES } from "@/constants/statusCodes";
+import { fetchData } from '@/utils/api';
+import clientLogger from '@/utils/client-logger';
+import { formatDateJST } from '@/utils/date-formatter';
+import { buildQueryString, updateUrlParams } from '@/utils/queryUtils';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import React, { useEffect, useState } from 'react';
+import { UserListRow, UserListTableRow } from './types/user-list-row';
+import { UserList } from './UserList';
 
 export function UserListContainer() {
-  const router = useRouter();
-  const searchParamsQuery = useSearchParams();
-
   const [tagOptions, setTagOptions] = useState<{ value: string, label: string }[]>([]);
+  const [tagError, setTagError] = useState<string | null>(null);
   const [menuItems, setMenuItems] = useState<UserListRow[]>([]);
   const [page, setPage] = useState(1);
   const [pageCount, setPageCount] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
   const [sortConfig, setSortConfig] = useState<{
     key: keyof UserListRow;
     direction: 'asc' | 'desc';
   } | null>(null);
-  const [apiError, setApiError] = useState<Error | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
-  const pageSize = 10;
-
-  // APIエラーがある場合はスロー（error.tsx がキャッチする）
-  if (apiError) {
-    throw apiError;
-  }
-
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalMessage, setModalMessage] = useState('');
   const [selectedUser, setSelectedUser] = useState<UserListTableRow | null>(null);
+  const [userLoading, setUserLoading] = useState(true);
+  const [tagLoading, setTagLoading] = useState(true);
+  const [delLoading, setDelLoading] = useState(false);
+  const [isDelModalOpen, setIsDelModalOpen] = useState(false);
 
-  // フォーム入力値（リアルタイムで変更）
+  const pageSize = 10;
+  const router = useRouter();
+  const pathName = usePathname();
+  const searchParamsQuery = useSearchParams();
+  const pagePath = '/user';
+
+  // フォーム入力値(リアルタイムで変更)
   const [formValues, setFormValues] = useState<Record<string, string | string[]>>({
     email: '',
     name: '',
     department: '',
     company: '',
-    role: '',
-    tag: [],
+    user_role: '',
+    tags: [] as string[],
     status: '',
   });
 
-  // 検索パラメータ（検索ボタン押下時に更新）
+  // 検索パラメータ(検索ボタン押下時に更新)
   const [searchParams, setSearchParams] = useState<Record<string, string | string[]>>({
     email: '',
     name: '',
     department: '',
     company: '',
-    role: '',
-    tag: [],
+    user_role: '',
+    tags: [] as string[],
     status: '',
   });
-
-  // 検索パラメータを含むクエリ文字列を構築（API用）
-  const buildQueryString = (params: Record<string, string | string[]>, pageNum: number = 1) => {
-    const queryParams = new URLSearchParams();
-    queryParams.append('page', String(pageNum));
-    queryParams.append('limit', String(pageSize));
-
-    // 空でない検索パラメータのみ追加
-    Object.entries(params).forEach(([key, value]) => {
-      if (Array.isArray(value)) {
-        // タグなど配列の場合は複数の値を追加
-        value.forEach(v => {
-          if (v.trim()) {
-            queryParams.append(key, v);
-          }
-        });
-      } else if (typeof value === 'string' && value.trim()) {
-        queryParams.append(key, value);
-      }
-    });
-
-    return queryParams.toString();
-  };
-
-  // URLパラメータを更新する関数（limitは含めない）
-  const updateUrlParams = (newSearchParams: Record<string, string | string[]>, pageNum: number = 1) => {
-    const queryParams = new URLSearchParams();
-    queryParams.append('page', String(pageNum));
-
-    // 空でない検索パラメータのみ追加
-    Object.entries(newSearchParams).forEach(([key, value]) => {
-      if (Array.isArray(value)) {
-        value.forEach(v => {
-          if (v.trim()) {
-            queryParams.append(key, v);
-          }
-        });
-      } else if (typeof value === 'string' && value.trim()) {
-        queryParams.append(key, value);
-      }
-    });
-
-    const queryString = queryParams.toString();
-    router.push(`/user?${queryString}`);
-    clientLogger.info('UserListContainer', 'URL更新', { pageNum, searchParams: newSearchParams });
-  };
 
   // URLパラメータをコンポーネント状態に同期する
   useEffect(() => {
@@ -114,14 +72,12 @@ export function UserListContainer() {
       name: searchParamsQuery.get('name') || '',
       department: searchParamsQuery.get('department') || '',
       company: searchParamsQuery.get('company') || '',
-      role: searchParamsQuery.get('role') || '',
-      tag: searchParamsQuery.getAll('tag') || [],
+      user_role: searchParamsQuery.get('user_role') || '',
+      tags: searchParamsQuery.getAll('tags') || [],
       status: searchParamsQuery.get('status') || '',
     };
-
     const pageNum = parseInt(searchParamsQuery.get('page') || '1', 10);
     const hasPageInUrl = searchParamsQuery.get('page') !== null;
-
     setFormValues(params);
     setSearchParams(params);
     setPage(pageNum);
@@ -129,10 +85,8 @@ export function UserListContainer() {
 
     // URLにpageパラメータがない場合は、URLを更新（初期表示やサイドバーからの遷移時）
     if (!hasPageInUrl) {
-      updateUrlParams(params, pageNum);
+      updateUrlParams(router, params, pagePath, pageNum);
     }
-
-    clientLogger.info('UserListContainer', 'URLパラメータ同期完了', { params, pageNum, hasPageInUrl });
   }, [searchParamsQuery]);
 
   useEffect(() => {
@@ -140,83 +94,86 @@ export function UserListContainer() {
     if (!isInitialized) {
       return;
     }
-
-    const getDataCountFunc = async () => {
-      try {
-        clientLogger.info('UserListContainer', 'ユーザー数取得開始', { searchParams, isInitialized });
-        const result = await getDataCount(searchParams);
-        if (!result.success || !result.data) {
-          throw new Error('ユーザー数の取得に失敗しました');
-        }
-        setPageCount(result.success && result.data ? Math.ceil(result.data / pageSize) : 0);
-        clientLogger.info('UserListContainer', 'ユーザー数取得成功', { count: result.data, searchParams });
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        clientLogger.error('UserListContainer', 'ユーザー数取得失敗', {
-          error: error.message,
-          searchParams,
-        });
-        setApiError(error);
-      }
-    };
-    getDataCountFunc();
-  }, [searchParams, pageSize, isInitialized]);
-
-  useEffect(() => {
-    // URLパラメータ同期が完了するまで待つ
-    if (!isInitialized) {
-      return;
-    }
-
     let ignore = false;
-    clientLogger.info('UserListContainer', 'データ取得開始', { page, searchParams, isInitialized });
 
-    const getDataListFunc = async () => {
+    const getDataFunc = async () => {
       try {
-        clientLogger.info('UserListContainer', 'ユーザーリスト取得開始', { page, searchParams });
-        const userData = await getDataList({ page, searchParams });
-        if (!userData.success || !userData.data) {
-          throw new Error('データの取得に失敗しました' + ` (error: ${userData.error})`);
+        clientLogger.debug('ユーザ一覧画面', 'ユーザリスト取得開始', { page, searchParams });
+        setUserLoading(true);
+        const queryString = buildQueryString(searchParams, page, pageSize);
+        const userData = await fetchData(`/api/users?${queryString}`);
+        const count = userData.totalCount || (userData.data ? userData.data.length : 0);
+        setTotalCount(count);
+        setPageCount(Math.ceil(count / pageSize));
+
+        if (!ignore) {
+          // 日付をフォーマット（日本時間）
+          const formattedUsers = userData.data.map((user: typeof userData.data[0]) => ({
+            ...user,
+            tags: user.tags.split(","),
+            created_at: formatDateJST(user.created_at),
+            updated_at: formatDateJST(user.updated_at),
+          }));
+          setMenuItems(formattedUsers);
         }
-        if (!ignore) setMenuItems(userData.data);
-        clientLogger.info('UserListContainer', 'ユーザーリスト取得成功', {
+        clientLogger.debug('ユーザ一覧画面', 'ユーザリスト取得成功', {
           page,
           count: userData.data?.length,
+          result: userData.data,
         });
+        setUserLoading(false);
       } catch (err) {
         if (!ignore) setMenuItems([]);
-        const error = err instanceof Error ? err : new Error(String(err));
-        clientLogger.error('UserListContainer', 'ユーザーデータ取得失敗', {
-          page,
-          error: error.message,
-        });
-        if (!ignore) setApiError(error);
+        if (err instanceof Error) {
+          clientLogger.error('ユーザ一覧画面', 'データ取得失敗', {
+            page,
+            error: err.message,
+          });
+        }
+      } finally {
+        if (!ignore) {
+          setUserLoading(false);
+        }
       }
     };
-    getDataListFunc();
+    getDataFunc();
     return () => {
       ignore = true;
     };
   }, [page, pageSize, searchParams, isInitialized]);
 
   useEffect(() => {
-    async function fetchTagOptions() {
+    const fetchTags = async () => {
       try {
-        const result = await getTagOptions();
-        if (!result.success || !result.data) {
-          throw new Error('タグオプションの取得に失敗しました');
+        setTagLoading(true);
+        setTagError(null);
+        const result = await fetchData('/api/tags');
+
+        if (result.success && Array.isArray(result.data)) {
+          const tagOptions = result.data.map((tag: { id: number; name: string }) => ({
+            value: tag.name,
+            label: tag.name,
+          }));
+          setTagOptions(tagOptions);
+        } else {
+          setTagError('タグの取得に失敗しました');
         }
-        setTagOptions(result.data);
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err));
-        clientLogger.error('UserListContainer', 'タグオプション取得失敗', {
-          error: error.message,
-        });
-        setApiError(error);
+      } catch (error) {
+        clientLogger.error('ユーザ一覧画面', 'タグ取得エラー', { error });
+        setTagError(error instanceof Error ? error.message : 'タグの取得に失敗しました');
+      } finally {
+        setTagLoading(false);
       }
-    }
-    fetchTagOptions();
+    };
+    fetchTags();
   }, []);
+
+  const handleTagChange = (tagName: string, selectedValues: string[]) => {
+    setFormValues(prev => ({
+      ...prev,
+      [tagName]: selectedValues
+    }));
+  };
 
   const handleSort = (key: keyof UserListTableRow) => {
     setSortConfig((prev) => {
@@ -232,25 +189,76 @@ export function UserListContainer() {
     { key: 'name', header: '氏名', },
     { key: 'department', header: '部署', },
     { key: 'company', header: '会社名', },
-    { key: 'role', header: '権限', },
-    { key: 'tag', header: 'タグ', },
+    { key: 'user_role', header: '権限', },
+    { key: 'tags', header: 'タグ', },
     { key: 'status', header: 'ステータス', },
   ];
 
-  const toUserEditPage = (id: string) => {
+  // ユーザ新規登録画面遷移
+  const toUserRegistPage = () => {
+    router.push('/user/regist');
+  };
+
+  // ユーザ編集画面遷移
+  const toUserEditPage = (id: number) => {
     router.push(`/user/edit/${id}`);
   };
 
-  const userDelete = () => {
-    if (selectedUser) {
-      console.log("ユーザ削除", selectedUser.email);
-      setIsModalOpen(false);
+  const userDelete = async () => {
+    if (!selectedUser) {
+      throw new Error('削除対象ユーザが見つかりません')
+    }
+
+    try {
+      setDelLoading(true);
+      const response = await fetch(`/api/users/${selectedUser.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          id: selectedUser.id
+        })
+      });
+      const result = await response.json();
+
+      if (result.success) {
+        clientLogger.info('ユーザ一覧画面', 'ユーザ削除成功', { userId: selectedUser.id });
+        // ユーザ一覧再描画
+        const queryString = buildQueryString(searchParams, page, pageSize);
+        const newUserData = await fetchData(`/api/users?${queryString}`);
+        const count = newUserData.totalCount || (newUserData.data ? newUserData.data.length : 0);
+        setTotalCount(count);
+        setPageCount(Math.ceil(count / pageSize));
+
+        // 日付をフォーマット（日本時間）
+        const formattedUsers = newUserData.data.map((user: typeof newUserData.data[0]) => ({
+          ...user,
+          tags: user.tags.split(","),
+          created_at: formatDateJST(user.created_at),
+          updated_at: formatDateJST(user.updated_at),
+        }));
+        setMenuItems(formattedUsers);
+
+        setModalMessage(result.message);
+        setIsDelModalOpen(true);
+      } else {
+        clientLogger.info('ユーザ一覧画面', 'ユーザ削除失敗', { error: result.error });
+        setModalMessage(response.status === STATUS_CODES.INTERNAL_SERVER_ERROR ? 'ユーザの削除に失敗しました。再度、お試しください。' : result.error?.message);
+        setIsDelModalOpen(true);
+      }
+    } catch (error) {
+      clientLogger.error('ユーザ一覧画面', 'ユーザ一削除エラー', { error });
+      setModalMessage(error instanceof Error ? error.message : 'エラーが発生しました');
+      setIsDelModalOpen(true);
+    } finally {
+      setDelLoading(false);
     }
   };
 
   const renderActions = (item: UserListTableRow) => (
     <div className="flex items-center justify-end space-x-4 w-full box-border pr-4">
-      <Button variant="default" onClick={() => toUserEditPage(item.email)}>
+      <Button onClick={() => toUserEditPage(item.id)}>
         編集
       </Button>
       <Button
@@ -277,17 +285,32 @@ export function UserListContainer() {
     });
   }
 
-  const updatedItems = sortedItems.map(item => ({
-    ...item,
-    status: item.status ? '有効' : '無効'
-  }));
+  const updatedItems = menuItems.map(item => {
+    let userRole;
+    switch (item.user_role) {
+      case 0:
+        userRole = ROLE_OPTIONS.SYSTEM_ADMIN;
+        break;
+      case 1:
+        userRole = ROLE_OPTIONS.TEST_MANAGER;
+        break;
+      default:
+        userRole = ROLE_OPTIONS.GENERAL;
+    }
+
+    return {
+      ...item,
+      user_role: userRole,
+      status: item.status ? '無効' : '有効'
+    };
+  });
 
   const fields = [
     {
       label: 'ID (メールアドレス)',
       type: 'email',
       name: 'email',
-      value: formValues.email || '',
+      value: formValues.email,
       onChange: () => { },
       placeholder: 'ID (メールアドレス)'
     },
@@ -295,7 +318,7 @@ export function UserListContainer() {
       label: '氏名',
       type: 'text',
       name: 'name',
-      value: formValues.name || '',
+      value: formValues.name,
       onChange: () => { },
       placeholder: '氏名'
     },
@@ -303,7 +326,7 @@ export function UserListContainer() {
       label: '部署',
       type: 'text',
       name: 'department',
-      value: formValues.department || '',
+      value: formValues.department,
       onChange: () => { },
       placeholder: '部署'
     },
@@ -311,46 +334,46 @@ export function UserListContainer() {
       label: '会社名',
       type: 'text',
       name: 'company',
-      value: formValues.company || '',
+      value: formValues.company,
       onChange: () => { },
       placeholder: '会社名'
     },
     {
       label: '権限',
       type: 'select',
-      name: 'role',
-      value: formValues.role || '',
+      name: 'user_role',
+      value: formValues.user_role,
       onChange: () => { },
       placeholder: '権限',
-      options: Object.values(ROLE_OPTIONS).map(role => ({
-        value: role,
-        label: role
+      options: Object.values(ROLE_OPTIONS).map(user_role => ({
+        value: user_role,
+        label: user_role
       }))
-    },
-    {
-      label: 'タグ',
-      type: 'tag',
-      name: 'tag',
-      value: formValues.tag || [],
-      onChange: () => { },
-      placeholder: 'タグ',
-      options: tagOptions
     },
     {
       label: 'ステータス',
       type: 'select',
       name: 'status',
-      value: formValues.status || '',
+      value: formValues.status,
       onChange: () => { },
       placeholder: 'ステータス',
-      options: Object.values(STATUS_OPTIONS).map(role => ({
-        value: role,
-        label: role
+      options: Object.values(STATUS_OPTIONS).map(status => ({
+        value: status,
+        label: status,
       }))
+    },
+    {
+      label: 'タグ',
+      type: 'tag',
+      name: 'tags',
+      value: formValues.tags || [],
+      onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement> | { target: { name: string; value: string | string[] } }) => handleTagChange('tags', Array.isArray(e.target?.value) ? e.target.value : []),
+      placeholder: 'タグ',
+      options: tagOptions
     },
   ];
 
-  // 検索フォームのデータが更新されたときに呼び出される
+  /// 検索フォームのデータが更新されたときに呼び出される
   const handleFormDataChange = (formData: Record<string, string | string[]>) => {
     setFormValues(formData);
   };
@@ -359,44 +382,74 @@ export function UserListContainer() {
     // 検索ボタン押下時、フォーム値を検索パラメータに設定してURLを更新
     setSearchParams(formValues);
     setPage(1); // ページを1にリセット
-    updateUrlParams(formValues, 1);
-    clientLogger.info('UserListContainer', '検索実行', { formValues });
+    updateUrlParams(router, formValues, pagePath, 1);
+    clientLogger.info('ユーザ一覧画面', '検索ボタン押下', { formValues });
   };
 
   // ページ変更時にURLも更新
   const handlePageChange = (pageNum: number) => {
     setPage(pageNum);
-    updateUrlParams(searchParams, pageNum);
+    updateUrlParams(router, searchParams, pagePath, pageNum);
   };
 
   return (
     <div>
-      <SeachForm fields={fields} values={formValues} onClick={handleSearch} onFormDataChange={handleFormDataChange} />
-      <div className="text-right space-x-2 pb-2">
-        <Button variant="default">
-          <Link href="/user/regist">
-            ユーザ登録
-          </Link>
-        </Button>
-        <ExportButton />
-        <ImportButton type={'user'} />
-      </div>
-      <UserList
-        items={updatedItems}
-        columns={columns}
-        sortConfig={sortConfig}
-        page={page}
-        pageCount={pageCount}
-        onSort={handleSort}
-        onPageChange={handlePageChange}
-        renderActions={renderActions}
+      {/* ユーザ一覧のデータ読み込み中の表示 */}
+      <Loading
+        isLoading={tagLoading || delLoading}
+        message={tagLoading ? "データを読み込み中..." : "データ削除中..."}
+        size="md"
       />
+      {!tagLoading && !delLoading && (
+        <>
+          <SeachForm fields={fields} onClick={handleSearch} onFormDataChange={handleFormDataChange} /><div className="text-right space-x-2 pb-2">
+            <Button
+              onClick={() => toUserRegistPage()}
+            >
+              ユーザ登録
+            </Button>
+            <ExportButton />
+            <ImportButton type={'user'} />
+          </div>
+          <Loading
+            isLoading={userLoading}
+            message="データ読み込み中..."
+            size="md" />
+          {!userLoading && (
+            <UserList
+              items={updatedItems}
+              columns={columns}
+              sortConfig={sortConfig}
+              page={page}
+              pageCount={pageCount}
+              onSort={handleSort}
+              onPageChange={handlePageChange}
+              renderActions={renderActions}
+            />
+          )}
+        </>
+      )}
+      {/* 削除対象表示モーダル */}
       <Modal open={isModalOpen} onClose={() => setIsModalOpen(false)}>
         <p className="mb-8">本当にこのユーザを削除しますか？</p>
         {selectedUser && <p className="mb-8">対象ユーザ: {selectedUser.name}</p>}
         <div className="flex justify-center space-x-5">
-          <Button className="w-24 bg-red-600 text-white" onClick={userDelete}>削除</Button>
+          <Button className="w-24 bg-red-600 text-white" onClick={() => {
+            setIsModalOpen(false);
+            userDelete();
+          }}>削除</Button>
           <Button className="w-24 bg-gray-500 hover:bg-gray-400" onClick={() => setIsModalOpen(false)}>閉じる</Button>
+        </div>
+      </Modal>
+      {/* 削除完了モーダル */}
+      <Modal open={isDelModalOpen} onClose={() => setIsDelModalOpen(false)}>
+        <p className="mb-8 text-black font-bold text-center">
+          {modalMessage}
+        </p>
+        <div className="flex justify-center">
+          <Button className="w-24 bg-gray-500 hover:bg-gray-400" onClick={() => setIsDelModalOpen(false)}>
+            閉じる
+          </Button>
         </div>
       </Modal>
     </div>

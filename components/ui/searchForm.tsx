@@ -64,12 +64,12 @@ export default function SeachForm({ fields, values, onClick, onFormDataChange }:
           <FormField
             key={index}
             {...field}
-            value={formData[field.name] !== undefined ? formData[field.name] : (Array.isArray(field.value) ? [] : '')}
+            value={formData[field.name] || ''}
             onChange={(e) => handleInputChange(field, e)} />
         ))}
       </div>
       <div className={SEARCH_BUTTON_STYLE}>
-        <Button onClick={onClick} variant="default">
+        <Button onClick={onClick} style={{ width: 60 }}>
           検索
         </Button>
       </div>

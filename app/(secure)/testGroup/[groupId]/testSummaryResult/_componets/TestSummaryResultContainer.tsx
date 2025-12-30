@@ -1,20 +1,79 @@
 'use client';
-import { useState } from "react";
+import { Column } from "@/components/datagrid/DataGrid";
+import clientLogger from "@/utils/client-logger";
+import { useState, useEffect } from "react";
+import { getDataCount, getDataList } from "../action";
 import TestSummaryResultGraph from "./TestSummaryResultGraph";
 import { TestSummaryResultList } from "./TestSummaryResultList";
 import { TestSummaryResultListRow } from "./types/test-summary-result-list-row";
-import { Column } from "@/components/datagrid/DataGrid";
+import Loading from "@/app/loading";
 import { Button } from "@/components/ui/button";
 
 type TestSummaryResultContainerProps = {
-  groupId: number;
+  groupName: string;
 };
 
-export default function TestSummaryResultContainer({ groupId }: TestSummaryResultContainerProps) {
+export default function TestSummaryResultContainer({ groupName }: TestSummaryResultContainerProps) {
+  const [menuItems, setMenuItems] = useState<TestSummaryResultListRow[]>([]);
+  const [page, setPage] = useState(1);
+  const [pageCount, setPageCount] = useState(0);
   const [sortConfig, setSortConfig] = useState<{
     key: keyof TestSummaryResultListRow;
     direction: 'asc' | 'desc';
   } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const pageSize = 10;
+
+  useEffect(() => {
+    const getDataCountFunc = async () => {
+      try {
+        const result = await getDataCount();
+        if (!result.success || !result.data) {
+          throw new Error('データの取得に失敗しました' + ` (error: ${result.error})`);
+        }
+        setPageCount(result.success && result.data ? Math.ceil(result.data / pageSize) : 0);
+      } catch (err) {
+        clientLogger.error('UserListContainer', 'データ取得失敗', {
+          page,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    };
+    getDataCountFunc();
+
+  }, []);
+
+  useEffect(() => {
+    let ignore = false;
+    clientLogger.info('UserListContainer', 'データ取得開始', { page });
+
+    const getDataListFunc = async () => {
+      setLoading(true);
+      try {
+        const userData = await getDataList({ page: page });
+        if (!userData.success || !userData.data) {
+          throw new Error('データの取得に失敗しました' + ` (error: ${userData.error})`);
+        }
+        if (!ignore) setMenuItems(userData.data);
+        clientLogger.info('UserListContainer', 'データ取得成功', {
+          page,
+          count: userData.data?.length,
+        });
+      } catch (err) {
+        if (!ignore) setMenuItems([]);
+        clientLogger.error('UserListContainer', 'データ取得失敗', {
+          page,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        if (!ignore) setLoading(false);
+      }
+    };
+    getDataListFunc();
+    return () => {
+      ignore = true;
+    };
+  }, [page]);
 
   const handleSort = (key: keyof TestSummaryResultListRow) => {
     setSortConfig((prev) => {
@@ -26,6 +85,7 @@ export default function TestSummaryResultContainer({ groupId }: TestSummaryResul
   };
 
   const handleCancel = () => {
+    console.log('キャンセルされました');
     history.back();
   };
 
@@ -44,15 +104,37 @@ export default function TestSummaryResultContainer({ groupId }: TestSummaryResul
     { key: 'progressRate', header: '進捗率', },
   ];
 
+  const sortedItems = [...menuItems];
+  if (sortConfig) {
+    sortedItems.sort((a, b) => {
+      const key = sortConfig.key;
+      const aValue = a[key];
+      const bValue = b[key];
+      if (aValue === undefined || bValue === undefined) return 0;
+      if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }
+
   return (
     <>
-      <TestSummaryResultList
-        groupId={groupId}
-        columns={columns}
-        sortConfig={sortConfig}
-        onSort={handleSort}
-      />
-      <TestSummaryResultGraph groupId={groupId} />
+      {loading ? (
+        Loading()
+      ) : (
+        <>
+          <TestSummaryResultList
+            items={sortedItems}
+            columns={columns}
+            sortConfig={sortConfig}
+            page={page}
+            pageCount={pageCount}
+            onSort={handleSort}
+            onPageChange={setPage}
+          />
+          <TestSummaryResultGraph />
+        </>
+      )}
       <div className="flex justify-center space-x-4 mt-4">
         <Button type="button" onClick={handleCancel} className="bg-gray-500 hover:bg-gray-400">戻る</Button>
       </div>

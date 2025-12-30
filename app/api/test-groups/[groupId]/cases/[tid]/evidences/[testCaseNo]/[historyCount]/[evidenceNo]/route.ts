@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, hasTestRole } from '@/app/lib/auth';
 import { query } from '@/app/lib/db';
-import { deleteFileFromS3 } from '@/app/lib/s3';
+// import { deleteFileFromS3 } from '@/app/lib/s3';
 import { TestRole } from '@/types';
 
 // DELETE /api/test-groups/[groupId]/cases/[tid]/evidences/[testCaseNo]/[historyCount]/[evidenceNo]
@@ -64,7 +64,7 @@ export async function DELETE(
     const evidencePath = rows[0].evidence_path as string;
 
     // Delete from S3
-    await deleteFileFromS3(evidencePath);
+    // await deleteFileFromS3(evidencePath);
 
     // Mark as deleted in database
     await query(

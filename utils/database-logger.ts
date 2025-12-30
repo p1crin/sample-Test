@@ -80,6 +80,7 @@ function normalizeSQLQuery(query: string): string {
 export interface DatabaseQueryLog {
   operation: 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'TRANSACTION';
   table?: string;
+  userId?: number | string;
   executionTime: number; // ミリ秒
   rowsAffected?: number;
   rowsReturned?: number;
@@ -139,6 +140,14 @@ export class QueryTimer {
 }
 
 /**
+ * クエリパラメータをエンドポイントに追加するヘルパー関数
+ */
+function appendQueryParams(endpoint: string, params: URLSearchParams): string {
+  const queryString = params.toString();
+  return queryString ? `${endpoint}?${queryString}` : endpoint;
+}
+
+/**
  * APIエンドポイントのログ出力（リクエスト/レスポンス追跡付き）
  */
 export interface APILog {
@@ -149,12 +158,18 @@ export interface APILog {
   executionTime: number;
   dataSize?: number; // 返却行数または影響行数
   error?: string;
+  queryParams?: URLSearchParams;
 }
 
 export function logAPIEndpoint(log: APILog): void {
   const isDevelopment = process.env.NODE_ENV === 'development';
 
-  const message = `${log.method} ${log.endpoint}`;
+  // クエリパラメータをエンドポイントに追加
+  const endpointWithParams = log.queryParams
+    ? appendQueryParams(log.endpoint, log.queryParams)
+    : log.endpoint;
+
+  const message = `${log.method} ${endpointWithParams}`;
 
   if (log.error) {
     serverLogger.error(message, {
@@ -164,7 +179,7 @@ export function logAPIEndpoint(log: APILog): void {
       error: log.error,
     });
   } else if (isDevelopment) {
-    serverLogger.debug(message, {
+    serverLogger.info(message, {
       userId: log.userId,
       statusCode: log.statusCode,
       executionTime: `${log.executionTime.toFixed(2)}ms`,

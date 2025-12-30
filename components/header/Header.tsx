@@ -1,8 +1,10 @@
 'use client';
-import { User } from '@/types';
-import { useSession, signOut } from 'next-auth/react';
-import Link from 'next/link';
 import { clearAuthSession } from '@/stores/feature/auth';
+import { User } from '@/types';
+import clientLogger from '@/utils/client-logger';
+import { signOut, useSession } from 'next-auth/react';
+import Link from 'next/link';
+import Image from 'next/image';
 
 export type HeaderProps = {
   onToggleSidebar: () => void;
@@ -16,15 +18,16 @@ export type HeaderProps = {
 export function Header({ onToggleSidebar, user, onLogout, popupOpen, onAvatarClick }: HeaderProps) {
   const { data: session } = useSession();
 
-  // NextAuth セッションから直接メールアドレスを取得（Redux に依存しない）
-  const userEmail = session?.user?.email || user?.email || user?.name;
+  const userEmail = session?.user?.email || user?.email;
 
   return (
     <header
       className={`w-screen bg-[#151617] border-b z-20 fixed top-0 left-0 right-0 h-16 flex items-center px-4 sm:px-8`}
     >
       <button
-        onClick={onToggleSidebar}
+        onClick={() => {
+          onToggleSidebar();
+        }}
         className="absolute left-4 top-1/2 -translate-y-1/2 p-2 rounded hover:bg-gray-700 focus:outline-none"
         aria-label="サイドバー切替"
         type="button"
@@ -45,9 +48,16 @@ export function Header({ onToggleSidebar, user, onLogout, popupOpen, onAvatarCli
           <line x1="4" y1="18" x2="20" y2="18" />
         </svg>
       </button>
-      <span className="font-bold text-lg tracking-wide select-none whitespace-nowrap ml-12 text-[#ff5611]">
-        テストケースDBアプリ
-      </span>
+      <Link href="/testGroup">
+        <Image
+          width={120}
+          height={125}
+          src="/icons/bb_full.svg"
+          className='ml-8'
+          alt="ProofLink"
+          onClick={() => clientLogger.info('ヘッダー', 'ProofLinkアイコン押下')}
+        />
+      </Link>
       {session && (
         <div className="ml-auto flex items-center flex-wrap sm:flex-nowrap gap-2 sm:gap-4">
           {/* PC表示 */}
@@ -56,14 +66,21 @@ export function Header({ onToggleSidebar, user, onLogout, popupOpen, onAvatarCli
               <span className="text-sm text-white">{userEmail}</span>
             )}
             <Link href="/password">
-              <button className="text-sm text-white py-2 px-4 rounded border hover:bg-stone-600">
+              <button
+                className="text-sm text-white py-2 px-4 rounded border hover:bg-stone-600"
+                onClick={() => clientLogger.info('ヘッダー', 'パスワード変更ボタン押下')}
+              >
                 パスワード変更
               </button>
             </Link>
-            <button className="text-sm text-white py-2 px-4 rounded border hover:bg-stone-600" onClick={() => {
-              clearAuthSession();
-              signOut({ callbackUrl: '/login' });
-            }}>
+            <button
+              className="text-sm text-white py-2 px-4 rounded border hover:bg-stone-600"
+              onClick={() => {
+                clientLogger.info('ヘッダー', 'ログアウトボタン押下');
+                clearAuthSession();
+                signOut({ callbackUrl: '/login' });
+              }}
+            >
               ログアウト
             </button>
           </div>

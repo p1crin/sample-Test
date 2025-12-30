@@ -12,7 +12,7 @@ model mt_tags {
   id                 Int                  @id @default(autoincrement())
   name               String               @unique @db.VarChar(255)
   created_at         DateTime             @default(now()) @db.Timestamp(6)
-  updated_at         DateTime             @updatedAt @db.Timestamp(6)
+  updated_at         DateTime             @default(now()) @updatedAt @db.Timestamp(6)
   is_deleted         Boolean              @default(false)
   mt_user_tags       mt_user_tags[]
   tt_test_group_tags tt_test_group_tags[]
@@ -23,6 +23,9 @@ model mt_user_tags {
   tag_id   Int
   mt_tags  mt_tags  @relation(fields: [tag_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   mt_users mt_users @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  created_at              DateTime                @default(now()) @db.Timestamp(6)
+  updated_at              DateTime                @default(now()) @updatedAt @db.Timestamp(6)
+  is_deleted              Boolean                 @default(false)
 
   @@id([user_id, tag_id])
 }
@@ -30,12 +33,13 @@ model mt_user_tags {
 model mt_users {
   id           Int            @id @default(autoincrement())
   email        String         @unique @db.VarChar(255)
+  name         String         @db.VarChar(255)
   user_role    Int            @default(2)
-  department   String?        @db.VarChar(255)
-  company      String?        @db.VarChar(255)
+  department   String         
+  company      String         @db.VarChar(255)
   password     String         @db.VarChar(255)
   created_at   DateTime       @default(now()) @db.Timestamp(6)
-  updated_at   DateTime       @updatedAt @db.Timestamp(6)
+  updated_at   DateTime       @default(now()) @updatedAt @db.Timestamp(6)
   is_deleted   Boolean        @default(false)
   mt_user_tags mt_user_tags[]
 
@@ -43,30 +47,18 @@ model mt_users {
   @@index([user_role], map: "idx_users_role")
 }
 
-model tt_import_result_errors {
-  id                Int               @id @default(autoincrement())
-  import_result_id  Int
-  error_details     String?
-  error_row         Int?
-  created_at        DateTime          @default(now()) @db.Timestamp(6)
-  updated_at        DateTime          @updatedAt @db.Timestamp(6)
-  is_deleted        Boolean           @default(false)
-  tt_import_results tt_import_results @relation(fields: [import_result_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-}
 
 model tt_import_results {
   id                      Int                       @id @default(autoincrement())
-  file_name               String?                   @db.VarChar(255)
-  import_date             DateTime                  @default(dbgenerated("CURRENT_DATE")) @db.Date
-  import_status           Int                       @default(1)
+  file_name               String?                   
+  import_status           Int?                      @default(1)
   executor_name           String?                   @db.VarChar(255)
-  import_type             Int
+  import_type             Int?
   count                   Int?                      @default(0)
+  message                 String?                                      
   created_at              DateTime                  @default(now()) @db.Timestamp(6)
-  updated_at              DateTime                  @updatedAt @db.Timestamp(6)
+  updated_at              DateTime                  @default(now()) @updatedAt @db.Timestamp(6)
   is_deleted              Boolean                   @default(false)
-  tt_import_result_errors tt_import_result_errors[]
-
   @@index([import_status], map: "idx_import_results_status")
 }
 
@@ -78,7 +70,7 @@ model tt_test_case_files {
   file_name     String?
   file_path     String?
   created_at    DateTime      @default(now()) @db.Timestamp(6)
-  updated_at    DateTime      @updatedAt @db.Timestamp(6)
+  updated_at    DateTime      @default(now()) @updatedAt @db.Timestamp(6)
   is_deleted    Boolean       @default(false)
   tt_test_cases tt_test_cases @relation(fields: [test_group_id, tid], references: [test_group_id, tid], onDelete: Cascade, onUpdate: NoAction)
 
@@ -97,7 +89,7 @@ model tt_test_cases {
   check_items        String
   test_procedure     String
   created_at         DateTime             @default(now()) @db.Timestamp(6)
-  updated_at         DateTime             @updatedAt @db.Timestamp(6)
+  updated_at         DateTime             @default(now()) @updatedAt @db.Timestamp(6)
   is_deleted         Boolean              @default(false)
   tt_test_case_files tt_test_case_files[]
   tt_test_groups     tt_test_groups       @relation(fields: [test_group_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -115,7 +107,7 @@ model tt_test_contents {
   expected_value          String?
   is_target               Boolean                   @default(true)
   created_at              DateTime                  @default(now()) @db.Timestamp(6)
-  updated_at              DateTime                  @updatedAt @db.Timestamp(6)
+  updated_at              DateTime                  @default(now()) @updatedAt @db.Timestamp(6)
   is_deleted              Boolean                   @default(false)
   tt_test_cases           tt_test_cases             @relation(fields: [test_group_id, tid], references: [test_group_id, tid], onDelete: Cascade, onUpdate: NoAction)
   tt_test_results         tt_test_results?
@@ -134,7 +126,7 @@ model tt_test_evidences {
   evidence_name           String?
   evidence_path           String?
   created_at              DateTime                @default(now()) @db.Timestamp(6)
-  updated_at              DateTime                @updatedAt @db.Timestamp(6)
+  updated_at              DateTime                @default(now()) @updatedAt @db.Timestamp(6)
   is_deleted              Boolean                 @default(false)
   tt_test_results_history tt_test_results_history @relation(fields: [test_group_id, tid, test_case_no, history_count], references: [test_group_id, tid, test_case_no, history_count], onDelete: Cascade, onUpdate: NoAction)
 
@@ -146,6 +138,9 @@ model tt_test_group_tags {
   tag_id         Int
   test_role      Int
   mt_tags        mt_tags        @relation(fields: [tag_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  created_at              DateTime                @default(now()) @db.Timestamp(6)
+  updated_at              DateTime                @default(now()) @updatedAt @db.Timestamp(6)
+  is_deleted              Boolean                 @default(false)
   tt_test_groups tt_test_groups @relation(fields: [test_group_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@id([test_group_id, tag_id, test_role])
@@ -164,10 +159,10 @@ model tt_test_groups {
   test_startdate     DateTime?            @db.Date
   test_enddate       DateTime?            @db.Date
   ng_plan_count      Int?                 @default(0)
-  created_by         String?              @db.VarChar(255)
-  updated_by         String?              @db.VarChar(255)
+  created_by         Int?
+  updated_by         Int?
   created_at         DateTime             @default(now()) @db.Timestamp(6)
-  updated_at         DateTime             @updatedAt @db.Timestamp(6)
+  updated_at         DateTime             @default(now()) @updatedAt @db.Timestamp(6)
   is_deleted         Boolean              @default(false)
   tt_test_cases      tt_test_cases[]
   tt_test_group_tags tt_test_group_tags[]
@@ -189,7 +184,7 @@ model tt_test_results {
   note               String?
   version            Int              @default(1)
   created_at         DateTime         @default(now()) @db.Timestamp(6)
-  updated_at         DateTime         @updatedAt @db.Timestamp(6)
+  updated_at         DateTime         @default(now()) @updatedAt @db.Timestamp(6)
   is_deleted         Boolean          @default(false)
   tt_test_contents   tt_test_contents @relation(fields: [test_group_id, tid, test_case_no], references: [test_group_id, tid, test_case_no], onDelete: Cascade, onUpdate: NoAction)
 
@@ -212,7 +207,7 @@ model tt_test_results_history {
   note               String?
   version            Int                 @default(1)
   created_at         DateTime            @default(now()) @db.Timestamp(6)
-  updated_at         DateTime            @updatedAt @db.Timestamp(6)
+  updated_at         DateTime            @default(now()) @updatedAt @db.Timestamp(6)
   is_deleted         Boolean             @default(false)
   tt_test_evidences  tt_test_evidences[]
   tt_test_contents   tt_test_contents    @relation(fields: [test_group_id, tid, test_case_no], references: [test_group_id, tid, test_case_no], onDelete: Cascade, onUpdate: NoAction)

@@ -1,7 +1,7 @@
+import { Modal } from '@/components/ui/modal';
+import { cn } from '@/utils/utils';
 import * as React from 'react';
 import { useState } from 'react';
-import { cn } from '@/utils/utils';
-import { Modal } from '@/components/ui/modal';
 
 interface Label {
   name: string;
@@ -34,10 +34,10 @@ const DetailView: React.FC<DetailViewProps> = ({ labels, values, isFull = false 
         <tbody>
           {Object.keys(labels).map((key) => (
             <tr key={key} className="border-b">
-              <th className="text-foreground h-10 px-2 text-right align-middle font-medium whitespace-pre-wrap border-r bg-gray-100">
+              <th className="text-foreground h-10 px-2 min-w-36 text-right align-middle font-medium whitespace-pre-wrap border-r bg-gray-100">
                 {labels[key].name}
               </th>
-              <td className="p-2 align-middle whitespace-pre-wrap">
+              <td className="p-2 min-w-100 max-w-200 align-middle whitespace-pre-wrap overflow-hidden text-ellipsis">
                 {labels[key].type === 'img' ? (
                   <img
                     src={values[key]}

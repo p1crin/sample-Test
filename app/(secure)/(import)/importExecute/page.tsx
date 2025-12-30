@@ -33,21 +33,24 @@ export default function ImportExecute() {
     }
   }
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement> | { target: { name: string; value: string | string[] } }) => {
-    const file = (e.target as HTMLInputElement).files?.[0];
-    if (file) {
-      Papa.parse(file, {
-        header: true,
-        skipEmptyLines: true,
-        complete: (results) => {
-          setCsvContent(results.data as CsvData[]);
-        },
-        encoding: 'shift-jis'
-      });
-      console.log(file || "ファイルが選択されていません");
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement> | { target: { name: string; value: string | string[]; }; }) => {
+    if ('files' in e.target) {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (file) {
+        Papa.parse(file, {
+          header: true,
+          skipEmptyLines: true,
+          complete: (results) => {
+            setCsvContent(results.data as CsvData[]);
+          },
+          encoding: 'shift-jis'
+        });
+        console.log(file || "ファイルが選択されていません");
+      }
+    } else {
+      console.log("Unexpected event target");
     }
   }
-
   const fields = [
     {
       label: label,
@@ -55,7 +58,7 @@ export default function ImportExecute() {
       name: 'file',
       value: '',
       onChange: handleFileChange,
-      placeholder: ''
+      placeholder: '',
     },
   ]
 

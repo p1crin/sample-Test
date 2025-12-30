@@ -2,7 +2,7 @@ import serverLogger from '@/utils/server-logger';
 import { TestGroupCopyFormState } from './_components/TestGroupCopyForm';
 
 interface GetDataParams {
-  groupId: number;
+  testGroupId: number;
 }
 
 export type Result<T> = {
@@ -13,7 +13,8 @@ export type Result<T> = {
 
 export async function saveData(params: TestGroupCopyFormState): Promise<Result<number>> {
   try {
-    serverLogger.info(`saveData Resquest`, { params });
+    const { file: _file, ...paramsWithoutFile } = params;
+    serverLogger.info(`saveData Resquest`, { params: paramsWithoutFile, file: _file?.name });
 
     // TODO 保存処理
 
@@ -26,21 +27,18 @@ export async function saveData(params: TestGroupCopyFormState): Promise<Result<n
 
 export async function getData(params: GetDataParams): Promise<Result<TestGroupCopyFormState>> {
   try {
-    serverLogger.info(`getData Resquest`, { groupId: params.groupId });
+    serverLogger.info(`getData Resquest`, { testGroupId: params.testGroupId });
 
     const data: TestGroupCopyFormState = {
+      testGroupId: params.testGroupId,
       oem: '',
       model: '',
       destination: '',
       event: '',
       variation: '',
       specs: '',
-      test_startdate: '',
-      test_enddate: '',
-      ngPlanCount: '',
-      designerTag: [],
-      executerTag: [],
-      viewerTag: [],
+      testDatespan: '',
+      ngPlanCount: ''
     };
 
     return { success: true, data: data };

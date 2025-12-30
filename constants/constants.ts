@@ -31,3 +31,20 @@ export const STATUS_OPTIONS = {
 }
 
 export type StatusOption = typeof STATUS_OPTIONS[keyof typeof STATUS_OPTIONS];
+
+// インポート状況
+export const IMPORT_STATUS = {
+  EXECUTING: "実施中",
+  COMPLETE: "完了",
+  ERROR: 'エラー'
+}
+
+export type ImportStatus = typeof IMPORT_STATUS[keyof typeof IMPORT_STATUS];
+
+// インポート種別
+export const IMPORT_TYPE = {
+  TEST_CASE: "テストケース",
+  USER: "ユーザ",
+}
+
+export type ImportType = typeof IMPORT_TYPE[keyof typeof IMPORT_TYPE];

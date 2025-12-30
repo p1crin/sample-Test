@@ -1,20 +1,40 @@
+import { isAdmin } from '@/app/lib/auth';
+import { authOptions } from '@/app/lib/authOption';
+import ForbiddenUI from '@/components/ui/forbiddenUI';
+import InternalServerErrorUI from '@/components/ui/internalServerErrorUI';
+import UnauthorizedUI from '@/components/ui/unauthorizedUI';
+import { getServerSession } from 'next-auth';
 import { UserListContainer } from './_components/UserListContainer';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/app/lib/auth-options';
-import { UserRole } from '@/types/database';
 
 export default async function UserListPage() {
-  // Get current user session
-  const session = await getServerSession(authOptions);
-  
-  // Check if user is authenticated
-  if (!session?.user) {
-    throw new Error('Unauthorized');
-  }
+  let session;
+  let isCanView = false;
+  try {
+    // サーバー側で権限チェック
+    session = await getServerSession(authOptions);
 
-  // Check if user has admin role
-  if (session.user.user_role !== UserRole.ADMIN) {
-    throw new Error('Forbidden: Admin access required');
+    // 認証確認
+    if (!session?.user) {
+      return <UnauthorizedUI />;
+    }
+
+    // user.idが存在することを確認
+    if (!session.user.id) {
+      return <UnauthorizedUI />;
+    }
+
+    // ユーザロールがテストマネージャーまたは管理者のみが作成可能
+    isCanView = isAdmin(session.user);
+
+    if (!isCanView) {
+      return <ForbiddenUI />;
+    }
+  } catch (error) {
+    // エラーハンドリング
+    if (error instanceof Error && error.message.includes('Forbidden')) {
+      return <ForbiddenUI />;
+    }
+    return <InternalServerErrorUI />;
   }
 
   return (

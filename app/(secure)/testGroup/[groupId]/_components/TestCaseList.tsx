@@ -60,30 +60,45 @@ export function TestCaseList({
             key: 'chartData',
             header: '進捗',
             render: (_value: unknown, row: TestCaseListRow) => {
-              const total = row.chartData.notStartCount + row.chartData.okCount + row.chartData.ngCount + row.chartData.excludedCount;
+              const total = row.chartData.not_started_items + row.chartData.ok_items + row.chartData.ng_items + row.chartData.excluded_items;
+
+              const notStartedPercentage = (row.chartData.not_started_items / total) * 100;
+              const okPercentage = (row.chartData.ok_items / total) * 100;
+              const ngPercentage = (row.chartData.ng_items / total) * 100;
+              const excludedPercentage = (row.chartData.excluded_items / total) * 100;
+
+              const percentages = [notStartedPercentage, okPercentage, ngPercentage, excludedPercentage];
+              const roundedPercentages = percentages.map(Math.round);
+              const totalRounded = roundedPercentages.reduce((acc, val) => acc + val, 0);
+
+              if (totalRounded !== 100) {
+                const maxIndex = roundedPercentages.indexOf(Math.max(...roundedPercentages));
+                roundedPercentages[maxIndex] += 100 - totalRounded;
+              }
+
               const datasets: Dataset[] = [
                 {
                   label: '未実施',
-                  data: [(row.chartData.notStartCount / total) * 100],
-                  originalData: [row.chartData.notStartCount],
+                  data: [roundedPercentages[0]],
+                  originalData: [row.chartData.not_started_items],
                   backgroundColor: 'orange',
                 },
                 {
                   label: 'OK',
-                  data: [(row.chartData.okCount / total) * 100],
-                  originalData: [row.chartData.okCount],
+                  data: [roundedPercentages[1]],
+                  originalData: [row.chartData.ok_items],
                   backgroundColor: '#0068b7',
                 },
                 {
                   label: 'NG',
-                  data: [(row.chartData.ngCount / total) * 100],
-                  originalData: [row.chartData.ngCount],
+                  data: [roundedPercentages[2]],
+                  originalData: [row.chartData.ng_items],
                   backgroundColor: 'red',
                 },
                 {
                   label: '対象外',
-                  data: [(row.chartData.excludedCount / total) * 100],
-                  originalData: [row.chartData.excludedCount],
+                  data: [roundedPercentages[3]],
+                  originalData: [row.chartData.excluded_items],
                   backgroundColor: 'gray',
                 },
               ];

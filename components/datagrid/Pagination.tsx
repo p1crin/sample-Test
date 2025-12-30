@@ -31,7 +31,7 @@ export function Pagination({ page, pageCount, onPageChange, className }: Paginat
   return (
     <nav className={cn('flex items-center gap-2', className)} aria-label="pagination">
       <button
-        className="px-3 py-1 rounded border text-white bg-[#FF5611] disabled:opacity-50 transition-transform duration-150 hover:scale-105 active:scale-95"
+        className="px-3 py-1 rounded border text-white bg-stnly disabled:opacity-50 transition-transform duration-150 hover:scale-105 active:scale-95"
         onClick={() => onPageChange(page - 1)}
         disabled={page === 1}
       >
@@ -41,7 +41,7 @@ export function Pagination({ page, pageCount, onPageChange, className }: Paginat
       {startPage > 1 && (
         <>
           <button
-            className="px-3 py-1 rounded border bg-white text-[#FF5611] transition-transform duration-150 hover:scale-105 active:scale-95"
+            className="px-3 py-1 rounded border bg-white text-stnly transition-transform duration-150 hover:scale-105 active:scale-95"
             onClick={() => onPageChange(1)}
           >
             1
@@ -55,7 +55,7 @@ export function Pagination({ page, pageCount, onPageChange, className }: Paginat
           key={pageNum}
           className={cn(
             'px-3 py-1 rounded border',
-            page === pageNum ? 'text-white bg-[#FF5611]' : 'bg-white text-[#FF5611]',
+            page === pageNum ? 'text-white bg-stnly' : 'bg-white text-stnly',
             'transition-transform duration-150 hover:scale-105 active:scale-95'
           )}
           onClick={() => onPageChange(pageNum)}
@@ -68,7 +68,7 @@ export function Pagination({ page, pageCount, onPageChange, className }: Paginat
         <>
           {endPage < pageCount - 1 && <span className="px-2">...</span>}
           <button
-            className="px-3 py-1 rounded border bg-white text-[#FF5611] transition-transform duration-150 hover:scale-105 active:scale-95"
+            className="px-3 py-1 rounded border bg-white text-stnly transition-transform duration-150 hover:scale-105 active:scale-95"
             onClick={() => onPageChange(pageCount)}
           >
             {pageCount}
@@ -77,7 +77,7 @@ export function Pagination({ page, pageCount, onPageChange, className }: Paginat
       )}
 
       <button
-        className="px-3 py-1 rounded border bg-white text-[#FF5611] disabled:opacity-50 transition-transform duration-150 hover:scale-105 active:scale-95"
+        className="px-3 py-1 rounded border bg-white text-stnly disabled:opacity-50 transition-transform duration-150 hover:scale-105 active:scale-95"
         onClick={() => onPageChange(page + 1)}
         disabled={page === pageCount}
       >

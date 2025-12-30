@@ -1,5 +1,5 @@
+import { Column, DataGrid } from '@/components/datagrid/DataGrid';
 import { UserListTableRow } from './types/user-list-row';
-import { DataGrid, Column } from '@/components/datagrid/DataGrid';
 
 type UserListProps = {
   items: UserListTableRow[];

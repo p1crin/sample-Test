@@ -1,266 +1,381 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, canViewTestGroup, canEditTestCases } from '@/app/lib/auth';
+'use server';
+import { canViewTestGroup, requireAuth } from "@/app/lib/auth";
+import { getAllRows, query } from "@/app/lib/db";
 import { prisma } from '@/app/lib/prisma';
-import { logAPIEndpoint, QueryTimer } from '@/utils/database-logger';
+import { ERROR_MESSAGES } from "@/constants/errorMessages";
+import { STATUS_CODES } from "@/constants/statusCodes";
+import { TestCase } from "@/types";
+import { logAPIEndpoint, logDatabaseQuery, QueryTimer } from "@/utils/database-logger";
+import { handleError } from "@/utils/errorHandler";
+import { existsSync } from 'fs';
+import { mkdir, writeFile } from 'fs/promises';
+import { NextRequest, NextResponse } from "next/server";
+import { join } from 'path';
 
 interface RouteParams {
   params: Promise<{ groupId: string }>;
 }
 
-// GET /api/test-groups/[groupId]/cases - Get test cases
+// GET /api/test-groups/[groupId]/cases - テストグループIDが該当するテストケースを取得
 export async function GET(req: NextRequest, { params }: RouteParams) {
   const apiTimer = new QueryTimer();
-  let statusCode = 200;
+  // URLからテストグループIDを取得
+  const { groupId: groupId } = await params;
+  const testGroupId = parseInt(groupId, 10);
 
   try {
-    const { groupId } = await params;
     const user = await requireAuth(req);
-    const groupIdNum = parseInt(groupId);
+    // 取得したテストグループIDとユーザ情報で権限チェック
+    await canViewTestGroup(user.id, user.user_role, testGroupId);
+    // クエリ文字列から検索パラメータを取得
+    const { searchParams } = new URL(req.url);
+    const tid = searchParams.get('tid') || '';
+    const firstLayer = searchParams.get('first_layer') || '';
+    const secondLayer = searchParams.get('second_layer') || '';
+    const thirdLayer = searchParams.get('third_layer') || '';
+    const fourthLayer = searchParams.get('fourth_layer') || '';
 
-    // Check view permission
-    const canView = await canViewTestGroup(user.id, user.user_role, groupIdNum);
+    // ページネーションパラメータを取得
+    const page = parseInt(searchParams.get('page') || '1', 10);
+    const limit = parseInt(searchParams.get('limit') || '10', 10);
+    const offset = (page - 1) * limit;
 
-    if (!canView) {
-      statusCode = 403;
-      logAPIEndpoint({
-        method: 'GET',
-        endpoint: `/api/test-groups/${groupId}/cases`,
-        userId: user.id,
-        statusCode,
-        executionTime: apiTimer.elapsed(),
-        error: 'Permission denied',
-      });
-      return NextResponse.json(
-        { error: 'このテストグループを表示する権限がありません' },
-        { status: 403 }
-      );
+    // WHERE句を動的に構築
+    const whereConditions = [`ttc.test_group_id = ${testGroupId}`, 'ttc.is_deleted = FALSE'];
+    const whereParams: unknown[] = [];
+    let paramsIndex = 1;
+
+    if (tid) {
+      whereConditions.push(`ttc.tid ILIKE $${paramsIndex}`);
+      whereParams.push(`%${tid}%`);
+      paramsIndex++;
     }
 
-    // Fetch test cases
-    const testCases = await prisma.tt_test_cases.findMany({
-      where: {
-        test_group_id: groupIdNum,
-        is_deleted: false,
-      },
-      orderBy: {
-        tid: 'asc',
-      },
-    });
+    if (firstLayer) {
+      whereConditions.push(`ttc.first_layer ILIKE $${paramsIndex}`);
+      whereParams.push(`%${firstLayer}%`);
+      paramsIndex++;
+    }
 
-    // Fetch test contents and files for each test case
-    const casesWithContents = await Promise.all(
-      testCases.map(async (testCase: typeof testCases[0]) => {
-        const contents = await prisma.tt_test_contents.findMany({
-          where: {
-            test_group_id: groupIdNum,
-            tid: testCase.tid,
-            is_deleted: false,
-          },
-          orderBy: {
-            test_case_no: 'asc',
-          },
-        });
+    if (secondLayer) {
+      whereConditions.push(`ttc.second_layer ILIKE $${paramsIndex}`);
+      whereParams.push(`%${secondLayer}%`);
+      paramsIndex++;
+    }
 
-        const files = await prisma.tt_test_case_files.findMany({
-          where: {
-            test_group_id: groupIdNum,
-            tid: testCase.tid,
-            is_deleted: false,
-          },
-          orderBy: [
-            { file_type: 'asc' },
-            { file_no: 'asc' },
-          ],
-        });
+    if (thirdLayer) {
+      whereConditions.push(`ttc.third_layer ILIKE $${paramsIndex}`);
+      whereParams.push(`%${thirdLayer}%`);
+      paramsIndex++;
+    }
 
-        return {
-          ...testCase,
-          contents,
-          files,
-        };
-      })
-    );
+    if (fourthLayer) {
+      whereConditions.push(`ttc.fourth_layer ILIKE $${paramsIndex}`);
+      whereParams.push(`%${fourthLayer}%`);
+      paramsIndex++;
+    }
 
-    statusCode = 200;
+    const whereClause = whereConditions.join(' AND ');
+
     logAPIEndpoint({
       method: 'GET',
-      endpoint: `/api/test-groups/${groupId}/cases`,
+      endpoint: `/api/test-groups/${testGroupId}/cases`,
       userId: user.id,
-      statusCode,
       executionTime: apiTimer.elapsed(),
-      dataSize: casesWithContents.length,
+      queryParams: searchParams,
+    })
+
+    // ページネーション用に合計件数を取得
+    const countQuery = `SELECT COUNT(*) FROM tt_test_cases ttc WHERE ${whereClause}`;
+    const countTimer = new QueryTimer();
+    const countResult = await query<{ count: string | number }>(countQuery, whereParams);
+    const totalCount = parseInt(String(countResult.rows[0]?.count || '0'), 10);
+
+    logDatabaseQuery({
+      operation: 'SELECT',
+      table: 'tt_test_cases',
+      executionTime: countTimer.elapsed(),
+      rowsReturned: 1,
+      query: 'COUNT(*)',
+      params: Object.entries(whereClause),
     });
 
-    return NextResponse.json({ testCases: casesWithContents });
-  } catch (error) {
-    statusCode = error instanceof Error && error.message === 'Unauthorized' ? 401 : 500;
+    // ページネーション付きでテストケースを取得
+    const dataParams = [...whereParams, limit, offset];
+    const limitParamIndex = whereParams.length + 1;
+    const offsetParamIndex = whereParams.length + 2;
+    const dataQuery = `SELECT ttc.test_group_id, ttc.tid, ttc.first_layer, ttc.second_layer, ttc.third_layer, ttc.fourth_layer,
+      ttc.purpose, ttc.request_id, ttc.check_items, ttc.test_procedure, ttc.created_at, ttc.updated_at,
+      SUM(CASE WHEN (tc.test_group_id IS NOT NULL AND tr.judgment IS NULL) OR tr.judgment = '未着手' THEN 1 ELSE 0 END):: INTEGER AS not_started_items,
+      SUM(CASE WHEN tr.judgment IN('OK', '参照OK') THEN 1 ELSE 0 END):: INTEGER AS ok_items,
+      SUM(CASE WHEN tr.judgment = 'NG' THEN 1 ELSE 0 END):: INTEGER AS ng_items,
+      SUM(CASE WHEN tr.judgment = '対象外' THEN 1 ELSE 0 END):: INTEGER AS excluded_items
+                      FROM tt_test_cases ttc
+                      LEFT JOIN tt_test_contents tc
+                      ON ttc.test_group_id = tc.test_group_id
+                      AND ttc.tid = tc.tid
+                      LEFT JOIN tt_test_results tr
+                      ON tc.test_group_id = tr.test_group_id
+                      AND tc.tid = tr.tid
+                      AND tc.test_case_no = tr.test_case_no
+                      WHERE ${whereClause}
+                      GROUP BY
+                        ttc.test_group_id, ttc.tid, ttc.first_layer, ttc.second_layer, ttc.third_layer, ttc.fourth_layer,
+      ttc.purpose, ttc.request_id, ttc.check_items, ttc.test_procedure, ttc.created_at, ttc.updated_at
+                      ORDER BY ttc.created_at DESC
+                      LIMIT $${limitParamIndex} OFFSET $${offsetParamIndex}`;
+    const dataTimer = new QueryTimer();
+    const result = await query<TestCase>(dataQuery, dataParams);
+    const testCases = getAllRows(result);
+
+    logDatabaseQuery({
+      operation: 'SELECT',
+      table: 'tt_test_case',
+      userId: user.id,
+      executionTime: dataTimer.elapsed(),
+      rowsReturned: testCases.length,
+      query: 'findMany',
+      params: [{ skip: offset, take: limit }],
+    })
+
+    // 日付をフォーマット(日本時間)し、レスポンスデータを整形
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const formattedTestCases = testCases.map((testCase: any) => ({
+      test_group_id: testCase.test_group_id,
+      tid: testCase.tid,
+      first_layer: testCase.first_layer,
+      second_layer: testCase.second_layer,
+      third_layer: testCase.third_layer,
+      fourth_layer: testCase.fourth_layer,
+      purpose: testCase.purpose,
+      request_id: testCase.request_id,
+      check_items: testCase.check_items,
+      test_procedure: testCase.test_procedure,
+      created_at: testCase.created_at,
+      updated_at: testCase.updated_at,
+      chartData: {
+        ok_items: testCase.ok_items || 0,
+        ng_items: testCase.ng_items || 0,
+        not_started_items: testCase.not_started_items || 0,
+        excluded_items: testCase.excluded_items || 0,
+      },
+    }));
 
     logAPIEndpoint({
       method: 'GET',
-      endpoint: `/api/test-groups/${(await params).groupId}/cases`,
-      statusCode,
+      endpoint: `/api/test-groups/${testGroupId}/cases`,
+      userId: user.id,
+      statusCode: STATUS_CODES.OK,
       executionTime: apiTimer.elapsed(),
-      error: error instanceof Error ? error.message : 'Unknown error',
+      dataSize: formattedTestCases.length,
     });
 
-    if (error instanceof Error && error.message === 'Unauthorized') {
-      return NextResponse.json(
-        { error: '認証が必要です' },
-        { status: 401 }
-      );
-    }
+    return NextResponse.json({ success: true, data: formattedTestCases, totalCount });
 
-    return NextResponse.json(
-      { error: 'テストケースの取得に失敗しました' },
-      { status: 500 }
+  } catch (error) {
+    return handleError(
+      error as Error,
+      STATUS_CODES.INTERNAL_SERVER_ERROR,
+      apiTimer,
+      'GET',
+      `/api/test-groups/${testGroupId}/cases`
     );
   }
 }
 
-// POST /api/test-groups/[groupId]/cases - Create test case
-export async function POST(req: NextRequest, { params }: RouteParams) {
+// POST /api/test-groups/[groupId]/cases - テストケース登録
+export async function POST(req: NextRequest) {
   const apiTimer = new QueryTimer();
-  let statusCode = 201;
-
   try {
-    const { groupId } = await params;
+    // 認証チェック
     const user = await requireAuth(req);
-    const groupIdNum = parseInt(groupId);
+    // FormData をパース
+    const formData = await req.formData();
+    const groupId = parseInt(formData.get('groupId') as string);
+    const tid = formData.get('tid') as string;
+    const firstLayer = formData.get('firstLayer') as string;
+    const secondLayer = formData.get('secondLayer') as string;
+    const thirdLayer = formData.get('thirdLayer') as string;
+    const fourthLayer = formData.get('fourthLayer') as string;
+    const purpose = formData.get('purpose') as string;
+    const requestId = formData.get('requestId') as string;
+    const checkItems = formData.get('checkItems') as string;
+    const testProcedure = formData.get('testProcedure') as string;
+    const testContentsStr = formData.get('testContents') as string;
 
-    // Check edit permission
-    const canEdit = await canEditTestCases(user, groupIdNum);
+    const testContents = testContentsStr ? JSON.parse(testContentsStr) : [];
 
-    if (!canEdit) {
-      statusCode = 403;
-      logAPIEndpoint({
-        method: 'POST',
-        endpoint: `/api/test-groups/${groupId}/cases`,
-        userId: user.id,
-        statusCode,
-        executionTime: apiTimer.elapsed(),
-        error: 'Permission denied',
-      });
-      return NextResponse.json(
-        { error: 'テストケースを作成する権限がありません' },
-        { status: 403 }
-      );
+    // FileInfo 配列をパース（controlSpecFile と dataFlowFile）
+    interface FileInfo {
+      name: string;
+      id: string;
+      base64?: string;
+      type?: string;
     }
 
-    const body = await req.json();
-    const {
-      tid,
-      first_layer,
-      second_layer,
-      third_layer,
-      fourth_layer,
-      purpose,
-      request_id,
-      check_items,
-      test_procedure,
-      contents, // Array of test contents
-    } = body;
+    const controlSpecFiles: FileInfo[] = [];
+    const dataFlowFiles: FileInfo[] = [];
 
-    // Validate required fields
-    if (!tid) {
-      statusCode = 400;
-      logAPIEndpoint({
-        method: 'POST',
-        endpoint: `/api/test-groups/${groupId}/cases`,
-        userId: user.id,
-        statusCode,
-        executionTime: apiTimer.elapsed(),
-        error: 'Validation error: tid required',
-      });
-      return NextResponse.json(
-        { error: 'TIDは必須です' },
-        { status: 400 }
-      );
+    // controlSpecFile[0], controlSpecFile[1], ... をパース
+    let controlSpecIndex = 0;
+    while (formData.has(`controlSpecFile[${controlSpecIndex}]`)) {
+      const fileStr = formData.get(`controlSpecFile[${controlSpecIndex}]`) as string;
+      controlSpecFiles.push(JSON.parse(fileStr));
+      controlSpecIndex++;
     }
 
-    if (!contents || !Array.isArray(contents) || contents.length === 0) {
-      statusCode = 400;
-      logAPIEndpoint({
-        method: 'POST',
-        endpoint: `/api/test-groups/${groupId}/cases`,
-        userId: user.id,
-        statusCode,
-        executionTime: apiTimer.elapsed(),
-        error: 'Validation error: contents required',
-      });
-      return NextResponse.json(
-        { error: 'テストケース内容は最低1つ必要です' },
-        { status: 400 }
-      );
+    // dataFlowFile[0], dataFlowFile[1], ... をパース
+    let dataFlowIndex = 0;
+    while (formData.has(`dataFlowFile[${dataFlowIndex}]`)) {
+      const fileStr = formData.get(`dataFlowFile[${dataFlowIndex}]`) as string;
+      dataFlowFiles.push(JSON.parse(fileStr));
+      dataFlowIndex++;
     }
 
-    // Create test case in transaction
-    const testCase = await prisma.$transaction(async (tx) => {
-      // Insert test case
-      const newTestCase = await tx.tt_test_cases.create({
-        data: {
-          test_group_id: groupIdNum,
+    // TIDの重複チェック
+    const existingTestCase = await prisma.tt_test_cases.findUnique({
+      where: {
+        test_group_id_tid: {
+          test_group_id: groupId,
           tid,
-          first_layer: first_layer || null,
-          second_layer: second_layer || null,
-          third_layer: third_layer || null,
-          fourth_layer: fourth_layer || null,
-          purpose: purpose || null,
-          request_id: request_id || null,
-          check_items: check_items || null,
-          test_procedure: test_procedure || null,
+        },
+      },
+    });
+
+    if (existingTestCase) {
+      logAPIEndpoint({
+        method: 'POST',
+        endpoint: `/api/test-groups/${groupId}/cases`,
+        userId: user.id,
+        statusCode: STATUS_CODES.CONFLICT,
+        executionTime: apiTimer.elapsed(),
+        dataSize: 0,
+      });
+      return handleError(
+        new Error(`TID「${tid}」は既に登録されています`),
+        STATUS_CODES.CONFLICT,
+        apiTimer,
+        'POST',
+        `/api/test-groups/${groupId}/cases`
+      );
+    }
+
+    // トランザクション開始
+    const result = await prisma.$transaction(async (tx) => {
+      // tt_test_cases に登録
+      const testCase = await tx.tt_test_cases.create({
+        data: {
+          test_group_id: groupId,
+          tid,
+          first_layer: firstLayer,
+          second_layer: secondLayer,
+          third_layer: thirdLayer,
+          fourth_layer: fourthLayer,
+          purpose,
+          request_id: requestId,
+          check_items: checkItems,
+          test_procedure: testProcedure,
         },
       });
 
-      // Insert test contents
-      for (const content of contents) {
-        await tx.tt_test_contents.create({
-          data: {
-            test_group_id: groupIdNum,
-            tid,
-            test_case_no: content.test_case_no,
-            test_case: content.test_case || '',
-            expected_value: content.expected_value || null,
-            is_target: content.is_target !== undefined ? content.is_target : true,
-          },
-        });
+      // ファイル保存処理
+      const uploadDir = join(process.cwd(), 'public', 'uploads', 'test-cases', String(groupId), tid);
+
+      // ディレクトリが存在しない場合は作成
+      if (!existsSync(uploadDir)) {
+        await mkdir(uploadDir, { recursive: true });
       }
 
-      return newTestCase;
+      // 制御仕様書ファイル保存
+      for (let i = 0; i < controlSpecFiles.length; i++) {
+        const fileInfo = controlSpecFiles[i];
+        if (fileInfo.base64) {
+          const controlSpecFileName = `control_spec_${Date.now()}_${i}_${fileInfo.name}`;
+          const controlSpecPath = join(uploadDir, controlSpecFileName);
+          const buffer = Buffer.from(fileInfo.base64, 'base64');
+          await writeFile(controlSpecPath, buffer);
+
+          // tt_test_case_files に記録（type=0: 制御仕様書）
+          await tx.tt_test_case_files.create({
+            data: {
+              test_group_id: groupId,
+              tid,
+              file_type: 0,
+              file_no: i + 1,
+              file_name: fileInfo.name,
+              file_path: `/uploads/test-cases/${groupId}/${tid}/${controlSpecFileName}`,
+            },
+          });
+        }
+      }
+
+      // データフローファイル保存
+      for (let i = 0; i < dataFlowFiles.length; i++) {
+        const fileInfo = dataFlowFiles[i];
+        if (fileInfo.base64) {
+          const dataFlowFileName = `data_flow_${Date.now()}_${i}_${fileInfo.name}`;
+          const dataFlowPath = join(uploadDir, dataFlowFileName);
+          const buffer = Buffer.from(fileInfo.base64, 'base64');
+          await writeFile(dataFlowPath, buffer);
+
+          // tt_test_case_files に記録（type=1: データフロー）
+          await tx.tt_test_case_files.create({
+            data: {
+              test_group_id: groupId,
+              tid,
+              file_type: 1,
+              file_no: i + 1,
+              file_name: fileInfo.name,
+              file_path: `/uploads/test-cases/${groupId}/${tid}/${dataFlowFileName}`,
+            },
+          });
+        }
+      }
+
+      // tt_test_contents に登録（テストケースと期待値が両方入力されているもののみ）
+      if (testContents && testContents.length > 0) {
+        let testCaseNo = 1;
+        for (let i = 0; i < testContents.length; i++) {
+          const tc = testContents[i];
+          // テストケースと期待値が両方入力されている場合のみ登録
+          if (tc.testCase && tc.testCase.trim() !== '' && tc.expectedValue && tc.expectedValue.trim() !== '') {
+            await tx.tt_test_contents.create({
+              data: {
+                test_group_id: groupId,
+                tid,
+                test_case_no: testCaseNo,
+                test_case: tc.testCase,
+                expected_value: tc.expectedValue,
+                is_target: !tc.excluded,
+              },
+            });
+            testCaseNo++;
+          }
+        }
+      }
+
+      return testCase;
     });
 
-    statusCode = 201;
     logAPIEndpoint({
       method: 'POST',
       endpoint: `/api/test-groups/${groupId}/cases`,
       userId: user.id,
-      statusCode,
+      statusCode: STATUS_CODES.CREATED,
       executionTime: apiTimer.elapsed(),
-      dataSize: 1 + contents.length,
+      dataSize: 1,
     });
 
-    return NextResponse.json({ testCase }, { status: 201 });
+    return NextResponse.json({
+      success: true,
+      data: result,
+    }, { status: STATUS_CODES.CREATED });
   } catch (error) {
-    statusCode = error instanceof Error && error.message === 'Unauthorized' ? 401 : 500;
-    logAPIEndpoint({
-      method: 'POST',
-      endpoint: `/api/test-groups/${(await params).groupId}/cases`,
-      statusCode,
-      executionTime: apiTimer.elapsed(),
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
+    const errorMessage = error instanceof Error ? error.message : ERROR_MESSAGES.DEFAULT;
 
-    console.error(`POST /api/test-groups/${(await params).groupId}/cases error:`, error);
-
-    if (error instanceof Error && error.message === 'Unauthorized') {
-      return NextResponse.json(
-        { error: '認証が必要です' },
-        { status: 401 }
-      );
-    }
-
-    return NextResponse.json(
-      { error: 'テストケースの作成に失敗しました' },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      success: false,
+      error: errorMessage,
+    }, { status: STATUS_CODES.INTERNAL_SERVER_ERROR });
   }
 }

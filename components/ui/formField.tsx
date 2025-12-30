@@ -39,8 +39,8 @@ const FORM_FIELD_STYLE = "flex flex-cols space-x-4 justify-end";
 const LABLE_STYLE = "flex items-center text-sm";
 const INPUT_FORM_STYLE = "flex h-10 w-67/100 rounded border border-[#cccccc] bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:border-2 focus-visible:border-[#2684ff]";
 const INPUT_TEXTARER_FORM_STYLE = "flex h-32 w-67/100 rounded border border-[#cccccc] bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:border-2 focus-visible:border-[#2684ff]";
-const INPUT_SLECT_FORM_STYLE = "h-10 w-67/100 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:border-2 focus-visible:border-[#2684ff] disabled:cursor-not-allowed disabled:opacity-50";
-const INPUT_TAG_FORM_STYLE = "h-10 w-67/100 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:border-2 focus-visible:border-[#2684ff] disabled:cursor-not-allowed disabled:opacity-50";
+const INPUT_SELECT_FORM_STYLE = "min-h-10 max-h-100 w-67/100 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:border-2 focus-visible:border-[#2684ff] disabled:cursor-not-allowed disabled:opacity-50";
+const INPUT_TAG_FORM_STYLE = "min-h-10 max-h-100 w-67/100 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:border-2 focus-visible:border-[#2684ff] disabled:cursor-not-allowed disabled:opacity-50";
 const INPUT_DATE_FORM_STYLE = "h-10 w-67/100 rounded border border-[#cccccc] bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:border-2 focus-visible:border-[#2684ff]";
 
 /**
@@ -82,10 +82,14 @@ export default function FormField({
     return (
       <div className={FORM_FIELD_STYLE}>
         <label className={LABLE_STYLE}>{label}</label>
-        <div className={INPUT_SLECT_FORM_STYLE} />
+        <div className={INPUT_SELECT_FORM_STYLE} />
       </div>
     );
   }
+
+  const truncateFileName = (name: string) => {
+    return name.length > 30 ? name.slice(0, 30) + '...' : name;
+  };
 
   return (
     <div>
@@ -99,7 +103,7 @@ export default function FormField({
             onChange={(selectedOption) =>
               onChange({ target: { name, value: selectedOption?.value || '' } } as unknown as React.ChangeEvent<HTMLInputElement>)
             }
-            className={INPUT_SLECT_FORM_STYLE}
+            className={INPUT_SELECT_FORM_STYLE}
             classNamePrefix="select"
             menuPosition="fixed"
             placeholder={placeholder}
@@ -122,7 +126,7 @@ export default function FormField({
               const newValue = selectedOptions ? selectedOptions.map(option => option.value) : [];
               onChange({ target: { name, value: newValue } });
             }}
-            className={INPUT_SLECT_FORM_STYLE}
+            className={INPUT_SELECT_FORM_STYLE}
             classNamePrefix="select"
             menuPosition="fixed"
             placeholder={placeholder}

@@ -1,273 +1,194 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireAdmin } from '@/app/lib/auth';
-import { prisma } from '@/app/lib/prisma';
-import bcrypt from 'bcryptjs';
-import { logAPIEndpoint, QueryTimer } from '@/utils/database-logger';
+import { isAdmin, requireAuth } from "@/app/lib/auth";
+import { prisma } from "@/app/lib/prisma";
+import { ERROR_MESSAGES } from "@/constants/errorMessages";
+import { STATUS_CODES } from "@/constants/statusCodes";
+import { logAPIEndpoint, logDatabaseQuery, QueryTimer } from "@/utils/database-logger";
+import { handleError } from "@/utils/errorHandler";
+import { NextRequest, NextResponse } from "next/server";
 
-// GET /api/users/[userId] - Get user detail
-export async function GET(
-  req: NextRequest,
-  { params }: { params: Promise<{ userId: string }> }
-) {
+interface RouteParams {
+  params: Promise<{ userId: string }>
+}
+
+// GET /api/users/[userId] - ユーザー詳細取得
+export async function GET(req: NextRequest, { params }: RouteParams) {
   const apiTimer = new QueryTimer();
-  let statusCode = 200;
+  const { userId } = await params;
 
   try {
-    await requireAdmin(req);
-    const { userId: userIdParam } = await params;
-    const userId = parseInt(userIdParam, 10);
+    const user = await requireAuth(req);
 
-    // Get user detail
-    const user = await prisma.mt_users.findUnique({
-      where: {
-        id: userId,
-        is_deleted: false,
-      },
-    });
-
-    if (!user) {
-      statusCode = 404;
-      logAPIEndpoint({
-        method: 'GET',
-        endpoint: `/api/users/${userId}`,
-        statusCode,
-        executionTime: apiTimer.elapsed(),
-        dataSize: 0,
-      });
-      return NextResponse.json({ error: 'ユーザーが見つかりません' }, { status: 404 });
+    if (!isAdmin(user)) {
+      return handleError(
+        new Error(ERROR_MESSAGES.PERMISSION_DENIED),
+        STATUS_CODES.FORBIDDEN,
+        apiTimer,
+        'GET',
+        `/api/users/${userId}`
+      );
     }
 
-    // Get user tags
-    const tags = await prisma.mt_user_tags.findMany({
+    const queryTimer = new QueryTimer();
+    const userData = await prisma.mt_users.findFirst({
       where: {
-        user_id: userId,
+        id: parseInt(userId, 10),
+        is_deleted: false
+      }
+    });
+
+    logDatabaseQuery({
+      operation: 'SELECT',
+      table: 'mt_users',
+      executionTime: queryTimer.elapsed(),
+      rowsReturned: userData ? 1 : 0,
+      query: 'findFirst',
+      params: [
+        {
+          id: parseInt(userId, 10),
+          is_deleted: false
+        }
+      ]
+    });
+
+    if (!userData) {
+      return handleError(
+        new Error(ERROR_MESSAGES.GET_FALED),
+        STATUS_CODES.NOT_FOUND,
+        queryTimer,
+        'GET',
+        `/api/users/${userId}`
+      );
+    }
+
+    const tagsTimer = new QueryTimer();
+    const userTags = await prisma.mt_user_tags.findMany({
+      where: {
+        user_id: parseInt(userId, 10),
+        is_deleted: false,
+        mt_tags: {
+          is_deleted: false,
+        },
       },
       include: {
         mt_tags: true,
       },
-      orderBy: {
-        mt_tags: {
-          name: 'asc',
-        },
-      },
     });
 
-    const formattedTags = tags
-      .filter((tag) => !tag.mt_tags.is_deleted)
-      .map((tag) => ({
-        tag_id: tag.mt_tags.id,
-        tag_name: tag.mt_tags.name,
-      }));
-
-    statusCode = 200;
-    logAPIEndpoint({
-      method: 'GET',
-      endpoint: `/api/users/${userId}`,
-      statusCode,
-      executionTime: apiTimer.elapsed(),
-      dataSize: 1 + formattedTags.length,
-    });
-
-    return NextResponse.json({ user, tags: formattedTags });
-  } catch (error) {
-    statusCode = error instanceof Error && error.message === 'Unauthorized' ? 401 :
-                 error instanceof Error && error.message === 'Forbidden' ? 403 : 500;
-    logAPIEndpoint({
-      method: 'GET',
-      endpoint: `/api/users/${(await params).userId}`,
-      statusCode,
-      executionTime: apiTimer.elapsed(),
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
-
-    console.error('GET /api/users/[userId] error:', error);
-
-    if (error instanceof Error && error.message === 'Unauthorized') {
-      return NextResponse.json({ error: '認証が必要です' }, { status: 401 });
-    }
-
-    if (error instanceof Error && error.message === 'Forbidden') {
-      return NextResponse.json({ error: '管理者権限が必要です' }, { status: 403 });
-    }
-
-    return NextResponse.json(
-      { error: 'ユーザーの取得に失敗しました' },
-      { status: 500 }
-    );
-  }
-}
-
-// PUT /api/users/[userId] - Update user
-export async function PUT(
-  req: NextRequest,
-  { params }: { params: Promise<{ userId: string }> }
-) {
-  const apiTimer = new QueryTimer();
-  let statusCode = 200;
-
-  try {
-    const admin = await requireAdmin(req);
-    const { userId: userIdParam } = await params;
-    const userId = parseInt(userIdParam, 10);
-    const body = await req.json();
-    const { name, email, user_role, password, tags } = body;
-
-    await prisma.$transaction(async (tx) => {
-      // Update user basic info
-      if (password) {
-        const hashedPassword = await bcrypt.hash(password, 10);
-        await tx.mt_users.update({
-          where: {
-            id: userId,
-          },
-          data: {
-            name,
-            email,
-            user_role,
-            password: hashedPassword,
-          },
-        });
-      } else {
-        await tx.mt_users.update({
-          where: {
-            id: userId,
-          },
-          data: {
-            name,
-            email,
-            user_role,
-          },
-        });
-      }
-
-      // Delete existing user tags
-      await tx.mt_user_tags.updateMany({
-        where: {
-          user_id: userId,
-        },
-        data: {
-          is_deleted: true,
-        },
-      });
-
-      // Insert new user tags
-      if (tags && tags.length > 0) {
-        for (const tagId of tags) {
-          await tx.mt_user_tags.upsert({
-            where: {
-              user_id_tag_id: {
-                user_id: userId,
-                tag_id: tagId,
-              },
-            },
-            update: {
-              is_deleted: false,
-            },
-            create: {
-              user_id: userId,
-              tag_id: tagId,
-              created_by: admin.id,
-              updated_by: admin.id,
-            },
-          });
+    logDatabaseQuery({
+      operation: 'SELECT',
+      table: 'mt_user_tags',
+      executionTime: tagsTimer.elapsed(),
+      rowsReturned: userTags.length,
+      query: 'findMany',
+      params: [
+        {
+          user_id: parseInt(userId, 10),
+          mt_tags: {
+            is_deleted: false
+          }
         }
-      }
+      ]
     });
 
-    statusCode = 200;
+    // タグのフォーマット
+    const formattedUserTags = userTags.map(tag =>
+      tag.mt_tags.name
+    );
+
     logAPIEndpoint({
-      method: 'PUT',
+      method: 'GET',
       endpoint: `/api/users/${userId}`,
-      statusCode,
+      userId: user.id,
+      statusCode: STATUS_CODES.OK,
       executionTime: apiTimer.elapsed(),
-      dataSize: 0,
+      dataSize: 1
     });
-
-    return NextResponse.json({ message: 'ユーザーを更新しました' });
-  } catch (error) {
-    statusCode = error instanceof Error && error.message === 'Unauthorized' ? 401 :
-                 error instanceof Error && error.message === 'Forbidden' ? 403 : 500;
-    logAPIEndpoint({
-      method: 'PUT',
-      endpoint: `/api/users/${(await params).userId}`,
-      statusCode,
-      executionTime: apiTimer.elapsed(),
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
-
-    console.error('PUT /api/users/[userId] error:', error);
-
-    if (error instanceof Error && error.message === 'Unauthorized') {
-      return NextResponse.json({ error: '認証が必要です' }, { status: 401 });
-    }
-
-    if (error instanceof Error && error.message === 'Forbidden') {
-      return NextResponse.json({ error: '管理者権限が必要です' }, { status: 403 });
-    }
 
     return NextResponse.json(
-      { error: 'ユーザーの更新に失敗しました' },
-      { status: 500 }
+      {
+        success: true,
+        data: {
+          ...userData,
+          userTags: formattedUserTags
+        }
+      },
+      { status: STATUS_CODES.OK }
+    );
+  } catch (error) {
+    return handleError(
+      error as Error,
+      STATUS_CODES.INTERNAL_SERVER_ERROR,
+      apiTimer,
+      'GET',
+      `/api/users/${userId}`
     );
   }
 }
 
-// DELETE /api/users/[userId] - Delete user (soft delete)
-export async function DELETE(
-  req: NextRequest,
-  { params }: { params: Promise<{ userId: string }> }
-) {
+// DELETE /api/users/[userId] - ユーザー削除
+export async function DELETE(req: NextRequest, { params }: RouteParams) {
   const apiTimer = new QueryTimer();
-  let statusCode = 200;
+  const { userId } = await params;
+
+  if (isNaN(parseInt(userId, 10))) {
+    throw new Error('対象のID(メールアドレス)の取得に失敗しました');
+  }
 
   try {
-    await requireAdmin(req);
-    const { userId: userIdParam } = await params;
-    const userId = parseInt(userIdParam, 10);
+    const user = await requireAuth(req);
 
+    // ユーザが管理者か確認   
+    if (!isAdmin(user)) {
+      logAPIEndpoint({
+        method: 'DELETE',
+        endpoint: `/api/users/${userId}`,
+        userId: user.id,
+        statusCode: STATUS_CODES.FORBIDDEN,
+        executionTime: apiTimer.elapsed(),
+        error: ERROR_MESSAGES.PERMISSION_DENIED
+      });
+      return NextResponse.json(
+        { success: false, error: { message: ERROR_MESSAGES.PERMISSION_DENIED } },
+        { status: STATUS_CODES.FORBIDDEN },
+      );
+    }
+
+    const deleteTimer = new QueryTimer();
+    // ユーザIDに一致するレコードを削除扱い
     await prisma.mt_users.update({
       where: {
-        id: userId,
+        id: parseInt(userId, 10),
       },
       data: {
         is_deleted: true,
-      },
+      }
     });
 
-    statusCode = 200;
+
+    logDatabaseQuery({
+      operation: 'UPDATE',
+      table: 'mt_users',
+      executionTime: deleteTimer.elapsed(),
+      rowsAffected: 1,
+      query: 'update',
+      params: [
+        {
+          id: parseInt(userId, 10),
+        }
+      ]
+    });
+
     logAPIEndpoint({
       method: 'DELETE',
       endpoint: `/api/users/${userId}`,
-      statusCode,
+      userId: user.id,
+      statusCode: STATUS_CODES.OK,
       executionTime: apiTimer.elapsed(),
-      dataSize: 0,
+      dataSize: 1
     });
 
-    return NextResponse.json({ message: 'ユーザーを削除しました' });
+    return NextResponse.json({ success: true, message: 'ユーザを削除しました' }, { status: STATUS_CODES.OK });
   } catch (error) {
-    statusCode = error instanceof Error && error.message === 'Unauthorized' ? 401 :
-                 error instanceof Error && error.message === 'Forbidden' ? 403 : 500;
-    logAPIEndpoint({
-      method: 'DELETE',
-      endpoint: `/api/users/${(await params).userId}`,
-      statusCode,
-      executionTime: apiTimer.elapsed(),
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
-
-    console.error('DELETE /api/users/[userId] error:', error);
-
-    if (error instanceof Error && error.message === 'Unauthorized') {
-      return NextResponse.json({ error: '認証が必要です' }, { status: 401 });
-    }
-
-    if (error instanceof Error && error.message === 'Forbidden') {
-      return NextResponse.json({ error: '管理者権限が必要です' }, { status: 403 });
-    }
-
-    return NextResponse.json(
-      { error: 'ユーザーの削除に失敗しました' },
-      { status: 500 }
-    );
+    return handleError(error as Error, STATUS_CODES.INTERNAL_SERVER_ERROR, apiTimer, 'DELETE', `/api/users/${userId}`);
   }
 }

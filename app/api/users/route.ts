@@ -1,172 +1,254 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireAdmin } from '@/app/lib/auth';
+import { isAdmin, requireAdmin, requireAuth } from "@/app/lib/auth";
+import { getAllRows, query } from "@/app/lib/db";
 import { prisma } from '@/app/lib/prisma';
-import { hash } from 'bcryptjs';
-import { logAPIEndpoint, QueryTimer } from '@/utils/database-logger';
-import type { Prisma } from '@/generated/prisma/client';
+import { ERROR_MESSAGES } from "@/constants/errorMessages";
+import { STATUS_CODES } from "@/constants/statusCodes";
+import { User } from "@/types";
+import { hashPassword } from "@/utils/cryptroUtils";
+import { logAPIEndpoint, logDatabaseQuery, QueryTimer } from "@/utils/database-logger";
+import { handleError } from "@/utils/errorHandler";
+import { NextRequest, NextResponse } from "next/server";
 
-// GET /api/users - Get all users (Admin only)
+// GET /api/users - ユーザ一覧情報を取得
 export async function GET(req: NextRequest) {
   const apiTimer = new QueryTimer();
-  let statusCode = 200;
-
   try {
-    await requireAdmin(req);
+    const user = await requireAdmin(req);
 
-    // Parse query parameters
+    // クエリ文字列から検索パラメータを取得
     const { searchParams } = new URL(req.url);
-    const email = searchParams.get('email');
-    const department = searchParams.get('department');
-    const tagId = searchParams.get('tagId');
+    let roleValue;
+    switch (searchParams.get('user_role')) {
+      case "システム管理者":
+        roleValue = "0";
+        break;
+      case "テスト管理者":
+        roleValue = "1";
+        break;
+      case "一般":
+        roleValue = "2";
+        break;
+      default:
+        roleValue = "";
+        break;
+    }
 
-    // Build where conditions
-    const whereConditions: Prisma.mt_usersWhereInput = {
-      is_deleted: false,
-    };
+    let statusValue;
+    switch (searchParams.get('status')) {
+      case "有効":
+        statusValue = false;
+        break;
+      case "無効":
+        statusValue = true;
+        break;
+      default:
+        statusValue = "";
+    }
+    const email = searchParams.get('email') || '';
+    const name = searchParams.get('name') || '';
+    const department = searchParams.get('department') || '';
+    const company = searchParams.get('company') || '';
+    const role = roleValue;
+    const tags = searchParams.getAll('tags');
+    const status = statusValue;
+
+    // ページネーションパラメータを取得
+    const page = parseInt(searchParams.get('page') || '1', 10);
+    const limit = parseInt(searchParams.get('limit') || '10', 10);
+    const offset = (page - 1) * limit;
+
+    // WHERE句を動的に構築
+    const whereConditions = [`u.is_deleted = ${status || 'FALSE'}`];
+    const whereParams: unknown[] = [];
+    let paramsIndex = 1;
 
     if (email) {
-      whereConditions.email = {
-        contains: email,
-        mode: 'insensitive',
-      };
+      whereConditions.push(`u.email ILIKE $${paramsIndex}`);
+      whereParams.push(`%${email}%`);
+      paramsIndex++;
+    }
+
+    if (name) {
+      whereConditions.push(`u.name ILIKE $${paramsIndex}`);
+      whereParams.push(`%${name}%`);
+      paramsIndex++;
     }
 
     if (department) {
-      whereConditions.department = {
-        contains: department,
-        mode: 'insensitive',
-      };
+      whereConditions.push(`u.department ILIKE $${paramsIndex}`);
+      whereParams.push(`%${department}%`);
+      paramsIndex++;
     }
 
-    // If tagId is provided, filter users by tag
-    let userIds: number[] | undefined;
-    if (tagId) {
-      const userTags = await prisma.mt_user_tags.findMany({
-        where: {
-          tag_id: parseInt(tagId),
-        },
-        select: {
-          user_id: true,
-        },
-      });
-      userIds = userTags.map((ut) => ut.user_id);
+    if (company) {
+      whereConditions.push(`u.company ILIKE $${paramsIndex}`);
+      whereParams.push(`%${company}%`);
+      paramsIndex++;
     }
 
-    if (userIds !== undefined && userIds.length === 0) {
-      // No users with this tag
-      statusCode = 200;
-      logAPIEndpoint({
-        method: 'GET',
-        endpoint: '/api/users',
-        statusCode,
-        executionTime: apiTimer.elapsed(),
-        dataSize: 0,
-      });
-      return NextResponse.json({ success: true, data: [] });
+    if (role) {
+      whereConditions.push(`u.user_role = $${paramsIndex}`);
+      whereParams.push(`${role}`);
+      paramsIndex++;
     }
 
-    if (userIds) {
-      whereConditions.id = {
-        in: userIds,
-      };
+    if (tags.length > 0) {
+      const tagPlaceholders = tags.map((_, index) => `$${paramsIndex + index}`).join(',');
+      whereConditions.push(`u.id IN (
+                            SELECT ut2.user_id
+                            FROM mt_user_tags ut2
+                            JOIN mt_tags t2
+                            ON ut2.tag_id = t2.id
+                            WHERE t2.name IN(${tagPlaceholders})
+                            AND ut2.is_deleted = FALSE
+                            GROUP BY ut2.user_id
+                            HAVING COUNT(DISTINCT t2.name) =${tags.length}
+                            )`);
+      whereParams.push(...tags);
+      paramsIndex += tags.length;
     }
 
-    // Fetch users
-    const users = await prisma.mt_users.findMany({
-      where: whereConditions,
-      orderBy: {
-        created_at: 'desc',
-      },
-    });
 
-    // Fetch tags for each user
-    const usersWithTags = await Promise.all(
-      users.map(async (user) => {
-        const tags = await prisma.mt_user_tags.findMany({
-          where: {
-            user_id: user.id,
-          },
-          include: {
-            mt_tags: true,
-          },
-        });
+    const whereClause = whereConditions.join(' AND ');
 
-        return {
-          ...user,
-          tags: tags
-            .filter((tag) => !tag.mt_tags.is_deleted)
-            .map((tag) => ({
-              id: tag.mt_tags.id,
-              name: tag.mt_tags.name,
-            })),
-        };
-      })
-    );
-
-    statusCode = 200;
     logAPIEndpoint({
       method: 'GET',
       endpoint: '/api/users',
-      statusCode,
+      userId: user.id,
       executionTime: apiTimer.elapsed(),
-      dataSize: usersWithTags.length,
+      queryParams: searchParams,
     });
 
-    return NextResponse.json({ success: true, data: usersWithTags });
+    // ページネーションように合計件数を取得
+    const countQuery = `SELECT COUNT(*) FROM mt_users u WHERE ${whereClause}`;
+    const countTimer = new QueryTimer();
+    const countResult = await query<{ count: string | number }>(countQuery, whereParams);
+    const totalCount = parseInt(String(countResult.rows[0]?.count || '0'), 10);
+
+    logDatabaseQuery({
+      operation: 'SELECT',
+      table: 'mt_users',
+      executionTime: countTimer.elapsed(),
+      rowsReturned: 1,
+      query: 'COUNT(*)',
+      params: Object.entries(whereClause),
+    });
+
+    // ページネーション付きでユーザ情報を取得
+    const dataParams = [...whereParams, limit, offset];
+    const limitParamIndex = whereParams.length + 1;
+    const offsetParamIndex = whereParams.length + 2;
+    const dataQuery = `SELECT u.id, u.email, u.name, u.user_role, u.department, u.company, u.created_at, u.updated_at,
+                      u.is_deleted, COALESCE(tags.tags,'') AS tags
+                      FROM mt_users u
+                      LEFT JOIN (
+                        SELECT ut.user_id, string_agg(t.name, ',') AS tags
+                        FROM mt_user_tags ut
+                        JOIN mt_tags t 
+                        ON ut.tag_id = t.id
+                        WHERE ut.is_deleted = FALSE
+                        GROUP BY ut.user_id
+                      ) tags ON u.id = tags.user_id
+                       WHERE ${whereClause}
+                       ORDER BY u.updated_at
+                      LIMIT $${limitParamIndex} OFFSET $${offsetParamIndex}`;
+
+    const dataTimer = new QueryTimer();
+    const result = await query<User>(dataQuery, dataParams);
+    const users = getAllRows(result);
+
+    logDatabaseQuery({
+      operation: 'SELECT',
+      table: 'mt_users',
+      userId: user.id,
+      executionTime: dataTimer.elapsed(),
+      rowsReturned: users.length,
+      query: 'findMany',
+      params: [{ skip: offset, take: limit }],
+    })
+
+    logAPIEndpoint({
+      method: 'GET',
+      endpoint: '/api/users',
+      userId: user.id,
+      statusCode: STATUS_CODES.OK,
+      executionTime: apiTimer.elapsed(),
+      dataSize: users.length,
+      queryParams: searchParams,
+    });
+
+    return NextResponse.json({ success: true, data: users, totalCount });
   } catch (error) {
-    statusCode = error instanceof Error && error.message.includes('Admin') ? 403 : 500;
-    logAPIEndpoint({
-      method: 'GET',
-      endpoint: '/api/users',
-      statusCode,
-      executionTime: apiTimer.elapsed(),
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
-
-    console.error('GET /api/users error:', error);
-
-    if (error instanceof Error && error.message.includes('Admin')) {
-      return NextResponse.json(
-        { error: '管理者権限が必要です' },
-        { status: 403 }
-      );
-    }
-
-    return NextResponse.json(
-      { error: 'ユーザーの取得に失敗しました' },
-      { status: 500 }
-    );
+    return handleError(
+      error as Error,
+      STATUS_CODES.INTERNAL_SERVER_ERROR,
+      apiTimer,
+      'GET',
+      '/api/users',
+    )
   }
 }
 
-// POST /api/users - Create user (Admin only)
+// POST /api/users - 新しいユーザ情報を作成
 export async function POST(req: NextRequest) {
   const apiTimer = new QueryTimer();
-  let statusCode = 201;
+  let statusCode = STATUS_CODES.CREATED;
 
   try {
-    await requireAdmin(req);
+    const user = await requireAuth(req);
 
-    const body = await req.json();
-    const { email, password, user_role, department, company, tags } = body;
-
-    // Validate required fields
-    if (!email || !password) {
-      statusCode = 400;
+    // ユーザが管理者か確認
+    if (!isAdmin(user)) {
+      statusCode = STATUS_CODES.FORBIDDEN;
       logAPIEndpoint({
         method: 'POST',
         endpoint: '/api/users',
+        userId: user.id,
         statusCode,
         executionTime: apiTimer.elapsed(),
-        error: 'Validation error: email and password required',
+        error: ERROR_MESSAGES.PERMISSION_DENIED
       });
       return NextResponse.json(
-        { error: 'メールアドレスとパスワードは必須です' },
-        { status: 400 }
+        { error: { message: ERROR_MESSAGES.PERMISSION_DENIED }, status: STATUS_CODES.FORBIDDEN }
       );
     }
 
-    // Check if email already exists
+    const body = await req.json();
+    const {
+      email,
+      name,
+      department,
+      company,
+      user_role,
+      password,
+      userTags
+    } = body;
+
+    logAPIEndpoint({
+      method: 'POST',
+      endpoint: '/api/users',
+      userId: user.id,
+      executionTime: apiTimer.elapsed(),
+      queryParams: new URLSearchParams(req.url.split('?')[1])
+    });
+
+    // 必須フィールドをバリデーション
+    if (!email || !name || !department || !company || !user_role || !password) {
+      statusCode = STATUS_CODES.BAD_REQUEST;
+      logAPIEndpoint({
+        method: 'POST',
+        endpoint: '/api/users',
+        userId: user.id,
+        statusCode,
+        executionTime: apiTimer.elapsed(),
+        error: ERROR_MESSAGES.VALIDATION_ERROR_REQUIRED_FIELDS
+      });
+      return NextResponse.json(
+        { success: false, error: { message: ERROR_MESSAGES.VALIDATION_ERROR_REQUIRED_FIELDS }, status: STATUS_CODES.BAD_REQUEST }
+      );
+    }
+
+    // メールアドレス重複確認
     const existingUser = await prisma.mt_users.findFirst({
       where: {
         email: email,
@@ -174,100 +256,199 @@ export async function POST(req: NextRequest) {
     });
 
     if (existingUser) {
-      statusCode = 400;
+      statusCode = STATUS_CODES.BAD_REQUEST;
       logAPIEndpoint({
         method: 'POST',
         endpoint: '/api/users',
+        userId: user.id,
         statusCode,
         executionTime: apiTimer.elapsed(),
-        error: 'Email already exists',
+        error: ERROR_MESSAGES.VALIDATION_ERROR_DUPLICATION_EMAIL
       });
       return NextResponse.json(
-        { error: 'このメールアドレスは既に使用されています' },
-        { status: 400 }
+        { success: false, error: { message: ERROR_MESSAGES.VALIDATION_ERROR_DUPLICATION_EMAIL }, status: STATUS_CODES.BAD_REQUEST }
       );
     }
 
-    // Hash password
-    const hashedPassword = await hash(password, 10);
+    // フィールドの文字数をバリデーション
+    const maxLength = 255;
+    const passMaxLength = 64;
+    const passMinlength = 8;
+    if (email.length > maxLength || name.length > maxLength || company.length > maxLength
+      || (password.length > passMaxLength || password.length < passMinlength)) {
+      statusCode = STATUS_CODES.BAD_REQUEST;
+      logAPIEndpoint({
+        method: 'POST',
+        endpoint: '/api/users',
+        userId: user.id,
+        statusCode,
+        executionTime: apiTimer.elapsed(),
+        error: ERROR_MESSAGES.VALIDATION_ERROR_FIELD_LENGTH_FOR_USER
+      });
+      return NextResponse.json(
+        { success: false, error: { message: ERROR_MESSAGES.VALIDATION_ERROR_FIELD_LENGTH_FOR_USER }, status: STATUS_CODES.BAD_REQUEST }
+      );
+    }
 
-    // Create user in transaction
-    const user = await prisma.$transaction(async (tx) => {
-      // Insert user
+    //パスワードの文字種のバリデーション
+    const passwordPattern = /(?=.*[0-9])(?=.*[a-z])(?=.*[A-Z])(?=.*[!-/:-@[-`{-~])/;
+    if (!passwordPattern.test(password)) {
+      return NextResponse.json(
+        { success: false, error: { message: ERROR_MESSAGES.VALIDATION_ERROR_PASSWORD_CONTENT }, status: STATUS_CODES.BAD_REQUEST }
+      );
+    }
+
+    // タグの使用不可文字をバリデーション
+    const userTagNgScript = (userTags: string[]): boolean => {
+      return userTags.some(tag => tag.includes(",") || tag.includes(";"));
+    }
+    if (userTags && Array.isArray(userTags) && userTags.length > 0) {
+      if (userTagNgScript(userTags)) {
+        statusCode = STATUS_CODES.BAD_REQUEST;
+        logAPIEndpoint({
+          method: 'POST',
+          endpoint: '/api/users',
+          userId: user.id,
+          statusCode,
+          executionTime: apiTimer.elapsed(),
+          error: ERROR_MESSAGES.VALIDATION_ERROR_NG_USER_TAG
+        });
+        return NextResponse.json(
+          { success: false, error: { message: ERROR_MESSAGES.VALIDATION_ERROR_NG_USER_TAG }, status: STATUS_CODES.BAD_REQUEST }
+        );
+      }
+    }
+
+    // Prisma トランザクション内でユーザを作成
+    const userData = await prisma.$transaction(async (tx) => {
+      const insertTimer = new QueryTimer();
+      const hash = await hashPassword(password);
+
+      // 新規ユーザの作成
       const newUser = await tx.mt_users.create({
         data: {
           email,
-          password: hashedPassword,
-          user_role: user_role || 2,
-          department: department || '',
-          company: company || '',
-        },
+          name,
+          department,
+          company,
+          user_role,
+          password: hash
+        }
       });
 
-      // Create tags if they don't exist and assign to user
-      if (tags && Array.isArray(tags)) {
-        for (const tagName of tags) {
-          // Check if tag exists
+      logDatabaseQuery({
+        operation: 'INSERT',
+        table: 'mt_users',
+        executionTime: insertTimer.elapsed(),
+        rowsAffected: 1,
+        query: 'create',
+        params: [
+          {
+            email,
+            name,
+            department,
+            company,
+            user_role,
+            hash
+          }
+        ]
+      });
+
+      // 新規に作成されたタグの確認
+      if (userTags && Array.isArray(userTags) && userTags.length > 0) {
+        for (const tag of userTags) {
+          // タグ名からタグIDを取得
+          const tagLookupTimer = new QueryTimer();
           let foundTag = await tx.mt_tags.findFirst({
             where: {
-              name: tagName,
-            },
+              name: tag,
+              is_deleted: false
+            }
           });
 
-          // Create new tag if it doesn't exist
+          logDatabaseQuery({
+            operation: 'SELECT',
+            table: 'mt_tags',
+            executionTime: tagLookupTimer.elapsed(),
+            rowsReturned: foundTag ? 1 : 0,
+            query: 'findFirst',
+            params: [
+              {
+                name: tag
+              }
+            ]
+          });
+
+          // タグの新規作成
           if (!foundTag) {
+            const tagInsertTimer = new QueryTimer();
             foundTag = await tx.mt_tags.create({
               data: {
-                name: tagName,
-              },
+                name: tag
+              }
+            });
+
+            logDatabaseQuery({
+              operation: 'INSERT',
+              table: 'mt_tags',
+              executionTime: tagInsertTimer.elapsed(),
+              rowsAffected: 1,
+              query: 'create',
+              params: [
+                {
+                  name: tag
+                }
+              ]
             });
           }
 
-          // Assign tag to user
-          await tx.mt_user_tags.create({
-            data: {
-              user_id: newUser.id,
-              tag_id: foundTag.id,
-            },
-          });
+          // ユーザとタグの紐づけ
+          if (foundTag && newUser) {
+            const tagInsertTimer = new QueryTimer();
+            await tx.mt_user_tags.create({
+              data: {
+                user_id: newUser.id,
+                tag_id: foundTag.id
+              }
+            });
+
+            logDatabaseQuery({
+              operation: 'INSERT',
+              table: 'mt_user_tags',
+              executionTime: tagInsertTimer.elapsed(),
+              rowsAffected: 1,
+              query: 'create',
+              params: [
+                {
+                  user_id: newUser.id,
+                  tag_id: foundTag.id
+                }
+              ]
+            });
+          }
         }
       }
-
       return newUser;
     });
 
-    statusCode = 201;
+    statusCode = STATUS_CODES.CREATED;
     logAPIEndpoint({
       method: 'POST',
       endpoint: '/api/users',
+      userId: user.id,
       statusCode,
       executionTime: apiTimer.elapsed(),
-      dataSize: 1,
+      dataSize: 1
     });
 
-    return NextResponse.json({ user }, { status: 201 });
+    return NextResponse.json({ success: true, status: STATUS_CODES.CREATED, data: userData });
   } catch (error) {
-    statusCode = error instanceof Error && error.message.includes('Admin') ? 403 : 500;
-    logAPIEndpoint({
-      method: 'POST',
-      endpoint: '/api/users',
-      statusCode,
-      executionTime: apiTimer.elapsed(),
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
-
-    console.error('POST /api/users error:', error);
-
-    if (error instanceof Error && error.message.includes('Admin')) {
-      return NextResponse.json(
-        { error: '管理者権限が必要です' },
-        { status: 403 }
-      );
-    }
-
-    return NextResponse.json(
-      { error: 'ユーザーの作成に失敗しました' },
-      { status: 500 }
+    return handleError(
+      error as Error,
+      STATUS_CODES.INTERNAL_SERVER_ERROR,
+      apiTimer,
+      'POST',
+      '/api/users'
     );
   }
 }

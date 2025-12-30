@@ -179,14 +179,13 @@ export enum ImportStatus {
 }
 
 export enum ImportType {
-  TEST_CASE = 0,
-  USER = 1,
+  USER = 0,
+  TEST_CASE = 1,
 }
 
 export interface ImportResult {
   id: number;
   file_name: string;
-  import_date: Date;
   import_status: ImportStatus;
   executor_name: string;
   import_type: ImportType;

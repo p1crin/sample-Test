@@ -1,28 +1,26 @@
-import DetailView from '@/components/ui/detailView';
-import React from 'react';
-import { ImportInfoListRow } from './types/import-info-list-row';
-import { useRouter } from 'next/navigation';
 import ButtonGroup from '@/components/ui/buttonGroup';
 import ImportInfoView from '@/components/ui/importInfoView';
+import { useRouter } from 'next/navigation';
+import { ImportInfoListRow } from './types/import-info-list-row';
 
 export type ImportInfoState = ImportInfoListRow;
 
 type ImportInfoProps = {
   labels: {
-    fileName: { name: string; type: 'text' };
+    file_name: { name: string; type: 'text' };
     count: { name: string; type: 'text' };
-    importDate: { name: string; type: 'text' };
-    importStatus: { name: string; type: 'text' };
-    execterName: { name: string; type: 'text' };
-    errorDetails: { name: string; type: 'text' };
+    created_at: { name: string; type: 'text' };
+    import_status: { name: string; type: 'text' };
+    executor_name: { name: string; type: 'text' };
+    message: { name: string; type: 'text' };
   };
   values: {
-    fileName: string;
+    file_name: string;
     count: string;
-    importDate: string;
-    importStatus: string;
-    execterName: string;
-    errorDetails: string;
+    created_at: string;
+    import_status: string;
+    executor_name: string;
+    message: string;
   };
 };
 

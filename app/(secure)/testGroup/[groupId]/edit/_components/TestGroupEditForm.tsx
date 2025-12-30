@@ -1,153 +1,191 @@
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { VerticalForm } from '@/components/ui/verticalForm';
+import { Button } from '@/components/ui/button';
 import ButtonGroup from '@/components/ui/buttonGroup';
 import { Modal } from '@/components/ui/modal';
-import { Button } from '@/components/ui/button';
+import { VerticalForm } from '@/components/ui/verticalForm';
+import { fetchData } from '@/utils/api';
 import clientLogger from '@/utils/client-logger';
-import { TestGroupFormData } from '@/app/(secure)/_components/types/testGroup-list-row';
+import { useParams, useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { testGroupEditSchema } from './schemas/testGroup-edit-schema';
+
+export type TestGroupEditFormState = {
+  oem: string;
+  model: string;
+  event: string;
+  variation: string;
+  destination: string;
+  specs: string;
+  test_startdate: string;
+  test_enddate: string;
+  ngPlanCount: string;
+  designerTag: [] | string[];
+  executerTag: [] | string[];
+  viewerTag: [] | string[];
+};
 
 export type TestGroupEditChangeData = {
   target: {
+    id: number;
     name: string;
-    value: string | string[];
+    value: string;
     type: string;
   };
 };
 
 export type TestGroupEditFormProps = {
-  form: TestGroupFormData;
-  errors: Record<string, string[]>;
-  toastOpen: boolean;
-  onChange: (e: TestGroupEditChangeData) => void;
-  onClear: () => void;
-  onSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
-  onToastClose: () => void;
+  groupName?: string;
+  form: TestGroupEditFormState;
 };
 
 export function TestGroupEditForm({
   form,
-  errors,
-  toastOpen,
-  onChange,
-  onClear,
-  onSubmit,
-  onToastClose,
 }: TestGroupEditFormProps) {
   const router = useRouter();
-  const [tagOptions, setTagOptions] = useState<{ value: string; label: string }[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalMessage, setModalMessage] = useState('');
+  const [formData, setFormData] = useState(form);
+  const [editIsLoading, setEditIsLoading] = useState(false);
+  const [editIsModalOpen, setEditIsModalOpen] = useState(false);
+  const [editModalMessage, setEditModalMessage] = useState('');
+  const [editError, setEditErrors] = useState<Record<string, string>>({});
+  const [tagOptions, setTagOptions] = useState<{ value: string, label: string }[]>([]);
+  const [tagError, setTagError] = useState<string | null>(null);
+  const params = useParams();
+  const groupId = params.groupId;
+
+  // テストグループのフォーマットの各値取得
+  useEffect(() => {
+    setFormData(form);
+  }, [form]);
 
   useEffect(() => {
-    async function fetchTagOptions() {
+    const fetchTags = async () => {
       try {
-        clientLogger.info('TestGroupEditForm', 'タグオプション取得開始');
-        const response = await fetch('/api/tags');
+        setTagError(null);
+        const result = await fetchData('/api/tags');
 
-        if (!response.ok) {
-          throw new Error(`API error: ${response.status}`);
-        }
-
-        const result = await response.json();
-
-        clientLogger.info('TestGroupEditForm', 'タグオプション取得レスポンス', {
-          success: result.success,
-          dataLength: result.data?.length || 0,
-          error: result.error,
-        });
-
-        if (result.success && result.data && Array.isArray(result.data)) {
+        if (result.success && Array.isArray(result.data)) {
           const tagOptions = result.data.map((tag: { id: number; name: string }) => ({
             value: tag.name,
             label: tag.name,
           }));
           setTagOptions(tagOptions);
-          clientLogger.info('TestGroupEditForm', 'タグオプション設定完了', {
-            count: tagOptions.length,
-          });
         } else {
-          clientLogger.warn('TestGroupEditForm', 'タグオプション取得失敗', {
-            success: result.success,
-            hasData: !!result.data,
-            isArray: Array.isArray(result.data),
-            error: result.error,
-          });
-          setTagOptions([]);
+          setTagError('タグの取得に失敗しました');
         }
       } catch (error) {
-        clientLogger.error('TestGroupEditForm', 'タグオプション取得エラー', {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        setTagOptions([]);
+        clientLogger.error('TestGroupRegistration', 'タグ取得エラー', { error });
+        setTagError(error instanceof Error ? error.message : 'タグの取得に失敗しました');
       }
-    }
-    fetchTagOptions();
+    };
+    fetchTags();
   }, []);
 
   // 更新ボタン押下時処理
-  const handleUpdate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
+  const handleEditer = async () => {
+    // クライアント側バリデーション
+    const validationResult = testGroupEditSchema.safeParse(formData);
+    if (!validationResult.success) {
+      const newErrors: Record<string, string> = {};
+      validationResult.error.errors.forEach(err => {
+        const fieldPath = err.path[0] as string;
+        newErrors[fieldPath] = err.message;
+      });
+      setEditErrors(newErrors);
+      return;
+    }
+
+    // バリデーション成功時にエラークリア
+    setEditErrors({});
+
+    setEditIsLoading(true);
     try {
-      await onSubmit(e as React.FormEvent<HTMLFormElement>);
-      clientLogger.info('TestGroupEditForm', 'テストグループ更新成功');
-      setModalMessage('テストグループを更新しました');
-      setIsModalOpen(true);
-      setTimeout(() => {
-        router.push('/testGroup');
-      }, 1500);
+      // タグ名の配列を生成
+      const tag_names: { tag_name: string; test_role: number }[] = [];
+
+      if (formData.designerTag && formData.designerTag.length > 0) {
+        formData.designerTag.forEach(tag => {
+          tag_names.push({ tag_name: tag, test_role: 0 });
+        });
+      }
+      if (formData.executerTag && formData.executerTag.length > 0) {
+        formData.executerTag.forEach(tag => {
+          tag_names.push({ tag_name: tag, test_role: 1 });
+        });
+      }
+      if (formData.viewerTag && formData.viewerTag.length > 0) {
+        formData.viewerTag.forEach(tag => {
+          tag_names.push({ tag_name: tag, test_role: 2 });
+        });
+      }
+
+      // API呼び出し
+      const response = await fetch(`/api/test-groups/${groupId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          oem: formData.oem,
+          model: formData.model,
+          event: formData.event,
+          variation: formData.variation,
+          destination: formData.destination,
+          specs: formData.specs,
+          test_startdate: formData.test_startdate,
+          test_enddate: formData.test_enddate,
+          ng_plan_count: formData.ngPlanCount ? parseInt(formData.ngPlanCount) : 0,
+          tag_names: tag_names.length > 0 ? tag_names : undefined,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(
+          errorData.error?.message || `API error: ${response.status}`
+        );
+      }
+
+      const result = await response.json();
+
+      if (result.success) {
+        clientLogger.info('TestGroupEditForm', 'テストグループ更新成功', { groupId: result.data?.id });
+        setEditModalMessage('テストグループを更新しました');
+        setEditIsModalOpen(true);
+        setTimeout(() => {
+          router.push('/testGroup');
+        }, 1500); // 1.5秒後にテストグループ一覧に飛ばす
+      } else {
+        clientLogger.error('TestGroupEditForm', 'テストグループ更新失敗', { error: result.error });
+        setEditModalMessage('テストグループの更新に失敗しました');
+        setEditIsModalOpen(true);
+      }
     } catch (error) {
-      clientLogger.error('TestGroupEditForm', 'テストグループ更新失敗', { error });
-      setModalMessage(
-        error instanceof Error ? error.message : 'テストグループの更新に失敗しました'
-      );
-      setIsModalOpen(true);
+      clientLogger.error('TestGroupEditForm', 'テストグループ更新エラー', { error });
+      setEditModalMessage('テストグループの更新に失敗しました');
+      setEditIsModalOpen(true);
     } finally {
-      setIsLoading(false);
+      setEditIsLoading(false);
     }
   };
 
   // キャンセルボタン押下時処理
-  const handleCancel = () => {
+  const handleCansel = () => {
     router.push('/testGroup', { scroll: false });
   };
 
-  const handleInputChange = (
-    e:
-      | React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
-      | { target: { name: string; value: string | string[] } }
-  ) => {
-    const target = e.target as
-      | HTMLInputElement
-      | HTMLSelectElement
-      | HTMLTextAreaElement
-      | { name: string; value: string | string[] };
-    const { name } = target;
-    const value =
-      typeof target.value === 'string'
-        ? target.value
-        : Array.isArray(target.value)
-          ? target.value.join(',')
-          : '';
-    onChange({
-      target: {
-        name,
-        value,
-        type: (target as HTMLInputElement).type || 'text',
-      },
-    });
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement> | { target: { name: string; value: string | string[] } }) => {
+    const target = e.target as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | { name: string; value: string | string[] };
+    const { name, value } = target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
   };
 
   const handleTagChange = (tagName: string, selectedValues: string[]) => {
-    onChange({
-      target: {
-        name: tagName,
-        value: selectedValues,
-        type: 'tag',
-      },
-    });
+    setFormData(prev => ({
+      ...prev,
+      [tagName]: selectedValues
+    }));
   };
 
   const fields = [
@@ -155,153 +193,159 @@ export function TestGroupEditForm({
       label: 'OEM',
       type: 'text',
       name: 'oem',
-      value: form.oem,
+      value: formData.oem,
       onChange: handleInputChange,
       placeholder: 'OEM',
       required: true,
+      error: editError.oem
     },
     {
       label: '機種',
       type: 'text',
       name: 'model',
-      value: form.model,
+      value: formData.model,
       onChange: handleInputChange,
       placeholder: '機種',
       required: true,
+      error: editError.model
     },
     {
       label: 'イベント',
       type: 'text',
       name: 'event',
-      value: form.event,
+      value: formData.event,
       onChange: handleInputChange,
       placeholder: 'イベント',
+      required: true,
+      error: editError.event
     },
     {
       label: 'バリエーション',
       type: 'text',
       name: 'variation',
-      value: form.variation,
+      value: formData.variation,
       onChange: handleInputChange,
       placeholder: 'バリエーション',
+      required: true,
+      error: editError.variation
     },
     {
       label: '仕向',
       type: 'text',
       name: 'destination',
-      value: form.destination,
+      value: formData.destination,
       onChange: handleInputChange,
       placeholder: '仕向',
+      required: true,
+      error: editError.destination
     },
     {
       label: '制御仕様名',
       type: 'text',
       name: 'specs',
-      value: form.specs,
+      value: formData.specs,
       onChange: handleInputChange,
       placeholder: '制御仕様名',
+      required: true,
+      error: editError.specs
     },
     {
       label: '試験開始日',
       type: 'date',
       name: 'test_startdate',
-      value: form.test_startdate,
+      value: formData.test_startdate,
       onChange: handleInputChange,
       placeholder: '',
+      required: true,
+      error: editError.test_startdate
     },
     {
       label: '試験終了日',
       type: 'date',
       name: 'test_enddate',
-      value: form.test_enddate,
+      value: formData.test_enddate,
       onChange: handleInputChange,
       placeholder: '',
+      required: true,
+      error: editError.test_enddate
     },
     {
       label: '不具合摘出予定数',
       type: 'number',
       name: 'ngPlanCount',
-      value: form.ngPlanCount,
+      value: formData.ngPlanCount,
       onChange: handleInputChange,
-      placeholder: '',
+      placeholder: '0〜9999',
+      required: true,
+      error: editError.ngPlanCount,
+      min: 0,
+      max: 9999
     },
     {
       label: 'テスト設計者',
       type: 'tag',
       name: 'designerTag',
-      value: form.designerTag,
-      onChange: (
-        e:
-          | React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
-          | { target: { name: string; value: string | string[] } }
-      ) =>
-        handleTagChange(
-          'designerTag',
-          Array.isArray(e.target?.value) ? e.target.value : []
-        ),
+      value: formData.designerTag,
+      onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement> | { target: { name: string; value: string | string[] } }) => handleTagChange('designerTag', Array.isArray(e.target?.value) ? e.target.value : []),
       placeholder: 'タグを選択してください。',
-      options: tagOptions,
+      options: tagOptions
     },
     {
       label: 'テスト実施者',
       type: 'tag',
       name: 'executerTag',
-      value: form.executerTag,
-      onChange: (
-        e:
-          | React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
-          | { target: { name: string; value: string | string[] } }
-      ) =>
-        handleTagChange(
-          'executerTag',
-          Array.isArray(e.target?.value) ? e.target.value : []
-        ),
+      value: formData.executerTag,
+      onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement> | { target: { name: string; value: string | string[] } }) => handleTagChange('executerTag', Array.isArray(e.target?.value) ? e.target.value : []),
       placeholder: 'タグを選択してください。',
-      options: tagOptions,
+      options: tagOptions
     },
     {
       label: 'テスト閲覧者',
       type: 'tag',
       name: 'viewerTag',
-      value: form.viewerTag,
-      onChange: (
-        e:
-          | React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
-          | { target: { name: string; value: string | string[] } }
-      ) =>
-        handleTagChange('viewerTag', Array.isArray(e.target?.value) ? e.target.value : []),
+      value: formData.viewerTag,
+      onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement> | { target: { name: string; value: string | string[] } }) => handleTagChange('viewerTag', Array.isArray(e.target?.value) ? e.target.value : []),
       placeholder: 'タグを選択してください。',
-      options: tagOptions,
+      options: tagOptions
     },
   ];
 
   const buttons = [
     {
-      label: isLoading ? '更新中...' : '更新',
+      label: editIsLoading ? '更新中...' : '更新',
       onClick: () => {
-        console.log('更新ボタンクリック');
-        handleUpdate({ preventDefault: () => {} } as React.FormEvent);
+        clientLogger.info('TestGroupEditForm', '更新ボタン押下');
+        handleEditer();
       },
-      disabled: isLoading,
+      disabled: editIsLoading,
     },
     {
       label: '戻る',
-      onClick: handleCancel,
-      isCancel: true,
-      disabled: isLoading,
+      onClick: () => {
+        handleCansel();
+      },
+      isCancel: true
     },
   ];
 
   return (
     <div>
+      {/* タグ読み込みエラー表示 */}
+      {tagError && (
+        <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
+          <p className="font-bold">タグの読み込みに失敗しました</p>
+          <p className="text-sm">{tagError}</p>
+        </div>
+      )}
+
       <VerticalForm fields={fields} />
       <ButtonGroup buttons={buttons} />
-      <Modal open={isModalOpen} onClose={() => setIsModalOpen(false)}>
-        <p className="mb-8">{modalMessage}</p>
+
+      {/* 結果モーダル */}
+      <Modal open={editIsModalOpen} onClose={() => setEditIsModalOpen(false)}>
+        <p className="mb-8">{editModalMessage}</p>
         <div className="flex justify-center">
-          <Button className="w-24" onClick={() => setIsModalOpen(false)}>
-            閉じる
-          </Button>
+          <Button className="w-24" onClick={() => setEditIsModalOpen(false)}>閉じる</Button>
         </div>
       </Modal>
     </div>

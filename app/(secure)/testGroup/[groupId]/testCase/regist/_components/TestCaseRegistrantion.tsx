@@ -1,16 +1,17 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
-import { useRouter, useParams } from 'next/navigation';
-import { VerticalForm } from '@/components/ui/verticalForm';
 import FileUploadField from '@/components/ui/FileUploadField';
+import { Button } from '@/components/ui/button';
 import ButtonGroup from '@/components/ui/buttonGroup';
 import { Modal } from '@/components/ui/modal';
-import { Button } from '@/components/ui/button';
+import { VerticalForm } from '@/components/ui/verticalForm';
+import { fetchData } from '@/utils/api';
 import clientLogger from '@/utils/client-logger';
-import { testCaseRegistSchema } from './schemas/testCase-regist-schema';
-import TestCaseForm from '@/components/ui/testCaseForm';
 import { FileInfo } from '@/utils/fileUtils';
+import { useParams, useRouter } from 'next/navigation';
+import React, { useState } from 'react';
+import TestCaseForm from '../../[tid]/_components/testCaseForm';
+import { testCaseRegistSchema } from '../schemas/testCase-regist-schema';
 
 type TestCase = {
   id: number;
@@ -46,16 +47,6 @@ const TestCaseRegistrantion: React.FC = () => {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isTidChecking, setIsTidChecking] = useState(false);
 
-  // testCaseForm に渡す value を memoize して、無駄な re-render を防ぐ
-  const testCaseFormValue = useMemo(() =>
-    testContents.map(tc => ({
-      testCase: tc.testCase,
-      expectedValue: tc.expectedValue,
-      excluded: tc.excluded,
-    })),
-    [testContents]
-  );
-
   const handleFileChange = (fieldName: string, files: FileInfo[]) => {
     setFormData(prev => ({
       ...prev,
@@ -73,7 +64,6 @@ const TestCaseRegistrantion: React.FC = () => {
     })));
   };
 
-  // VerticalForm expects a broader onChange type that includes HTMLSelectElement
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement> | { target: { name: string; value: string | string[] } }) => {
     if ('target' in e && 'name' in e.target) {
       const target = e.target as HTMLInputElement | HTMLTextAreaElement;
@@ -85,23 +75,23 @@ const TestCaseRegistrantion: React.FC = () => {
     }
   };
 
+  // BlurでTID重複チェック
   const handleTidBlur = async () => {
     if (!formData.tid.trim()) {
       return;
     }
 
     setIsTidChecking(true);
+    clientLogger.info('テストケース新規登録画面', 'TID重複チェック開始', { tid: formData.tid });
     try {
-      const response = await fetch(
-        `/api/test-cases/check-tid?groupId=${groupId}&tid=${encodeURIComponent(formData.tid)}`
-      );
-      const result = await response.json();
+      const result = await fetchData(`/api/test-cases/check-tid?groupId=${groupId}&tid=${encodeURIComponent(formData.tid)}`);
 
       if (result.success && result.isDuplicate) {
         setErrors(prev => ({
           ...prev,
           tid: `TID「${formData.tid}」は既に登録されています`,
         }));
+        clientLogger.warn('テストケース新規登録画面', 'TID重複', { tid: formData.tid });
       } else {
         // TIDが重複していない場合、tidエラーをクリア
         setErrors(prev => {
@@ -109,9 +99,10 @@ const TestCaseRegistrantion: React.FC = () => {
           delete newErrors.tid;
           return newErrors;
         });
+        clientLogger.info('テストケース新規登録画面', 'TID重複なし', { tid: formData.tid });
       }
     } catch (error) {
-      clientLogger.error('TestCaseRegistration', 'TID重複チェックエラー', { error });
+      clientLogger.error('テストケース新規登録画面', 'TID重複チェックエラー', { error });
     } finally {
       setIsTidChecking(false);
     }
@@ -125,7 +116,7 @@ const TestCaseRegistrantion: React.FC = () => {
       value: formData.tid,
       onChange: handleChange,
       onBlur: handleTidBlur,
-      placeholder: '例：1-1-1-1',
+      placeholder: 'TID（例: 123-45-6-789）',
       required: true,
       error: errors.tid,
       disabled: isTidChecking
@@ -223,7 +214,6 @@ const TestCaseRegistrantion: React.FC = () => {
     if (!validationResult.success) {
       const newErrors: Record<string, string> = {};
       validationResult.error.errors.forEach(err => {
-        // testContents[index].fieldName の形式でエラーキーを作成
         if (err.path[0] === 'testContents' && typeof err.path[1] === 'number') {
           const rowIndex = err.path[1];
           const fieldName = err.path[2] as string;
@@ -234,11 +224,19 @@ const TestCaseRegistrantion: React.FC = () => {
         }
       });
       setErrors(newErrors);
+      clientLogger.warn('テストケース新規登録画面', 'バリデーションエラー', { errors: newErrors });
+      return;
+    }
+
+    // TID重複エラーが存在する場合
+    if (errors.tid) {
+      clientLogger.warn('テストケース新規登録画面', 'TID重複エラー', { errors });
       return;
     }
 
     setErrors({});
     setIsLoading(true);
+    clientLogger.info('テストケース新規登録画面', 'テストケース登録開始', { formData, testContents });
 
     try {
       const formDataObj = new FormData();
@@ -265,27 +263,34 @@ const TestCaseRegistrantion: React.FC = () => {
         formDataObj.append('testContents', JSON.stringify(testContents));
       }
 
-      const response = await fetch(`/api/test-cases/regist`, {
+      const response = await fetch(`/api/test-groups/${groupId}/cases`, {
         method: 'POST',
         body: formDataObj,
       });
 
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(
+          errorData.error?.message || `API error: ${response.status}`
+        );
+      }
+
       const result = await response.json();
 
       if (result.success) {
-        clientLogger.info('TestCaseRegistration', 'テストケース作成成功', { tid: formData.tid });
+        clientLogger.info('テストケース新規登録画面', 'テストケース作成成功', { tid: formData.tid });
         setModalMessage('テストケースを登録しました');
         setIsModalOpen(true);
         setTimeout(() => {
           router.push(`/testGroup/${groupId}/testCase`);
         }, 1500);
       } else {
-        clientLogger.error('TestCaseRegistration', 'テストケース作成失敗', { error: result.error });
+        clientLogger.error('テストケース新規登録画面', 'テストケース作成失敗', { error: result.error });
         setModalMessage(result.error || 'テストケースの作成に失敗しました');
         setIsModalOpen(true);
       }
     } catch (error) {
-      clientLogger.error('TestCaseRegistration', 'テストケース作成エラー', { error });
+      clientLogger.error('テストケース新規登録画面', 'テストケース作成エラー', { error });
       setModalMessage(error instanceof Error ? error.message : 'エラーが発生しました');
       setIsModalOpen(true);
     } finally {
@@ -294,13 +299,17 @@ const TestCaseRegistrantion: React.FC = () => {
   };
 
   const handleCancel = () => {
-    router.push(`/testGroup/${groupId}`);
+    clientLogger.info('テストケース新規登録画面', 'キャンセルボタン押下');
+    router.push(`/testGroup/${groupId}/testCase`);
   };
 
   const buttons = [
     {
       label: isLoading ? '登録中...' : '登録',
-      onClick: handleRegister,
+      onClick: () => {
+        clientLogger.info('テストケース新規登録画面', '登録ボタン押下');
+        handleRegister();
+      },
       disabled: isLoading
     },
     {
@@ -313,8 +322,10 @@ const TestCaseRegistrantion: React.FC = () => {
 
   return (
     <div>
-      <VerticalForm fields={fieldsBeforeFiles} />
-
+      <h1 className="text-lg font-bold">テスト情報</h1>
+      <div>
+        <VerticalForm fields={fieldsBeforeFiles} />
+      </div>
       {/* ファイルアップロードセクション */}
       <div className="pb-2 w-4/5 grid gap-4 grid-cols-1">
         <FileUploadField
@@ -339,7 +350,7 @@ const TestCaseRegistrantion: React.FC = () => {
       <div className="mb-6">
         <h2 className="text-lg font-bold mb-4">テスト内容</h2>
         <div className="bg-gray-50 p-4 rounded-md flex justify-center">
-          <TestCaseForm value={testCaseFormValue} onChange={handleTestContentsChange} errors={errors} />
+          <TestCaseForm onChange={handleTestContentsChange} errors={errors} />
         </div>
         {errors.testContents && (
           <div className="text-red-500 text-sm mt-2">{errors.testContents}</div>

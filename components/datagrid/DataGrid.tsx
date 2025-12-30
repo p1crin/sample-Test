@@ -14,7 +14,6 @@ export type Column<T> = {
   isLink?: boolean;
   isExlink?: boolean;
   linkPrefix?: string;
-  linkPattern?: RegExp; // Pattern for partial link extraction (e.g., /#\d+/g for "#1000")
   width?: string | number;
   isImg?: boolean;
 };
@@ -107,7 +106,7 @@ export function DataGrid<T extends ItemType>({
           </Table>
         </div>
       </div>
-      {items.length > 0 && pageCount > 1 && (
+      {pageCount > 1 && (
         <div className="mt-4 flex justify-center">
           <Pagination page={page} pageCount={pageCount} onPageChange={onPageChange} />
         </div>

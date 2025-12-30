@@ -36,7 +36,7 @@ const Loading: React.FC<LoadingProps> = ({
   message = '読み込み中...',
   fullScreen = false,
   size = 'md',
-  color = 'border-gray-900',
+  color = 'border-stnly',
 }) => {
   // ローディング中でない場合は何も表示しない
   if (!isLoading) {
@@ -64,7 +64,7 @@ const Loading: React.FC<LoadingProps> = ({
       <div className={contentClass}>
         {/* スピナー */}
         <div
-          className={`animate-spin rounded-full border-b-2 ${sizeClasses[size]} ${color} mx-auto`}
+          className={`animate-spin h-10 w-10 border-4 rounded-full border-t-transparent ${sizeClasses[size]} ${color} mx-auto`}
         />
         {/* メッセージ */}
         {message && (

@@ -1,12 +1,12 @@
 'use client';
-import React, { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { VerticalForm } from '@/components/ui/verticalForm';
-import ButtonGroup from '@/components/ui/buttonGroup';
-import { Modal } from '@/components/ui/modal';
 import { Button } from '@/components/ui/button';
+import ButtonGroup from '@/components/ui/buttonGroup';
 import Loading from '@/components/ui/loading';
+import { Modal } from '@/components/ui/modal';
+import { VerticalForm } from '@/components/ui/verticalForm';
 import clientLogger from '@/utils/client-logger';
+import { useRouter } from 'next/navigation';
+import React, { useEffect, useState } from 'react';
 import { testGroupRegistSchema } from './schemas/testGroup-regist-schema';
 
 const Resist: React.FC = () => {
@@ -239,7 +239,7 @@ const Resist: React.FC = () => {
         });
       }
 
-      // API呼び出し (REST API風)
+      // API呼び出し
       const response = await fetch('/api/test-groups', {
         method: 'POST',
         headers: {
@@ -274,7 +274,7 @@ const Resist: React.FC = () => {
         setIsModalOpen(true);
         setTimeout(() => {
           router.push('/testGroup');
-        }, 1500);
+        }, 1500); // 1.5秒後にテストグループ一覧に飛ばす
       } else {
         clientLogger.error('TestGroupRegistration', 'テストグループ作成失敗', { error: result.error });
         setModalMessage(result.error?.message || 'テストグループの作成に失敗しました');
@@ -297,14 +297,17 @@ const Resist: React.FC = () => {
     {
       label: isLoading ? '登録中...' : '登録',
       onClick: () => {
-        console.log('登録ボタンクリック');
+        clientLogger.info('TestGroupRegistration', '登録ボタン押下');
         handleRegister();
       },
       disabled: isLoading
     },
     {
       label: '戻る',
-      onClick: handleCancel,
+      onClick: () => {
+        clientLogger.info('TestGroupRegistration', '戻るボタン押下');
+        handleCancel();
+      },
       isCancel: true,
       disabled: isLoading
     }

@@ -1,37 +1,106 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireAdmin } from '@/app/lib/auth';
-import { query } from '@/app/lib/db';
+import { isAdmin, isTestManager, requireAuth } from "@/app/lib/auth";
+import { prisma } from '@/app/lib/prisma';
+import { ERROR_MESSAGES } from "@/constants/errorMessages";
+import { STATUS_CODES } from "@/constants/statusCodes";
+import { Prisma } from "@/generated/prisma/client";
+import { logAPIEndpoint, logDatabaseQuery, QueryTimer } from "@/utils/database-logger";
+import { handleError } from "@/utils/errorHandler";
+import { NextRequest, NextResponse } from "next/server";
 
-// GET /api/import-results - Get import history
+// GET /api/import-results -インポート結果一覧を取得
 export async function GET(req: NextRequest) {
+  const apiTimer = new QueryTimer();
+  const user = await requireAuth(req);
+
   try {
-    await requireAdmin(req);
+    // ユーザーが管理者またはテスト管理者かどうかを確認
+    if (!isAdmin(user) && !isTestManager(user)) {
+      logAPIEndpoint({
+        method: 'GET',
+        endpoint: '/api/import-results',
+        userId: user.id,
+        statusCode: STATUS_CODES.FORBIDDEN,
+        executionTime: apiTimer.elapsed(),
+        error: ERROR_MESSAGES.PERMISSION_DENIED,
+      });
+      return NextResponse.json(
+        { error: ERROR_MESSAGES.PERMISSION_DENIED },
+        { status: STATUS_CODES.FORBIDDEN }
+      );
+    }
+    // クエリ文字列から検査パラメータを取得
+    const { searchParams } = new URL(req.url);
 
-    const result = await query(
-      `SELECT id, file_name, import_date, import_status, executor_name, import_type, count, created_at
-       FROM tt_import_results
-       WHERE is_deleted = FALSE
-       ORDER BY created_at DESC
-       LIMIT 100`
-    );
+    // ページネーションパラメータを取得
+    const page = parseInt(searchParams.get('page') || '1', 10);
+    const limit = parseInt(searchParams.get('limit') || '10', 10);
+    const offset = (page - 1) * limit;
 
-    return NextResponse.json({
-      imports: result.rows,
+    // Prismaのwhere条件を構築
+    const whereConditions: Prisma.tt_import_resultsWhereInput = {
+      is_deleted: false,
+    };
+    // テスト管理者の場合はインポート種別を1(テストケース)に設定する。
+    if (isTestManager(user)) {
+      whereConditions.import_type = {
+        equals: 1,
+      };
+    }
+
+    logAPIEndpoint({
+      method: 'GET',
+      endpoint: '/api/import-results',
+      userId: user.id,
+      executionTime: apiTimer.elapsed(),
+      queryParams: searchParams,
+    })
+
+    // ページネーション用に合計件数を取得
+    const countTimer = new QueryTimer();
+    const totalCount = await prisma.tt_import_results.count({
+      where: whereConditions,
     });
+
+    logDatabaseQuery({
+      operation: 'SELECT',
+      table: 'tt_import_result',
+      executionTime: countTimer.elapsed(),
+      rowsReturned: 1,
+      query: 'COUNT(*)',
+      params: Object.entries(whereConditions),
+    });
+
+    // ページネーション付きでインポート結果一覧を取得
+    const dataTimer = new QueryTimer();
+    const importResult = await prisma.tt_import_results.findMany({
+      where: whereConditions,
+      orderBy: {
+        updated_at: 'desc',
+      },
+      skip: offset,
+      take: limit
+    });
+
+    logDatabaseQuery({
+      operation: 'SELECT',
+      userId: user.id,
+      executionTime: dataTimer.elapsed(),
+      rowsReturned: importResult.length,
+      query: 'findmany',
+      params: [{ skip: offset, take: limit }],
+    });
+
+    logAPIEndpoint({
+      method: 'GET',
+      endpoint: 'api/import-results',
+      userId: user.id,
+      statusCode: STATUS_CODES.OK,
+      executionTime: apiTimer.elapsed(),
+      queryParams: searchParams,
+    });
+
+    return NextResponse.json({ success: true, data: importResult, totalCount });
   } catch (error) {
-    console.error('GET /api/import-results error:', error);
-
-    if (error instanceof Error && error.message === 'Unauthorized') {
-      return NextResponse.json({ error: '認証が必要です' }, { status: 401 });
-    }
-
-    if (error instanceof Error && error.message === 'Forbidden') {
-      return NextResponse.json({ error: '管理者権限が必要です' }, { status: 403 });
-    }
-
-    return NextResponse.json(
-      { error: 'インポート履歴の取得に失敗しました' },
-      { status: 500 }
-    );
+    return handleError(error as Error, apiTimer, 'GET', '/api/import-results');
   }
 }

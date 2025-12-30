@@ -1,20 +1,20 @@
 // 項目のエンティティ型
 export type TestCaseListRow = {
   tid: string;
-  firstLayer: string;
-  secondLayer: string;
-  thirdLayer: string;
-  fourthLayer: string;
+  first_layer: string;
+  second_layer: string;
+  third_layer: string;
+  fourth_layer: string;
   purpose: string;
-  requestId: string;
+  request_id: string;
   checkItems: string;
-  createdAt: string;
-  updatedAt: string;
+  created_at: string;
+  updated_at: string;
   chartData: {
-    okCount: number;
-    ngCount: number;
-    notStartCount: number;
-    excludedCount: number;
+    ok_items: number;
+    ng_items: number;
+    not_started_items: number;
+    excluded_items: number;
   };
 };
 

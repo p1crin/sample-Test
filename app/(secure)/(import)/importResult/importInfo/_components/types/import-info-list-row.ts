@@ -1,9 +1,9 @@
 export type ImportInfoListRow = {
   id: string;
-  fileName: string;
+  file_name: string;
   count: string;
-  importDate: string;
-  importStatus: '実施中' | '完了' | 'エラー';
-  execterName: string;
-  errorDetails: string;
+  import_status: '実施中' | '完了' | 'エラー';
+  executor_name: string;
+  created_at: string;
+  message: string;
 }

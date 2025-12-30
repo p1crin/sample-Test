@@ -2,7 +2,6 @@ import { JudgmentOption } from "@/constants/constants";
 
 // 項目のエンティティ型
 export type TestCaseResultRow = {
-  testCaseNo: number;
   testCase: string;
   expectedValue: string;
   result: string;
@@ -12,9 +11,8 @@ export type TestCaseResultRow = {
   comparatorVersion: string;
   executionDate: string;
   executor: string;
-  evidence: string[] | File | null;
+  evidence: { name: string; id: string }[];
   note: string;
-  historyCount?: number; // 追跡用（オプション）
 };
 
 // 項目作成時の入力型

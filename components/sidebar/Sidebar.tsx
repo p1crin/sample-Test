@@ -7,12 +7,27 @@ import { UserRole } from '@/types/database';
 
 export type SidebarProps = {
   open: boolean;
-  userRole: UserRole;
+  role: number;
 };
 
-export function Sidebar({ open, userRole }: SidebarProps) {
+export function Sidebar({ open, role }: SidebarProps) {
   const pathname = usePathname();
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set());
+
+  // システム管理者でない場合、menuConfigからidが'adminmenu'の項目を削除
+  let filteredMenuConfig;
+
+  switch (role) {
+    case UserRole.TEST_MANAGER:
+      filteredMenuConfig = menuConfig.filter(item => item.id !== 'adminmenu');
+      break;
+    case UserRole.GENERAL:
+      filteredMenuConfig = menuConfig.filter(item => item.id !== 'adminmenu' && item.id !== 'importmanager');
+      break;
+    default:
+      filteredMenuConfig = menuConfig;
+      break;
+  }
 
   const toggleSubmenu = (menuId: string) => {
     setExpandedMenus((prev) => {
@@ -26,28 +41,7 @@ export function Sidebar({ open, userRole }: SidebarProps) {
     });
   };
 
-  const canRenderMenuItems = (items: MenuItem[]): boolean => {
-    return items.some((item) => {
-      // Check if user has required role to see this menu item
-      if (item.requiredRole !== undefined && userRole > item.requiredRole) {
-        return false;
-      }
-
-      // If item has children, recursively check
-      if (item.children) {
-        return canRenderMenuItems(item.children);
-      }
-
-      return true;
-    });
-  };
-
   const renderMenuItem = (item: MenuItem) => {
-    // Check if user has required role to see this menu item
-    if (item.requiredRole !== undefined && userRole > item.requiredRole) {
-      return null;
-    }
-
     const isExpanded = expandedMenus.has(item.id);
     const isActive = item.path ? pathname.startsWith(item.path) : false;
 
@@ -117,16 +111,14 @@ export function Sidebar({ open, userRole }: SidebarProps) {
       style={{ minWidth: open ? '12rem' : 0 }}
     >
       <nav className="flex flex-col gap-6">
-        {menuConfig
-          .filter((group) => canRenderMenuItems(group.items))
-          .map((group) => (
-            <div key={group.id} className="space-y-2">
-              <div className="text-xs text-neutral-400 font-semibold tracking-wider select-none">
-                {group.label}
-              </div>
-              <div className="space-y-1">{group.items.map((item) => renderMenuItem(item))}</div>
+        {filteredMenuConfig.map((group) => (
+          <div key={group.id} className="space-y-2">
+            <div className="text-xs text-neutral-400 font-semibold tracking-wider select-none">
+              {group.label}
             </div>
-          ))}
+            <div className="space-y-1">{group.items.map((item) => renderMenuItem(item))}</div>
+          </div>
+        ))}
       </nav>
     </aside>
   );

@@ -38,13 +38,14 @@ export function formatDate(
   // 日本時間（JST）に変換（UTC+9）
   const jstDate = new Date(dateObj.getTime() + 9 * 60 * 60 * 1000);
 
-  // 年月日時分秒を取得
+  // 年月日時分秒ミリ秒を取得
   const year = jstDate.getUTCFullYear();
   const month = String(jstDate.getUTCMonth() + 1).padStart(2, '0');
   const day = String(jstDate.getUTCDate()).padStart(2, '0');
   const hours = String(jstDate.getUTCHours()).padStart(2, '0');
   const minutes = String(jstDate.getUTCMinutes()).padStart(2, '0');
   const seconds = String(jstDate.getUTCSeconds()).padStart(2, '0');
+  const milliseconds = String(jstDate.getUTCMilliseconds()).padStart(3, '0');
 
   // フォーマット文字列に置き換え
   let result = format;
@@ -54,6 +55,7 @@ export function formatDate(
   result = result.replace('HH', hours);
   result = result.replace('mm', minutes);
   result = result.replace('ss', seconds);
+  result = result.replace('SSS', milliseconds);
 
   return result;
 }
@@ -65,27 +67,48 @@ export function formatDate(
 /**
  * ISO文字列を "YYYY/MM/DD HH:mm:ss" 形式で返す
  */
-export function formatDateTimeJST(dateString: string | null | undefined): string {
-  return formatDate(dateString, 'YYYY/MM/DD HH:mm:ss');
+export function formatDateTimeJST(date: Date | string | null | undefined): string {
+  return formatDate(date, 'YYYY/MM/DD HH:mm:ss');
 }
 
 /**
  * ISO文字列を "YYYY/MM/DD" 形式で返す
  */
-export function formatDateJST(dateString: string | null | undefined): string {
-  return formatDate(dateString, 'YYYY/MM/DD');
+export function formatDateJST(date: Date | string | null | undefined): string {
+  return formatDate(date, 'YYYY/MM/DD');
+}
+
+/**
+ * ISO文字列を "YYYY-MM-DD" 形式で返す （ハイフン区切り）
+ */
+export function formatDateWithHyphen(date: Date | string | null | undefined): string {
+  return formatDate(date, 'YYYY-MM-DD');
 }
 
 /**
  * ISO文字列を "YYYY-MM-DD HH:mm:ss" 形式で返す（ハイフン区切り）
  */
-export function formatDateTimeWithHyphen(dateString: string | null | undefined): string {
-  return formatDate(dateString, 'YYYY-MM-DD HH:mm:ss');
+export function formatDateTimeWithHyphen(date: Date | string | null | undefined): string {
+  return formatDate(date, 'YYYY-MM-DD HH:mm:ss');
+}
+
+/**
+ * ISO文字列を "YYYY-MM-DD HH:mm:ss.SSS" 形式で返す（ログ向け）
+ */
+export function formatDateTimeForLogs(date: Date | string | null | undefined): string {
+  return formatDate(date, 'YYYY-MM-DD HH:mm:ss.SSS');
 }
 
 /**
  * ISO文字列を "HH:mm:ss" 形式で返す（時刻のみ）
  */
-export function formatTimeJST(dateString: string | null | undefined): string {
-  return formatDate(dateString, 'HH:mm:ss');
+export function formatTimeJST(date: Date | string | null | undefined): string {
+  return formatDate(date, 'HH:mm:ss');
+}
+
+/**
+ * ISO文字列を "YYYYMMDDHHmmssSSS" 形式で返す
+ */
+export function formatDateTimeToTimestamp(date: Date | string | null | undefined): string {
+  return formatDate(date, 'YYYYMMDDHHmmss');
 }

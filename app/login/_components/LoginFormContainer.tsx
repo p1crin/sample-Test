@@ -1,15 +1,16 @@
 'use client';
-import { useState, useEffect } from 'react';
 import { loginSchema } from '@/app/login/_components/schemas/login-schema';
-import { useRouter } from 'next/navigation';
-import { useDispatch } from 'react-redux';
-import { login as loginAction } from '@/stores/feature/authSlice';
 import Loading from '@/components/ui/loading';
-import { LoginForm } from './LoginForm';
-import { setAuthSession, generateToken } from '@/stores/feature/auth';
+import { ERROR_MESSAGES } from '@/constants/errorMessages';
+import { generateToken, setAuthSession } from '@/stores/feature/auth';
+import { login as loginAction } from '@/stores/feature/authSlice';
 import { User } from '@/types';
 import clientLogger from '@/utils/client-logger';
 import { signIn, useSession } from 'next-auth/react';
+import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { useDispatch } from 'react-redux';
+import { LoginForm } from './LoginForm';
 
 export function LoginFormContainer() {
   const router = useRouter();
@@ -19,7 +20,7 @@ export function LoginFormContainer() {
   const [loading, setLoading] = useState(false);
   const { data: session, status } = useSession();
 
-  // Redirect if already logged in
+  // 認証済みならテストグループ一覧にリダイレクト
   useEffect(() => {
     if (status === 'authenticated') {
       router.push('/testGroup');
@@ -32,19 +33,19 @@ export function LoginFormContainer() {
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    clientLogger.info('LoginForm', 'ログインフォーム送信', { email: form.email });
+    clientLogger.info('ログイン画面', 'ログインボタン押下', { email: form.email });
     e.preventDefault();
     setErrorMsg('');
     setLoading(true);
 
     const result = loginSchema.safeParse(form);
     if (!result.success) {
-      setErrorMsg('メールアドレスまたはパスワードが正しくありません。\n再度お試しください。');
+      setErrorMsg(ERROR_MESSAGES.INVALID_CREDENTIALS);
       setLoading(false);
       return;
     }
 
-    clientLogger.info('LoginForm', 'Form validation passed');
+    clientLogger.debug('ログイン画面', 'フォームバリデーション成功');
 
     try {
       const signInResult = await signIn('credentials', {
@@ -54,7 +55,7 @@ export function LoginFormContainer() {
       });
 
       if (signInResult?.error) {
-        setErrorMsg('メールアドレスまたはパスワードが正しくありません');
+        setErrorMsg(ERROR_MESSAGES.INVALID_CREDENTIALS);
       } else if (signInResult?.ok) {
         const username = form.email.split("@")[0];
         const avatar = '/avatar-placeholder.svg';
@@ -82,25 +83,24 @@ export function LoginFormContainer() {
           token,
         };
 
-        clientLogger.info('LoginForm', 'Preparing to save session:', authSession);
+        clientLogger.debug('ログイン画面', 'セッション保存中:', authSession);
 
         // セッションに保存を試みる
         try {
           setAuthSession(authSession);
-          clientLogger.info('LoginForm', 'Session save completed');
-          console.log('Session save completed');
+          clientLogger.debug('ログイン画面', 'セッション保存成功');
 
           // Reduxストアの更新
           dispatch(loginAction(authSession));
           router.push('/testGroup', { scroll: false });
         } catch (error) {
-          clientLogger.info('LoginForm', 'Error saving session:', error);
-          setErrorMsg('メールアドレスまたはパスワードが正しくありません。\n再度お試しください。');
+          clientLogger.error('ログイン画面', 'セッション保存失敗:', error);
+          setErrorMsg(ERROR_MESSAGES.INVALID_CREDENTIALS);
         }
       }
     } catch (error) {
-      clientLogger.info('LoginForm', 'Error saving session:', error);
-      setErrorMsg('ログインに失敗しました');
+      clientLogger.error('ログイン画面', 'セッション保存失敗:', error);
+      setErrorMsg(ERROR_MESSAGES.LOGIN_FAILED);
     } finally {
       setLoading(false);
     }
