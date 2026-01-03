@@ -11,26 +11,32 @@ type ItemType = {
   [key: string]: unknown;
 };
 
-const renderFileLink = (file: string | null, key: number) => (
-  file ? (
-    <Link href={file} key={key} download style={{ color: 'blue', textDecoration: 'underline', cursor: 'pointer', display: 'block' }}>
-      {file.split('/').pop()}
+const renderFileLink = (file: string | { name: string; id: string } | null, key: number) => {
+  if (!file) return null;
+
+  const isObject = typeof file === 'object';
+  const displayName = isObject ? file.name : file.split('/').pop();
+  const href = isObject ? `/api/evidence/${file.id}` : file;
+
+  return (
+    <Link href={href} key={key} download style={{ color: 'blue', textDecoration: 'underline', cursor: 'pointer', display: 'block' }}>
+      {displayName}
     </Link>
-  ) : null
-);
+  );
+};
 
 const renderContent = (value: unknown, isImg?: boolean) => {
   if (Array.isArray(value)) {
     return (
       <>
         {value.map((item, index) => (
-          isImg ? renderFileLink(item as string, index) : <span key={index}>{item as string}</span>
+          isImg ? renderFileLink(item as string | { name: string; id: string }, index) : <span key={index}>{String(item)}</span>
         ))}
       </>
     );
   }
 
-  return isImg ? renderFileLink(value as string, 0) : <span>{value as string}</span>;
+  return isImg ? renderFileLink(value as string | { name: string; id: string }, 0) : <span>{String(value)}</span>;
 };
 
 export function TableCellContent<T extends ItemType>({ column, item }: TableCellContentProps<T>) {
