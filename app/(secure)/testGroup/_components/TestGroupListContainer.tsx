@@ -15,6 +15,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { TestGroupListRow } from '../../_components/types/testGroup-list-row';
 import { TestGroupList } from './TestGroupList';
+import { apiGet } from '@/utils/apiClient';
 
 export function TestGroupListContainer() {
   const router = useRouter();
@@ -101,7 +102,9 @@ export function TestGroupListContainer() {
         clientLogger.debug('テストグループ一覧画面', 'テストグループリスト取得開始', { page, searchParams });
         setTestGroupLoading(true);
         const queryString = buildQueryString(searchParams, page, pageSize);
-        const result = await fetchData(`/api/test-groups?${queryString}`);
+        const result = await apiGet<{ success: boolean; data: unknown; totalCount?: number }>(
+          `/api/test-groups?${queryString}`
+        );
         const count = result.totalCount || (result.data ? result.data.length : 0);
         setTotalCount(count);
         setPageCount(Math.ceil(count / pageSize));

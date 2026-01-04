@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import ButtonGroup from '@/components/ui/buttonGroup';
 import { Modal } from '@/components/ui/modal';
 import { VerticalForm } from '@/components/ui/verticalForm';
-import { fetchData } from '@/utils/api';
+import { apiGet, apiFetch } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { FileInfo } from '@/utils/fileUtils';
 import { useParams, useRouter } from 'next/navigation';
@@ -84,7 +84,8 @@ const TestCaseRegistrantion: React.FC = () => {
     setIsTidChecking(true);
     clientLogger.info('テストケース新規登録画面', 'TID重複チェック開始', { tid: formData.tid });
     try {
-      const result = await fetchData(`/api/test-cases/check-tid?groupId=${groupId}&tid=${encodeURIComponent(formData.tid)}`);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await apiGet<any>(`/api/test-cases/check-tid?groupId=${groupId}&tid=${encodeURIComponent(formData.tid)}`);
 
       if (result.success && result.isDuplicate) {
         setErrors(prev => ({
@@ -263,7 +264,7 @@ const TestCaseRegistrantion: React.FC = () => {
         formDataObj.append('testContents', JSON.stringify(testContents));
       }
 
-      const response = await fetch(`/api/test-groups/${groupId}/cases`, {
+      const response = await apiFetch(`/api/test-groups/${groupId}/cases`, {
         method: 'POST',
         body: formDataObj,
       });

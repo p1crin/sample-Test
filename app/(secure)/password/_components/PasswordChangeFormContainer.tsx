@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Modal } from '@/components/ui/modal';
 import { STATUS_CODES } from '@/constants/statusCodes';
 import { ERROR_MESSAGES } from '@/constants/errorMessages';
+import { apiPut } from '@/utils/apiClient';
 
 export function PasswordChangeFormContainer() {
   const [isLoading, setIsLoading] = useState(false);
@@ -51,33 +52,27 @@ export function PasswordChangeFormContainer() {
       // API呼び出し
       setIsLoading(true);
 
-      const response = await fetch('/api/auth/change-password', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let result: any;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        result = await apiPut<any>('/api/auth/change-password', {
           current_password: formData.currentPassword,
           new_password: formData.newPassword,
           new_password_confirmation: formData.confirmPassword
-        }),
-      })
-      if (!response.ok) {
-        const errorData = await response.json();
+        });
+      } catch (error) {
         // APIが404エラー(現在のパスワードが正しくない)時フォームの下にバリデーションエラーを表示する。
-        if (response.status === STATUS_CODES.NOT_FOUND) {
+        if (error instanceof Error && error.message.includes('404')) {
           setErrors(prev => ({
             ...prev,
             currentPassword: ERROR_MESSAGES.INVALID_PASSWORD
           }));
+          setIsLoading(false);
           return;
         }
-        throw new Error(
-          errorData.error?.message || `API error: ${response.status}`
-        );
+        throw error;
       }
-
-      const result = await response.json();
       if (result.success) {
         clientLogger.info('パスワード変更画面', 'パスワード変更成功', { id: result.data?.id });
         setModalMessage('パスワードを変更しました');

@@ -29,7 +29,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="ja">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        <StoreProvider><Providers>{children}</Providers></StoreProvider>
+        <Providers>
+          <StoreProvider>{children}</StoreProvider>
+        </Providers>
       </body>
     </html>
   );

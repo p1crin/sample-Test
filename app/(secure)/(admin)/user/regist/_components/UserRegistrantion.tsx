@@ -6,7 +6,7 @@ import { Modal } from '@/components/ui/modal';
 import { VerticalForm } from '@/components/ui/verticalForm';
 import { ROLE_OPTIONS } from '@/constants/constants';
 import { ERROR_MESSAGES } from '@/constants/errorMessages';
-import { fetchData } from '@/utils/api';
+import { apiGet, apiPost } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { useRouter } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
@@ -38,7 +38,8 @@ const Resist: React.FC = () => {
       try {
         setTagLoading(true);
         setTagError(null);
-        const result = await fetchData('/api/tags');
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = await apiGet<any>('/api/tags');
 
         if (result.success && Array.isArray(result.data)) {
           const tagOptions = result.data.map((tag: { id: number, name: string }) => ({
@@ -90,7 +91,8 @@ const Resist: React.FC = () => {
 
     clientLogger.info('ユーザ新規登録画面', 'ID(メールアドレス)重複チェック開始', { email: formData.email });
     try {
-      const result = await fetchData(`/api/users/check-email?email=${formData.email}`);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await apiGet<any>(`/api/users/check-email?email=${formData.email}`);
 
       if (result.success && result.isDuplicate) {
         setErrors(prev => ({
@@ -206,32 +208,18 @@ const Resist: React.FC = () => {
       setIsLoading(true);
 
       // 権限の取得
-      let roleChange = userRoleChange(formData.user_role);
+      const roleChange = userRoleChange(formData.user_role);
 
-      const response = await fetch('/api/users', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email: formData.email,
-          name: formData.name,
-          department: formData.department,
-          company: formData.company,
-          user_role: roleChange,
-          password: formData.password,
-          userTags: formData.tags
-        }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await apiPost<any>('/api/users', {
+        email: formData.email,
+        name: formData.name,
+        department: formData.department,
+        company: formData.company,
+        user_role: roleChange,
+        password: formData.password,
+        userTags: formData.tags
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(
-          errorData.error?.message || `API error: ${response.status}`
-        );
-      }
-
-      const result = await response.json();
 
       if (result.success) {
         clientLogger.info('ユーザ新規登録画面', 'ユーザ新規登録成功', { id: result.data?.id });

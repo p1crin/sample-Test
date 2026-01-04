@@ -3,7 +3,7 @@ import { Column } from '@/components/datagrid/DataGrid';
 import { Button } from '@/components/ui/button';
 import Loading from '@/components/ui/loading';
 import { IMPORT_STATUS, IMPORT_TYPE } from '@/constants/constants';
-import { fetchData } from '@/utils/api';
+import { apiGet } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { formatDateTimeJST } from '@/utils/date-formatter';
 import { buildQueryString, updateUrlParams } from '@/utils/queryUtils';
@@ -54,7 +54,8 @@ export function ImportResultListContainer() {
         clientLogger.debug('インポート結果一覧画面', 'データ取得開始', { page });
         setImportResultLoading(true);
         const queryString = buildQueryString({}, page, pageSize);
-        const importResultData = await fetchData(`/api/import-results?${queryString}`);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const importResultData = await apiGet<any>(`/api/import-results?${queryString}`);
         const count = importResultData.totalCount || (importResultData.data ? importResultData.data.length : 0);
         setTotalCount(count);
         setPageCount(Math.ceil(count / pageSize));
@@ -74,7 +75,7 @@ export function ImportResultListContainer() {
                 importStatus = IMPORT_STATUS.EXECUTING;
             }
 
-            let importType = importResult.import_type == 0 ? IMPORT_TYPE.USER : IMPORT_TYPE.TEST_CASE;
+            const importType = importResult.import_type == 0 ? IMPORT_TYPE.USER : IMPORT_TYPE.TEST_CASE;
 
 
             return {

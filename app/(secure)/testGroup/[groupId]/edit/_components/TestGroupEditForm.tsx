@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/button';
 import ButtonGroup from '@/components/ui/buttonGroup';
 import { Modal } from '@/components/ui/modal';
 import { VerticalForm } from '@/components/ui/verticalForm';
-import { fetchData } from '@/utils/api';
+import { apiGet, apiPut } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -60,7 +60,8 @@ export function TestGroupEditForm({
     const fetchTags = async () => {
       try {
         setTagError(null);
-        const result = await fetchData('/api/tags');
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = await apiGet<any>('/api/tags');
 
         if (result.success && Array.isArray(result.data)) {
           const tagOptions = result.data.map((tag: { id: number; name: string }) => ({
@@ -118,33 +119,19 @@ export function TestGroupEditForm({
       }
 
       // API呼び出し
-      const response = await fetch(`/api/test-groups/${groupId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          oem: formData.oem,
-          model: formData.model,
-          event: formData.event,
-          variation: formData.variation,
-          destination: formData.destination,
-          specs: formData.specs,
-          test_startdate: formData.test_startdate,
-          test_enddate: formData.test_enddate,
-          ng_plan_count: formData.ngPlanCount ? parseInt(formData.ngPlanCount) : 0,
-          tag_names: tag_names.length > 0 ? tag_names : undefined,
-        }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await apiPut<any>(`/api/test-groups/${groupId}`, {
+        oem: formData.oem,
+        model: formData.model,
+        event: formData.event,
+        variation: formData.variation,
+        destination: formData.destination,
+        specs: formData.specs,
+        test_startdate: formData.test_startdate,
+        test_enddate: formData.test_enddate,
+        ng_plan_count: formData.ngPlanCount ? parseInt(formData.ngPlanCount) : 0,
+        tag_names: tag_names.length > 0 ? tag_names : undefined,
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(
-          errorData.error?.message || `API error: ${response.status}`
-        );
-      }
-
-      const result = await response.json();
 
       if (result.success) {
         clientLogger.info('TestGroupEditForm', 'テストグループ更新成功', { groupId: result.data?.id });

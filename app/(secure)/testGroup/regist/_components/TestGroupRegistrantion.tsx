@@ -5,6 +5,7 @@ import Loading from '@/components/ui/loading';
 import { Modal } from '@/components/ui/modal';
 import { VerticalForm } from '@/components/ui/verticalForm';
 import clientLogger from '@/utils/client-logger';
+import { apiGet, apiPost } from '@/utils/apiClient';
 import { useRouter } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
 import { testGroupRegistSchema } from './schemas/testGroup-regist-schema';
@@ -38,13 +39,8 @@ const Resist: React.FC = () => {
       try {
         setTagLoading(true);
         setTagError(null);
-        const response = await fetch('/api/tags');
-
-        if (!response.ok) {
-          throw new Error(`API error: ${response.status}`);
-        }
-
-        const result = await response.json();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = await apiGet<any>('/api/tags');
         if (result.success && Array.isArray(result.data)) {
           const tagOptions = result.data.map((tag: { id: number; name: string }) => ({
             value: tag.name,
@@ -240,33 +236,19 @@ const Resist: React.FC = () => {
       }
 
       // API呼び出し
-      const response = await fetch('/api/test-groups', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          oem: formData.oem,
-          model: formData.model,
-          event: formData.event,
-          variation: formData.variation,
-          destination: formData.destination,
-          specs: formData.specs,
-          test_startdate: formData.test_startdate,
-          test_enddate: formData.test_enddate,
-          ng_plan_count: formData.ngPlanCount ? parseInt(formData.ngPlanCount) : 0,
-          tag_names: tag_names.length > 0 ? tag_names : undefined,
-        }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await apiPost<any>('/api/test-groups', {
+        oem: formData.oem,
+        model: formData.model,
+        event: formData.event,
+        variation: formData.variation,
+        destination: formData.destination,
+        specs: formData.specs,
+        test_startdate: formData.test_startdate,
+        test_enddate: formData.test_enddate,
+        ng_plan_count: formData.ngPlanCount ? parseInt(formData.ngPlanCount) : 0,
+        tag_names: tag_names.length > 0 ? tag_names : undefined,
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(
-          errorData.error?.message || `API error: ${response.status}`
-        );
-      }
-
-      const result = await response.json();
 
       if (result.success) {
         clientLogger.info('TestGroupRegistration', 'テストグループ作成成功', { groupId: result.data?.id });

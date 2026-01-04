@@ -1,7 +1,7 @@
-import { prisma } from '@/app/lib/prisma';
-import { TestRole, UserRole } from '@/types';
 import { getToken } from 'next-auth/jwt';
 import { NextRequest } from 'next/server';
+import { TestRole, UserRole } from '@/types';
+import { prisma } from '@/app/lib/prisma';
 
 // セッションユーザーのインターフェース
 export interface SessionUser {

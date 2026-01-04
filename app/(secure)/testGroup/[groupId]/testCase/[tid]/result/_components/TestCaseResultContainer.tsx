@@ -1,5 +1,6 @@
 'use client';
 import clientLogger from '@/utils/client-logger';
+import { apiGet } from '@/utils/apiClient';
 import { useEffect, useState } from 'react';
 import { TestCaseResult } from './TestCaseResult';
 import { TestCaseResultRow } from './types/testCase-result-list-row';
@@ -94,29 +95,23 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
     const fetchData = async () => {
       try {
         // テストケース詳細情報を取得
-        const detailRes = await fetch(
+        const detailData = await apiGet<{ success: boolean; data: unknown }>(
           `/api/test-groups/${groupId}/cases/${tid}/detail`
         );
 
-        if (!detailRes.ok) {
-          throw new Error('テスト情報の取得に失敗しました');
-        }
-
-        const detailData = await detailRes.json();
-
         if (detailData.success && detailData.data) {
           const testCaseData: TestCaseDetailRow = {
-            tid: detailData.data.tid,
-            firstLayer: detailData.data.firstLayer,
-            secondLayer: detailData.data.secondLayer,
-            thirdLayer: detailData.data.thirdLayer,
-            fourthLayer: detailData.data.fourthLayer,
-            purpose: detailData.data.purpose,
-            requestId: detailData.data.requestId,
-            checkItems: detailData.data.checkItems,
-            controlSpec: detailData.data.controlSpec[0]?.id || '',
-            dataFlow: detailData.data.dataFlow[0]?.id || '',
-            testProcedure: detailData.data.testProcedure,
+            tid: (detailData.data as { tid: string }).tid,
+            firstLayer: (detailData.data as { firstLayer: string }).firstLayer,
+            secondLayer: (detailData.data as { secondLayer: string }).secondLayer,
+            thirdLayer: (detailData.data as { thirdLayer: string }).thirdLayer,
+            fourthLayer: (detailData.data as { fourthLayer: string }).fourthLayer,
+            purpose: (detailData.data as { purpose: string }).purpose,
+            requestId: (detailData.data as { requestId: string }).requestId,
+            checkItems: (detailData.data as { checkItems: string }).checkItems,
+            controlSpec: (detailData.data as { controlSpec: { id: string }[] }).controlSpec[0]?.id || '',
+            dataFlow: (detailData.data as { dataFlow: { id: string }[] }).dataFlow[0]?.id || '',
+            testProcedure: (detailData.data as { testProcedure: string }).testProcedure,
           };
           setData(testCaseData);
           setLabelData(labels);
@@ -135,21 +130,19 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
     const fetchTestResults = async () => {
       try {
         // テスト結果を取得
-        const resultsRes = await fetch(
+        const resultsData = await apiGet<{ success: boolean; data: unknown }>(
           `/api/test-groups/${groupId}/cases/${tid}/results`
         );
 
-        if (!resultsRes.ok) {
-          throw new Error('テスト結果の取得に失敗しました');
-        }
-
-        const resultsData = await resultsRes.json();
-
         if (resultsData.success && resultsData.data) {
           // 最新結果
-          setLatestTestCaseData(resultsData.data.latestResult?.results || []);
+          setLatestTestCaseData(
+            (resultsData.data as { latestResult?: { results: TestCaseResultRow[] } }).latestResult?.results || []
+          );
           // 過去の履歴
-          setHistoriesData(resultsData.data.histories || []);
+          setHistoriesData(
+            (resultsData.data as { histories: { historyCount: number; results: TestCaseResultRow[] }[] }).histories || []
+          );
           clientLogger.info('TestCaseResultContainer', 'テスト結果取得成功', { groupId, tid });
         } else {
           throw new Error('テスト結果の取得に失敗しました');

@@ -1,6 +1,6 @@
 'use client';
 import { STATUS_OPTIONS } from '@/constants/constants';
-import { fetchData } from '@/utils/api';
+import { apiGet } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { useEffect, useState } from 'react';
 import { saveData } from '../action';
@@ -73,7 +73,8 @@ export function UserEditFormContainer({ id }: UserEditFormContainerProps) {
   useEffect(() => {
     const getDataFunc = async () => {
       try {
-        const userData = await fetchData(`/api/users/${id}`);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const userData = await apiGet<any>(`/api/users/${id}`);
 
         if (!userData.success || !userData.data) {
           throw new Error('データの取得に失敗しました' + ` (error: ${userData.error})`);

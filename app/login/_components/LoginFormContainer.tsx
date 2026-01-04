@@ -1,20 +1,14 @@
 'use client';
 import { loginSchema } from '@/app/login/_components/schemas/login-schema';
-import Loading from '@/components/ui/loading';
 import { ERROR_MESSAGES } from '@/constants/errorMessages';
-import { generateToken, setAuthSession } from '@/stores/feature/auth';
-import { login as loginAction } from '@/stores/feature/authSlice';
-import { User } from '@/types';
 import clientLogger from '@/utils/client-logger';
 import { signIn, useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { useDispatch } from 'react-redux';
 import { LoginForm } from './LoginForm';
 
 export function LoginFormContainer() {
   const router = useRouter();
-  const dispatch = useDispatch();
   const [form, setForm] = useState({ email: '', password: '' });
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
@@ -56,50 +50,13 @@ export function LoginFormContainer() {
 
       if (signInResult?.error) {
         setErrorMsg(ERROR_MESSAGES.INVALID_CREDENTIALS);
+        clientLogger.error('ログイン画面', 'ログイン失敗:', signInResult.error);
       } else if (signInResult?.ok) {
-        const username = form.email.split("@")[0];
-        const avatar = '/avatar-placeholder.svg';
-        const token = generateToken(form.email);
-
-        const loginDate = new Date();
-        const serializeDate = () => {
-          return JSON.stringify({ date: loginDate.toJSON() });
-        };
-
-        const authSession = {
-          isAuthenticated: true,
-          user: {
-            email: form.email,
-            name: username,
-            avatar,
-            role: 'general',
-            id: token,
-            createdAt: serializeDate(),
-            updatedAt: serializeDate(),
-          } as unknown as Pick<
-            User,
-            'email' | 'name' | 'avatar' | 'role' | 'id' | 'createdAt' | 'updatedAt'
-          >,
-          token,
-        };
-
-        clientLogger.debug('ログイン画面', 'セッション保存中:', authSession);
-
-        // セッションに保存を試みる
-        try {
-          setAuthSession(authSession);
-          clientLogger.debug('ログイン画面', 'セッション保存成功');
-
-          // Reduxストアの更新
-          dispatch(loginAction(authSession));
-          router.push('/testGroup', { scroll: false });
-        } catch (error) {
-          clientLogger.error('ログイン画面', 'セッション保存失敗:', error);
-          setErrorMsg(ERROR_MESSAGES.INVALID_CREDENTIALS);
-        }
+        clientLogger.debug('ログイン画面', 'ログイン成功');
+        // リダイレクトはuseSessionの変更で自動的に行われる
       }
     } catch (error) {
-      clientLogger.error('ログイン画面', 'セッション保存失敗:', error);
+      clientLogger.error('ログイン画面', 'ログイン失敗:', error);
       setErrorMsg(ERROR_MESSAGES.LOGIN_FAILED);
     } finally {
       setLoading(false);
@@ -109,12 +66,11 @@ export function LoginFormContainer() {
   // セッション読み込み中またはログイン済みの場合
   if (status === 'loading' || status === 'authenticated') {
     return (
-      <Loading
-        isLoading={true}
-        message="セッションを読み込み中..."
-        fullScreen={true}
-        size="lg"
-      />
+      <div className="fixed inset-0 flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <p>セッションを読み込み中...</p>
+        </div>
+      </div>
     );
   }
 

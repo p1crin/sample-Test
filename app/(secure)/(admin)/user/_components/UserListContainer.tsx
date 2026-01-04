@@ -8,7 +8,7 @@ import { Modal } from '@/components/ui/modal';
 import SeachForm from '@/components/ui/searchForm';
 import { ROLE_OPTIONS, STATUS_OPTIONS } from '@/constants/constants';
 import { STATUS_CODES } from "@/constants/statusCodes";
-import { fetchData } from '@/utils/api';
+import { apiGet, apiDelete } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { formatDateJST } from '@/utils/date-formatter';
 import { buildQueryString, updateUrlParams } from '@/utils/queryUtils';
@@ -101,7 +101,8 @@ export function UserListContainer() {
         clientLogger.debug('ユーザ一覧画面', 'ユーザリスト取得開始', { page, searchParams });
         setUserLoading(true);
         const queryString = buildQueryString(searchParams, page, pageSize);
-        const userData = await fetchData(`/api/users?${queryString}`);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const userData = await apiGet<any>(`/api/users?${queryString}`);
         const count = userData.totalCount || (userData.data ? userData.data.length : 0);
         setTotalCount(count);
         setPageCount(Math.ceil(count / pageSize));
@@ -147,7 +148,8 @@ export function UserListContainer() {
       try {
         setTagLoading(true);
         setTagError(null);
-        const result = await fetchData('/api/tags');
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = await apiGet<any>('/api/tags');
 
         if (result.success && Array.isArray(result.data)) {
           const tagOptions = result.data.map((tag: { id: number; name: string }) => ({
@@ -211,22 +213,15 @@ export function UserListContainer() {
 
     try {
       setDelLoading(true);
-      const response = await fetch(`/api/users/${selectedUser.id}`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          id: selectedUser.id
-        })
-      });
-      const result = await response.json();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await apiDelete<any>(`/api/users/${selectedUser.id}`);
 
       if (result.success) {
         clientLogger.info('ユーザ一覧画面', 'ユーザ削除成功', { userId: selectedUser.id });
         // ユーザ一覧再描画
         const queryString = buildQueryString(searchParams, page, pageSize);
-        const newUserData = await fetchData(`/api/users?${queryString}`);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const newUserData = await apiGet<any>(`/api/users?${queryString}`);
         const count = newUserData.totalCount || (newUserData.data ? newUserData.data.length : 0);
         setTotalCount(count);
         setPageCount(Math.ceil(count / pageSize));
@@ -244,7 +239,7 @@ export function UserListContainer() {
         setIsDelModalOpen(true);
       } else {
         clientLogger.info('ユーザ一覧画面', 'ユーザ削除失敗', { error: result.error });
-        setModalMessage(response.status === STATUS_CODES.INTERNAL_SERVER_ERROR ? 'ユーザの削除に失敗しました。再度、お試しください。' : result.error?.message);
+        setModalMessage(result.error?.message || 'ユーザの削除に失敗しました');
         setIsDelModalOpen(true);
       }
     } catch (error) {

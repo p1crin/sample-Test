@@ -1,7 +1,7 @@
 "use client"
 import DetailView from '@/components/ui/detailView';
 import { Modal } from "@/components/ui/modal";
-import { fetchData } from '@/utils/api';
+import { apiGet } from '@/utils/apiClient';
 import { formatDateJST } from '@/utils/date-formatter';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -34,7 +34,8 @@ export default function TestGroupInfoTableModal() {
 
   useEffect(() => {
     const getTestGroup = async () => {
-      const testGroup = await fetchData(`/api/test-groups/${groupId}`);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const testGroup = await apiGet<any>(`/api/test-groups/${groupId}`);
 
       if (!testGroup.success) {
         throw new Error('テストグループデータの取得に失敗しました');

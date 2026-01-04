@@ -1,7 +1,7 @@
 'use client';
 import Loading from '@/components/ui/loading';
 import { TestRole } from '@/types/database';
-import { fetchData } from '@/utils/api';
+import { apiGet } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { formatDateWithHyphen } from '@/utils/date-formatter';
 import { useParams } from 'next/navigation';
@@ -36,7 +36,8 @@ export function TestGroupEditFormContainer() {
     const getFormFunc = async () => {
       try {
         setEditLoading(true);
-        const testGroupEditData = await fetchData(`/api/test-groups/${groupId}`);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const testGroupEditData = await apiGet<any>(`/api/test-groups/${groupId}`);
         const getEditData = testGroupEditData.data;
         const tags = getEditData.tags; //タグの配列
 

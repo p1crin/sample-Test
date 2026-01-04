@@ -1,6 +1,6 @@
 'use client';
 import { IMPORT_STATUS } from "@/constants/constants";
-import { fetchData } from "@/utils/api";
+import { apiGet } from "@/utils/apiClient";
 import clientLogger from '@/utils/client-logger';
 import { formatDateTimeJST } from "@/utils/date-formatter";
 import { useEffect, useState } from "react";
@@ -39,7 +39,8 @@ export function ImportInfoContainer({ id }: ImportInfoContainerProps) {
   useEffect(() => {
     const getDataFunc = async () => {
       try {
-        const importInfoData = await fetchData(`/api/import-results/${id}`);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const importInfoData = await apiGet<any>(`/api/import-results/${id}`);
 
         // 取得したデータをフォーマット
         const formattedImportInfo: ImportInfoListRow = {

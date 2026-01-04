@@ -2,7 +2,7 @@ import ButtonGroup from '@/components/ui/buttonGroup';
 import { VerticalForm } from '@/components/ui/verticalForm';
 import { ROLE_OPTIONS, STATUS_OPTIONS } from '@/constants/constants';
 import { UserRole } from '@/types';
-import { fetchData } from '@/utils/api';
+import { apiGet } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -49,7 +49,8 @@ export function UserEditForm({
   useEffect(() => {
     const fetchTags = async () => {
       try {
-        const result = await fetchData('/api/tags');
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = await apiGet<any>('/api/tags');
 
         if (result.success && Array.isArray(result.data)) {
           const tagOptions = result.data.map((tag: { id: number, name: string }) => ({
@@ -193,9 +194,9 @@ export function UserEditForm({
 
 
     try {
-
+      // 更新処理をここに実装する
     } catch (error) {
-
+      // エラー処理をここに実装する
     }
 
     router.push('/user', { scroll: false });

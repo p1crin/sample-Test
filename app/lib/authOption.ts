@@ -49,19 +49,33 @@ export const authOptions: NextAuthOptions = {
   ],
   session: {
     strategy: 'jwt',
-    maxAge: 30 * 24 * 60 * 60, // 30 days
+    maxAge: 30 * 24 * 60 * 60, // 30 days (session lifetime)
   },
   jwt: {
-    maxAge: 30 * 24 * 60 * 60, // 30 days
+    maxAge: 30, // 30 seconds (for testing token refresh)
   },
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
+        // New login - initialize token
         token.sub = user.id.toString();
         token.email = user.email;
         token.user_role = user.user_role;
         token.department = user.department;
         token.company = user.company;
+        token.iat = Math.floor(Date.now() / 1000);
+        token.exp = Math.floor(Date.now() / 1000) + 30; // 30 seconds for testing
+      } else if (token) {
+        // Token refresh - check if token needs to be refreshed
+        const now = Math.floor(Date.now() / 1000);
+        const exp = token.exp as number;
+        const timeRemaining = exp - now;
+
+        // If less than 10 seconds remaining (or already expired), refresh the token
+        if (timeRemaining < 10) {
+          token.iat = now;
+          token.exp = now + 30; // Refresh to 30 seconds
+        }
       }
       return token;
     },

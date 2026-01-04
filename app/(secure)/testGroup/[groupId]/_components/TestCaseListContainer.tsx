@@ -6,7 +6,7 @@ import ImportButton from '@/components/ui/importButton';
 import Loading from '@/components/ui/loading';
 import { Modal } from '@/components/ui/modal';
 import SeachForm from '@/components/ui/searchForm';
-import { fetchData } from '@/utils/api';
+import { apiGet } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { formatDateJST } from '@/utils/date-formatter';
 import { buildQueryString, updateUrlParams } from '@/utils/queryUtils';
@@ -97,7 +97,8 @@ export function TestCaseListContainer() {
         clientLogger.debug('テストケース一覧画面', 'テストケースリスト取得開始', { page, searchParams });
         setTestCaseLoading(true);
         const queryString = buildQueryString(searchParams, page, pageSize)
-        const result = await fetchData(`/api/test-groups/${testGroupId}/cases?${queryString}`);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = await apiGet<any>(`/api/test-groups/${testGroupId}/cases?${queryString}`);
         const count = result.totalCount || (result.data ? result.data.length : 0);
         setTotalCount(count);
         setPageCount(Math.ceil(count / pageSize));
