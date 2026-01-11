@@ -49,9 +49,11 @@ export function TestCaseEditForm({
     setTestContents(contents);
   }, [form, contents]);
 
+  // テスト内容が変更されたときのハンドラー
+  // IDは生成せず、データのみを保持（IDはTestCaseFormが内部管理）
   const handleTestContentsChange = (contents: { testCase: string; expectedValue: string; is_target: boolean }[]) => {
-    setTestContents(contents.map((tc, index) => ({
-      id: Date.now() + index,
+    setTestContents(contents.map((tc) => ({
+      id: 0, // サーバー送信時には使用しないダミー値
       testCase: tc.testCase,
       expectedValue: tc.expectedValue,
       is_target: tc.is_target,

@@ -18,27 +18,32 @@ type TestCaseFormProps = {
 
 const formFieldStyle = "flex h-10 w-2/3 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
 
+// 一意のIDを生成するためのカウンター
+let idCounter = 0;
+const generateId = () => {
+  idCounter += 1;
+  return idCounter;
+};
+
 const TestCaseForm: React.FC<TestCaseFormProps> = ({ value, onChange, errors = {} }) => {
-  const initialTestCases = value || [];
-  const [testCases, setTestCases] = useState<TestCase[]>(initialTestCases.map((testCase, index) => ({
-    id: Date.now() + index,
-    ...testCase,
-    selected: true
-  })));
+  const [testCases, setTestCases] = useState<TestCase[]>([]);
   const [allChecked, setAllChecked] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isFormVisible, setIsFormVisible] = useState(!!value);
   const [bulkValue, setBulkValue] = useState('');
   const [bulkField, setBulkField] = useState<'testCase' | 'expectedValue' | 'is_target'>('testCase');
   const bottomRef = useRef<HTMLDivElement>(null);
+  const isInitializedRef = useRef(false);
 
+  // 初回のみ value から testCases を初期化（IDを安定させる）
   useEffect(() => {
-    setTestCases(initialTestCases.map((testCase, index) => ({
-      id: Date.now() + index,
-      ...testCase,
-      selected: true
-    })));
-    if (value) {
+    if (value && value.length > 0 && !isInitializedRef.current) {
+      isInitializedRef.current = true;
+      setTestCases(value.map((testCase) => ({
+        id: generateId(),
+        ...testCase,
+        selected: true
+      })));
       setIsFormVisible(true);
     }
   }, [value]);
@@ -58,7 +63,7 @@ const TestCaseForm: React.FC<TestCaseFormProps> = ({ value, onChange, errors = {
   const handleAddRow = () => {
     const newTestCases = [
       ...testCases,
-      { id: Date.now(), testCase: '', expectedValue: '', is_target: true, selected: true },
+      { id: generateId(), testCase: '', expectedValue: '', is_target: true, selected: true },
     ];
     setTestCases(newTestCases);
     notifyParent(newTestCases);
