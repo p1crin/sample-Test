@@ -9,7 +9,7 @@ import { TestCaseDetailRow } from './types/testCase-detail-list-row';
 import { Button } from '@/components/ui/button';
 import { RootState } from '@/stores/store';
 import { useSelector } from 'react-redux';
-import Loading from '@/app/loading';
+import Loading from '@/components/ui/loading';
 
 const labels = {
   tid: { name: "TID", type: "text" as 'text' },
@@ -127,7 +127,11 @@ export function TestCaseConductContainer({ tid: tid }: { tid: number }) {
           </div>
         </>
       ) : (
-        Loading()
+        <Loading
+          isLoading={true}
+          message={"データ読み込み中..."}
+          size="md"
+        />
       )}
       <div className="space-y-2">
         <h1 className="text-lg font-bold">テスト結果</h1>

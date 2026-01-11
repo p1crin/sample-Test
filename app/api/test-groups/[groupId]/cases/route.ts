@@ -1,8 +1,7 @@
 'use server';
-import { canViewTestGroup, requireAuth } from "@/app/lib/auth";
+import { canEditTestCases, canViewTestGroup, requireAuth } from "@/app/lib/auth";
 import { getAllRows, query } from "@/app/lib/db";
 import { prisma } from '@/app/lib/prisma';
-import { ERROR_MESSAGES } from "@/constants/errorMessages";
 import { STATUS_CODES } from "@/constants/statusCodes";
 import { TestCase } from "@/types";
 import { logAPIEndpoint, logDatabaseQuery, QueryTimer } from "@/utils/database-logger";
@@ -22,11 +21,11 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
   // URLからテストグループIDを取得
   const { groupId: groupId } = await params;
   const testGroupId = parseInt(groupId, 10);
-
   try {
     const user = await requireAuth(req);
     // 取得したテストグループIDとユーザ情報で権限チェック
     await canViewTestGroup(user.id, user.user_role, testGroupId);
+    const isCanModify = await canEditTestCases(user, testGroupId);
     // クエリ文字列から検索パラメータを取得
     const { searchParams } = new URL(req.url);
     const tid = searchParams.get('tid') || '';
@@ -140,7 +139,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
 
     // 日付をフォーマット(日本時間)し、レスポンスデータを整形
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const formattedTestCases = testCases.map((testCase: any) => ({
+    const formattedTestCases = await Promise.all(testCases.map(async (testCase: any) => ({
       test_group_id: testCase.test_group_id,
       tid: testCase.tid,
       first_layer: testCase.first_layer,
@@ -159,7 +158,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
         not_started_items: testCase.not_started_items || 0,
         excluded_items: testCase.excluded_items || 0,
       },
-    }));
+    })));
 
     logAPIEndpoint({
       method: 'GET',
@@ -170,7 +169,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
       dataSize: formattedTestCases.length,
     });
 
-    return NextResponse.json({ success: true, data: formattedTestCases, totalCount });
+    return NextResponse.json({ success: true, data: formattedTestCases, isCanModify, totalCount });
 
   } catch (error) {
     return handleError(
@@ -184,14 +183,15 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
 }
 
 // POST /api/test-groups/[groupId]/cases - テストケース登録
-export async function POST(req: NextRequest) {
+export async function POST(req: NextRequest, { params }: RouteParams) {
   const apiTimer = new QueryTimer();
+  const { groupId } = await params;
+  const testGroupId = parseInt(groupId, 10);
   try {
     // 認証チェック
     const user = await requireAuth(req);
     // FormData をパース
     const formData = await req.formData();
-    const groupId = parseInt(formData.get('groupId') as string);
     const tid = formData.get('tid') as string;
     const firstLayer = formData.get('firstLayer') as string;
     const secondLayer = formData.get('secondLayer') as string;
@@ -236,7 +236,7 @@ export async function POST(req: NextRequest) {
     const existingTestCase = await prisma.tt_test_cases.findUnique({
       where: {
         test_group_id_tid: {
-          test_group_id: groupId,
+          test_group_id: testGroupId,
           tid,
         },
       },
@@ -245,7 +245,7 @@ export async function POST(req: NextRequest) {
     if (existingTestCase) {
       logAPIEndpoint({
         method: 'POST',
-        endpoint: `/api/test-groups/${groupId}/cases`,
+        endpoint: `/api/test-groups/${testGroupId}/cases`,
         userId: user.id,
         statusCode: STATUS_CODES.CONFLICT,
         executionTime: apiTimer.elapsed(),
@@ -256,7 +256,7 @@ export async function POST(req: NextRequest) {
         STATUS_CODES.CONFLICT,
         apiTimer,
         'POST',
-        `/api/test-groups/${groupId}/cases`
+        `/api/test-groups/${testGroupId}/cases`
       );
     }
 
@@ -265,7 +265,7 @@ export async function POST(req: NextRequest) {
       // tt_test_cases に登録
       const testCase = await tx.tt_test_cases.create({
         data: {
-          test_group_id: groupId,
+          test_group_id: testGroupId,
           tid,
           first_layer: firstLayer,
           second_layer: secondLayer,
@@ -279,7 +279,7 @@ export async function POST(req: NextRequest) {
       });
 
       // ファイル保存処理
-      const uploadDir = join(process.cwd(), 'public', 'uploads', 'test-cases', String(groupId), tid);
+      const uploadDir = join(process.cwd(), 'public', 'uploads', 'test-cases', String(testGroupId), tid);
 
       // ディレクトリが存在しない場合は作成
       if (!existsSync(uploadDir)) {
@@ -298,7 +298,7 @@ export async function POST(req: NextRequest) {
           // tt_test_case_files に記録（type=0: 制御仕様書）
           await tx.tt_test_case_files.create({
             data: {
-              test_group_id: groupId,
+              test_group_id: testGroupId,
               tid,
               file_type: 0,
               file_no: i + 1,
@@ -321,7 +321,7 @@ export async function POST(req: NextRequest) {
           // tt_test_case_files に記録（type=1: データフロー）
           await tx.tt_test_case_files.create({
             data: {
-              test_group_id: groupId,
+              test_group_id: testGroupId,
               tid,
               file_type: 1,
               file_no: i + 1,
@@ -341,7 +341,7 @@ export async function POST(req: NextRequest) {
           if (tc.testCase && tc.testCase.trim() !== '' && tc.expectedValue && tc.expectedValue.trim() !== '') {
             await tx.tt_test_contents.create({
               data: {
-                test_group_id: groupId,
+                test_group_id: testGroupId,
                 tid,
                 test_case_no: testCaseNo,
                 test_case: tc.testCase,
@@ -359,7 +359,7 @@ export async function POST(req: NextRequest) {
 
     logAPIEndpoint({
       method: 'POST',
-      endpoint: `/api/test-groups/${groupId}/cases`,
+      endpoint: `/api/test-groups/${testGroupId}/cases`,
       userId: user.id,
       statusCode: STATUS_CODES.CREATED,
       executionTime: apiTimer.elapsed(),
@@ -371,11 +371,12 @@ export async function POST(req: NextRequest) {
       data: result,
     }, { status: STATUS_CODES.CREATED });
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : ERROR_MESSAGES.DEFAULT;
-
-    return NextResponse.json({
-      success: false,
-      error: errorMessage,
-    }, { status: STATUS_CODES.INTERNAL_SERVER_ERROR });
+    return handleError(
+      error as Error,
+      STATUS_CODES.INTERNAL_SERVER_ERROR,
+      apiTimer,
+      'POST',
+      `/api/test-groups/${testGroupId}/cases`
+    )
   }
 }

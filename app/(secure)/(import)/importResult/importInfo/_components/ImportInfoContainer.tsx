@@ -1,4 +1,5 @@
 'use client';
+import Loading from "@/components/ui/loading";
 import { IMPORT_STATUS } from "@/constants/constants";
 import { apiGet } from "@/utils/apiClient";
 import clientLogger from '@/utils/client-logger';
@@ -6,7 +7,6 @@ import { formatDateTimeJST } from "@/utils/date-formatter";
 import { useEffect, useState } from "react";
 import { ImportInfo } from './ImportInfo';
 import { ImportInfoListRow } from "./types/import-info-list-row";
-import Loading from "@/components/ui/loading";
 
 const labels = {
   file_name: { name: "ファイル名", type: "text" as 'text' },

@@ -1,11 +1,10 @@
 'use client';
-
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import { Button } from './button';
 
 export default function ForbiddenUI() {
-  const router = useRouter();
-
+  const handleToTestGroup = () => {
+    window.location.href = '/testGroup';
+  }
   return (
     <div className="flex items-center justify-center min-h-screen bg-gray-50">
       <div className="text-center">
@@ -16,12 +15,12 @@ export default function ForbiddenUI() {
         <p className="text-gray-600 mb-8 max-w-md mx-auto">このページにアクセスする権限がありません。</p>
 
         <div className="flex gap-4 justify-center">
-          <Link
-            href="/"
+          <Button
+            onClick={handleToTestGroup}
             className="px-6 py-2 bg-stnly text-white font-semibold rounded-md hover:bg-stnly-light transition-colors"
           >
             テストグループ一覧へ戻る
-          </Link>
+          </Button>
         </div>
       </div>
     </div>

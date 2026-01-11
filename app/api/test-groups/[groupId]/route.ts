@@ -5,7 +5,9 @@ import { STATUS_CODES } from '@/constants/statusCodes';
 import { logAPIEndpoint, logDatabaseQuery, QueryTimer } from '@/utils/database-logger';
 import { handleError } from '@/utils/errorHandler';
 import serverLogger from '@/utils/server-logger';
+import { rm } from 'fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
+import { join } from 'path';
 
 interface RouteParams {
   params: Promise<{ groupId: string }>;
@@ -19,7 +21,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
   try {
     const user = await requireAuth(req);
     // テストグループIDが数値でないとき400エラー
-    if (isNaN(parseInt(groupId))) {
+    if (isNaN(parseInt(groupId, 10))) {
       return handleError(
         new Error(ERROR_MESSAGES.BAD_REQUEST),
         STATUS_CODES.BAD_REQUEST,
@@ -28,7 +30,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
         `/api/test-groups/${groupId}`
       );
     }
-    const canView = await canViewTestGroup(user.id, user.user_role, parseInt(groupId));
+    const canView = await canViewTestGroup(user.id, user.user_role, parseInt(groupId, 10));
 
     // 閲覧権限のテストグループ取得時は403エラー
     if (!canView) {
@@ -42,9 +44,9 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     }
 
     const queryTimer = new QueryTimer();
-    const testGroup = await prisma.tt_test_groups.findFirst({
+    const testGroup = await prisma.tt_test_groups.findUnique({
       where: {
-        id: parseInt(groupId),
+        id: parseInt(groupId, 10),
         is_deleted: false,
       },
     });
@@ -54,7 +56,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
       table: 'tt_test_groups',
       executionTime: queryTimer.elapsed(),
       rowsReturned: testGroup ? 1 : 0,
-      query: 'findFirst',
+      query: 'findUnique',
       params: [{ id: groupId, is_deleted: false }],
     });
 
@@ -71,7 +73,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     const tagsTimer = new QueryTimer();
     const tagsResult = await prisma.tt_test_group_tags.findMany({
       where: {
-        test_group_id: parseInt(groupId),
+        test_group_id: parseInt(groupId, 10),
         mt_tags: {
           is_deleted: false,
         },
@@ -98,7 +100,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
 
     logAPIEndpoint({
       method: 'GET',
-      endpoint: `/api/test-groups/${parseInt(groupId)}`,
+      endpoint: `/api/test-groups/${parseInt(groupId, 10)}`,
       userId: user.id,
       statusCode: STATUS_CODES.OK,
       executionTime: apiTimer.elapsed(),
@@ -129,7 +131,7 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
   const { groupId } = await params;
 
   // テストグループIDが数値でないとき400エラー
-  if (isNaN(parseInt(groupId))) {
+  if (isNaN(parseInt(groupId, 10))) {
     return handleError(
       new Error(ERROR_MESSAGES.BAD_REQUEST),
       STATUS_CODES.BAD_REQUEST,
@@ -143,7 +145,7 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
     const user = await requireAuth(req);
 
     // ユーザーが管理者またはテストグループを閲覧する権限があるかどうかをチェック
-    const canModify = await canModifyTestGroup(user, parseInt(groupId));
+    const canModify = await canModifyTestGroup(user, parseInt(groupId, 10));
 
     if (!canModify) {
       return handleError(
@@ -169,7 +171,7 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       tag_names,
     } = body;
 
-    serverLogger.info(`PUT /api/test-groups/${parseInt(groupId)} リクエスト`, {
+    serverLogger.info(`PUT /api/test-groups/${parseInt(groupId, 10)} リクエスト`, {
       oem,
       model,
       event,
@@ -229,10 +231,7 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
         executionTime: apiTimer.elapsed(),
         error: ERROR_MESSAGES.VALIDATION_ERROR_NG_PLAN_COUNT
       });
-      // return NextResponse.json(
-      //   { success: false, error: { message: ERROR_MESSAGES.VALIDATION_ERROR_NG_PLAN_COUNT } },
-      //   { status: STATUS_CODES.BAD_REQUEST }
-      // );
+
       return handleError(
         new Error(ERROR_MESSAGES.VALIDATION_ERROR_NG_PLAN_COUNT),
         STATUS_CODES.BAD_REQUEST,
@@ -298,7 +297,7 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
 
         for (const tag of tag_names) {
           // タグからタグIDを取得
-          const foundTag = await tx.mt_tags.findFirst({
+          const foundTag = await tx.mt_tags.findUnique({
             where: {
               name: tag.tag_name,
               is_deleted: false
@@ -343,7 +342,7 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
 
     logAPIEndpoint({
       method: 'PUT',
-      endpoint: `/api/test-groups/${parseInt(groupId)}`,
+      endpoint: `/api/test-groups/${parseInt(groupId, 10)}`,
       userId: user.id,
       statusCode: STATUS_CODES.OK,
       executionTime: apiTimer.elapsed(),
@@ -366,32 +365,49 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
   let statusCode = STATUS_CODES.OK;
   const { groupId } = await params;
 
-  // テストグループIDが数値でないとき400エラー
-  if (isNaN(parseInt(groupId))) {
-    return handleError(
-      new Error(ERROR_MESSAGES.BAD_REQUEST),
-      STATUS_CODES.BAD_REQUEST,
-      apiTimer,
-      'GET',
-      `/api/test-groups/${groupId}`
-    );
-  }
-
   try {
     const user = await requireAuth(req);
 
+    // テストグループIDが数値でないとき400エラー
+    if (isNaN(parseInt(groupId, 10))) {
+      return handleError(
+        new Error(ERROR_MESSAGES.INVALID_GROUP_ID),
+        STATUS_CODES.BAD_REQUEST,
+        apiTimer,
+        'DELETE',
+        `/api/test-groups/${groupId}`
+      );
+    }
+
     // ユーザーが管理者またはテストグループを変更(削除)する権限があるかどうかをチェック
-    const canModify = await canModifyTestGroup(user, parseInt(groupId));
+    const canModify = await canModifyTestGroup(user, parseInt(groupId, 10));
 
     if (!canModify) {
       return handleError(
         new Error(ERROR_MESSAGES.PERMISSION_DENIED),
         STATUS_CODES.FORBIDDEN,
         apiTimer,
-        'PUT',
+        'DELETE',
         `/api/test-groups/${groupId}`
       );
     }
+    // テストグループ存在確認
+    const testGroup = await prisma.tt_test_groups.findUnique({
+      where: { id: parseInt(groupId, 10) },
+    });
+
+    if (!testGroup || testGroup.is_deleted) {
+      return handleError(
+        new Error(ERROR_MESSAGES.NOT_FOUND),
+        STATUS_CODES.NOT_FOUND,
+        apiTimer,
+        'DELETE',
+        `/api/test-groups/${groupId}`,
+      );
+    }
+    // 紐づいているファイルの削除 TODO:AWS S3上のディレクトリを削除
+    const deleteDir = join(process.cwd(), 'public', 'uploads', 'test-cases', String(groupId));
+    await rm(deleteDir, { recursive: true, force: true })
 
     const deleteTimer = new QueryTimer();
     // Prisma トランザクション内でテストグループを削除
@@ -399,43 +415,49 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
       // groupIdに一致するレコードを削除
       await tx.tt_test_evidences.deleteMany({
         where: {
-          test_group_id: parseInt(groupId),
+          test_group_id: parseInt(groupId, 10),
         }
       });
 
       await tx.tt_test_results_history.deleteMany({
         where: {
-          test_group_id: parseInt(groupId),
+          test_group_id: parseInt(groupId, 10),
         }
       });
 
       await tx.tt_test_results.deleteMany({
         where: {
-          test_group_id: parseInt(groupId)
+          test_group_id: parseInt(groupId, 10)
         }
       });
 
       await tx.tt_test_contents.deleteMany({
         where: {
-          test_group_id: parseInt(groupId)
+          test_group_id: parseInt(groupId, 10)
         }
       });
 
       await tx.tt_test_case_files.deleteMany({
         where: {
-          test_group_id: parseInt(groupId)
+          test_group_id: parseInt(groupId, 10)
         }
       });
 
+      await tx.tt_test_cases.deleteMany({
+        where: {
+          test_group_id: parseInt(groupId, 10)
+        }
+      })
+
       await tx.tt_test_group_tags.deleteMany({
         where: {
-          test_group_id: parseInt(groupId)
+          test_group_id: parseInt(groupId, 10)
         }
       });
 
       await tx.tt_test_groups.delete({
         where: {
-          id: parseInt(groupId)
+          id: parseInt(groupId, 10)
         }
       });
     },
@@ -452,7 +474,7 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
       query: 'delete',
       params: [
         {
-          id: parseInt(groupId)
+          id: parseInt(groupId, 10)
         }
       ]
     });
@@ -467,7 +489,7 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
       dataSize: 1
     });
 
-    return NextResponse.json({ success: true, data: deleteGroup }, { status: STATUS_CODES.CREATED });
+    return NextResponse.json({ success: true, data: deleteGroup }, { status: STATUS_CODES.OK });
   } catch (error) {
     return handleError(
       error as Error,

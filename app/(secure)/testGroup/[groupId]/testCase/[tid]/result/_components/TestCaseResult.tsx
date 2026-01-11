@@ -29,17 +29,23 @@ type TestCaseResultProps = {
     purpose: string;
     checkItems: string;
     requestId: string;
-    controlSpec: string;
-    dataFlow: string;
+    controlSpec: { file_name: string; file_path: string }[];
+    dataFlow: { file_name: string; file_path: string }[];
     testProcedure: string;
   };
 };
 
 export function TestCaseResult({ labels, values }: TestCaseResultProps) {
+  const formattedValues = {
+    ...values,
+    controlSpec: values.controlSpec.map(spec => spec.file_path),
+    dataFlow: values.dataFlow.map(flow => flow.file_path),
+  };
+
   return (
     <section>
       <div className="text-left">
-        <DetailView labels={labels} values={values} isFull={true} />
+        <DetailView labels={labels} values={formattedValues} isFull={true} />
       </div>
     </section>
   );

@@ -1,20 +1,18 @@
 'use client';
 
 import ErrorPage from '@/components/ui/errorPage';
-
-export default function TestCaseRegistErrorPage({
+import { usePathname } from 'next/navigation';
+export default function ProofLinkErrorPage({
   error,
-  reset,
 }: {
   error: Error & { digest?: string };
-  reset: () => void;
 }) {
+  // 現在の画面のパスを取得
+  const pathname = usePathname();
   return (
     <ErrorPage
       error={error}
-      reset={reset}
-      backLink={`/testGroup`}
-      backLinkLabel="戻る"
+      pathname={pathname}
     />
   );
 }

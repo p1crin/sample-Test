@@ -5,7 +5,8 @@ import { apiGet } from '@/utils/apiClient';
 import { formatDateJST } from '@/utils/date-formatter';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { TestGroupListRow } from './types/testGroup-list-row';
+import { TestGroupModalRow } from './types/testGroup-list-row';
+import clientLogger from '@/utils/client-logger';
 
 export default function TestGroupInfoTableModal() {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -24,38 +25,43 @@ export default function TestGroupInfoTableModal() {
   });
   const params = useParams();
   const groupId = params.groupId;
-
   const openModal = () => {
     setIsModalOpen(true);
   };
   const closeModal = () => {
     setIsModalOpen(false);
   };
+  const [apiError, setApiError] = useState<Error | null>(null);
+  if (apiError) throw apiError;
 
   useEffect(() => {
     const getTestGroup = async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const testGroup = await apiGet<any>(`/api/test-groups/${groupId}`);
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const testGroup = await apiGet<any>(`/api/test-groups/${groupId}`);
+        const testGroupVal = testGroup.data;
 
-      if (!testGroup.success) {
-        throw new Error('テストグループデータの取得に失敗しました');
+        const viewValues: TestGroupModalRow = {
+          id: testGroupVal.id,
+          oem: testGroupVal.oem,
+          model: testGroupVal.model,
+          event: testGroupVal.event,
+          variation: testGroupVal.variation,
+          destination: testGroupVal.destination,
+          specs: testGroupVal.specs,
+          testDatespan: formatDateJST(testGroupVal.test_startdate) + '～' + formatDateJST(testGroupVal.test_enddate),
+          ngPlanCount: testGroupVal.ng_plan_count,
+          created_at: formatDateJST(testGroupVal.created_at),
+          updated_at: formatDateJST(testGroupVal.updated_at)
+        };
+        setTestGroupData(viewValues);
+        clientLogger.info('テストグループ情報モーダル', 'データ取得成功', { data: viewValues.id });
+      } catch (err) {
+        clientLogger.error('テストグループ情報モーダル', 'データ取得失敗', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        setApiError(err instanceof Error ? err : new Error(String(err)));
       }
-      const testGroupVal = testGroup.data;
-
-      const viewValues: TestGroupListRow = {
-        id: testGroupVal.id,
-        oem: testGroupVal.oem,
-        model: testGroupVal.model,
-        event: testGroupVal.event,
-        variation: testGroupVal.variation,
-        destination: testGroupVal.destination,
-        specs: testGroupVal.specs,
-        testDatespan: formatDateJST(testGroupVal.test_startdate) + '～' + formatDateJST(testGroupVal.test_enddate),
-        ngPlanCount: testGroupVal.ng_plan_count,
-        created_at: formatDateJST(testGroupVal.created_at),
-        updated_at: formatDateJST(testGroupVal.updated_at)
-      };
-      setTestGroupData(viewValues);
     };
     getTestGroup();
   }, []);

@@ -1,17 +1,19 @@
 'use client';
-import clientLogger from '@/utils/client-logger';
+import { Column, DataGrid } from '@/components/datagrid/DataGrid';
+import { Button } from '@/components/ui/button';
+import Loading from '@/components/ui/loading';
+import { JUDGMENT_OPTIONS, JudgmentOption, READMINE_URL } from '@/constants/constants';
 import { apiGet } from '@/utils/apiClient';
-import { useEffect, useState } from 'react';
+import clientLogger from '@/utils/client-logger';
+import { useRouter } from 'next/navigation';
+import { useEffect, useMemo, useState } from 'react';
 import { TestCaseResult } from './TestCaseResult';
 import { TestCaseResultRow } from './types/testCase-result-list-row';
-import { TestCaseDetailRow } from './types/testCase-detail-list-row';
-import { Button } from '@/components/ui/button';
-import { RootState } from '@/stores/store';
-import { useSelector } from 'react-redux';
-import Loading from '@/app/loading';
-import { usePathname, useRouter } from 'next/navigation';
-import { Column, DataGrid } from '@/components/datagrid/DataGrid';
-import { READMINE_URL } from '@/constants/constants';
+
+// 判定のバリデーションを行うための型ガード
+const isValidJudgment = (value: unknown): value is JudgmentOption => {
+  return typeof value === 'string' && Object.values(JUDGMENT_OPTIONS).includes(value as JudgmentOption);
+};
 
 const labels = {
   tid: { name: "TID", type: "text" as 'text' },
@@ -27,57 +29,48 @@ const labels = {
   testProcedure: { name: "テスト手順", type: "text" as 'text' }
 };
 
-interface HistoryData {
-  historyCount: number;
-  results: TestCaseResultRow[];
+interface TestCaseDetail {
+  test_group_id: number;
+  tid: string;
+  first_layer: string;
+  second_layer: string;
+  third_layer: string;
+  fourth_layer: string;
+  purpose: string;
+  request_id: string;
+  check_items: string;
+  test_procedure: string;
+  created_at: string;
+  updated_at: string;
+  control_spec: { file_name: string; file_path: string }[];
+  data_flow: { file_name: string; file_path: string }[];
+}
+
+interface ResultWithHistory {
+  latestValidResult: Record<string, unknown>;
+  allHistory: Record<string, unknown>[];
+  historyCounts: number[];
+}
+
+interface TestResultsData {
+  [testCaseNo: string]: ResultWithHistory;
 }
 
 export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid: string }) {
-  const [data, setData] = useState<TestCaseDetailRow | null>(null);
-  const [latestTestCaseData, setLatestTestCaseData] = useState<TestCaseResultRow[]>([]);
-  const [historiesData, setHistoriesData] = useState<HistoryData[]>([]);
-  const [accordionOpen, setAccordionOpen] = useState<{ [key: number]: boolean }>({});
+  const [data, setData] = useState<TestCaseDetail | null>(null);
+  const [resultsWithHistory, setResultsWithHistory] = useState<TestResultsData>({});
+  const [expandedSections, setExpandedSections] = useState<Set<number>>(new Set([0]));
   const [labelData, setLabelData] = useState(labels);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<Error | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  if (apiError) throw apiError;
 
   const router = useRouter();
-  const pathname = usePathname();
-
-  const user = useSelector((state: RootState) => state.auth.user);
-  console.log("user:", user)
-
-  // note 備考欄のカスタムレンダラー
-  const renderNoteCell = (value: unknown, _row: TestCaseResultRow): React.ReactNode => {
-    const noteText = String(value || '');
-    if (!noteText) return <span></span>;
-
-    // #数字 パターンをリンク化
-    const parts = noteText.split(/(#\d+)/);
-    return (
-      <span>
-        {parts.map((part, index) => {
-          const match = part.match(/^#(\d+)$/);
-          if (match) {
-            const ticketId = match[1];
-            return (
-              <a
-                key={index}
-                href={`${READMINE_URL}${ticketId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ color: 'blue', textDecoration: 'underline' }}
-              >
-                {part}
-              </a>
-            );
-          }
-          return <span key={index}>{part}</span>;
-        })}
-      </span>
-    );
-  };
 
   const columns: Column<TestCaseResultRow>[] = [
+    { key: 'testCaseNo', header: 'No' },
     { key: 'testCase', header: 'テストケース' },
     { key: 'expectedValue', header: '期待値' },
     { key: 'result', header: '結果' },
@@ -88,101 +81,155 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
     { key: 'executionDate', header: '実施日' },
     { key: 'executor', header: '実施者' },
     { key: 'evidence', header: 'エビデンス', isImg: true },
-    { key: 'note', header: '備考欄', render: renderNoteCell },
+    { key: 'note', header: '備考欄', isLink: true, isExlink: true, linkPrefix: READMINE_URL, linkPattern: /#\d+/g },
   ];
 
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchTestCaseDetail = async () => {
       try {
-        // テストケース詳細情報を取得
-        const detailData = await apiGet<{ success: boolean; data: unknown }>(
-          `/api/test-groups/${groupId}/cases/${tid}/detail`
-        );
+        clientLogger.info('テストケース結果確認画面', 'テストケース詳細取得開始', { groupId, tid });
 
-        if (detailData.success && detailData.data) {
-          const testCaseData: TestCaseDetailRow = {
-            tid: (detailData.data as { tid: string }).tid,
-            firstLayer: (detailData.data as { firstLayer: string }).firstLayer,
-            secondLayer: (detailData.data as { secondLayer: string }).secondLayer,
-            thirdLayer: (detailData.data as { thirdLayer: string }).thirdLayer,
-            fourthLayer: (detailData.data as { fourthLayer: string }).fourthLayer,
-            purpose: (detailData.data as { purpose: string }).purpose,
-            requestId: (detailData.data as { requestId: string }).requestId,
-            checkItems: (detailData.data as { checkItems: string }).checkItems,
-            controlSpec: (detailData.data as { controlSpec: { id: string }[] }).controlSpec[0]?.id || '',
-            dataFlow: (detailData.data as { dataFlow: { id: string }[] }).dataFlow[0]?.id || '',
-            testProcedure: (detailData.data as { testProcedure: string }).testProcedure,
-          };
-          setData(testCaseData);
-          setLabelData(labels);
-          clientLogger.info('TestCaseResultContainer', 'テスト情報取得成功', { groupId, tid });
-        } else {
-          throw new Error('テスト情報の取得に失敗しました');
+        const result = await apiGet<any>(`/api/test-groups/${groupId}/cases/${tid}`);
+
+        if (!result || !result.success || !result.data) {
+          throw new Error('テストケース詳細の取得に失敗しました');
         }
+
+        const testCase = result.data[0] as TestCaseDetail;
+
+        setData(testCase);
+        setLabelData(labels);
+
+        clientLogger.info('テストケース結果確認画面', 'テストケース詳細取得成功', { tid });
       } catch (err) {
-        clientLogger.error('TestCaseResultContainer', 'テスト情報取得失敗', {
-          error: err instanceof Error ? err.message : String(err),
-        });
-        setLoadError('テスト情報の取得に失敗しました');
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        clientLogger.error('テストケース結果確認画面', 'テストケース詳細取得失敗', { error: errorMessage });
+        setLoadError('テストケース詳細の取得に失敗しました');
+        setApiError(err instanceof Error ? err : new Error(String(err)));
+      } finally {
+        setIsLoading(false);
       }
     };
 
     const fetchTestResults = async () => {
       try {
-        // テスト結果を取得
-        const resultsData = await apiGet<{ success: boolean; data: unknown }>(
-          `/api/test-groups/${groupId}/cases/${tid}/results`
-        );
+        clientLogger.info('テストケース結果確認画面', 'テスト結果取得開始', { groupId, tid });
 
-        if (resultsData.success && resultsData.data) {
-          // 最新結果
-          setLatestTestCaseData(
-            (resultsData.data as { latestResult?: { results: TestCaseResultRow[] } }).latestResult?.results || []
-          );
-          // 過去の履歴
-          setHistoriesData(
-            (resultsData.data as { histories: { historyCount: number; results: TestCaseResultRow[] }[] }).histories || []
-          );
-          clientLogger.info('TestCaseResultContainer', 'テスト結果取得成功', { groupId, tid });
-        } else {
-          throw new Error('テスト結果の取得に失敗しました');
+        const data = await apiGet<any>(`/api/test-groups/${groupId}/cases/${tid}/results`);
+
+        if (!data.success || !data.results) {
+          throw new Error(data.error || 'テスト結果の取得に失敗しました');
         }
+
+        // 履歴付きの結果を保存
+        const resultsData = data.results as TestResultsData;
+        setResultsWithHistory(resultsData);
+
+        clientLogger.info('テストケース結果確認画面', 'テスト結果取得成功', { tid, count: Object.keys(resultsData).length });
       } catch (err) {
-        clientLogger.error('TestCaseResultContainer', 'テスト結果取得失敗', {
-          error: err instanceof Error ? err.message : String(err),
-        });
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        clientLogger.error('テストケース結果確認画面', 'テスト結果取得失敗', { error: errorMessage });
         setLoadError('テスト結果の取得に失敗しました');
+        setApiError(err instanceof Error ? err : new Error(String(err)));
+      } finally {
+        setIsLoading(false);
       }
     };
 
-    fetchData();
+    fetchTestCaseDetail();
     fetchTestResults();
   }, [groupId, tid]);
 
   const handleCancel = () => {
-    console.log('キャンセルされました');
-    history.back();
+    router.back();
   };
 
   const handleShowTestTable = () => {
-    router.push(`${pathname}/conduct`);
+    router.push(`/testGroup/${groupId}/testCase/${tid}/result/conduct`);
   };
 
-  const toggleAccordion = (historyCount: number) => {
-    setAccordionOpen(prevState => ({
-      ...prevState,
-      [historyCount]: !prevState[historyCount],
-    }));
+  const toggleSection = (historyCount: number) => {
+    setExpandedSections((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(historyCount)) {
+        newSet.delete(historyCount);
+      } else {
+        newSet.add(historyCount);
+      }
+      return newSet;
+    });
   };
+
+  // 結果からスネークケースをキャメルケースに変換して値を取得するヘルパー関数
+  const getResultValue = (result: Record<string, unknown>, key: string): unknown => {
+    // まずキャメルケースのキーを試す
+    if (key in result) {
+      return result[key];
+    }
+    // キャメルケースをスネークケースに変換して再度試す
+    const snakeCase = key.replace(/([A-Z])/g, '_$1').toLowerCase();
+    return result[snakeCase];
+  };
+
+  // レンダリングのために整理されたデータ構造を構築
+  const getOrganizedResultsByHistoryCount = useMemo(() => {
+    const historyCountsSet = new Set<number>();
+    const resultsByHistoryCount: Record<number, Map<string, Record<string, unknown>>> = {};
+
+    // すべての履歴カウントを収集し、データを整理
+    Object.entries(resultsWithHistory).forEach(([testCaseNo, data]) => {
+      const rwh = data as ResultWithHistory;
+
+      // 最新の有効な結果を追加
+      historyCountsSet.add(0);
+      if (!resultsByHistoryCount[0]) {
+        resultsByHistoryCount[0] = new Map();
+      }
+      resultsByHistoryCount[0].set(testCaseNo, rwh.latestValidResult);
+
+      // すべての履歴エントリを追加
+      rwh.allHistory.forEach((histItem) => {
+        const hc = (histItem as Record<string, unknown>).history_count as number;
+        historyCountsSet.add(hc);
+        if (!resultsByHistoryCount[hc]) {
+          resultsByHistoryCount[hc] = new Map();
+        }
+        resultsByHistoryCount[hc].set(testCaseNo, histItem);
+      });
+    });
+
+    // 履歴カウントをソート: 0（最新）を最初に、その後降順
+    const sortedHistoryCounts = Array.from(historyCountsSet).sort((a, b) => {
+      if (a === 0) return -1;
+      if (b === 0) return 1;
+      return b - a;
+    });
+
+    return { sortedHistoryCounts, resultsByHistoryCount };
+  }, [resultsWithHistory]);
 
   return (
     <div className='space-y-4'>
       <h1 className="text-lg font-bold">テスト情報</h1>
-      {data ? (
+      {isLoading ? (
+        <Loading isLoading={isLoading} message="データ読み込み中..." size="md" />
+      ) : data ? (
         <>
           <div>
             <div className="w-full">
-              <TestCaseResult labels={labelData} values={data} />
+              <TestCaseResult labels={labelData} values={{
+                tid: data.tid,
+                firstLayer: data.first_layer,
+                secondLayer: data.second_layer,
+                thirdLayer: data.third_layer,
+                fourthLayer: data.fourth_layer,
+                purpose: data.purpose,
+                checkItems: data.check_items,
+                requestId: data.request_id,
+                controlSpec: data.control_spec,
+                dataFlow: data.data_flow,
+                testProcedure: data.test_procedure,
+              }} />
             </div>
           </div>
           <div className="w-full flex items-end justify-end">
@@ -192,31 +239,82 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
           </div>
         </>
       ) : (
-        Loading()
+        <div className="text-red-500 mt-4" role="alert">
+          {loadError}
+        </div>
       )}
       <div className="space-y-2">
         <h1 className="text-lg font-bold">テスト結果</h1>
-        <h1 className="font-bold">最終テスト結果</h1>
-        <div>
-          <DataGrid items={latestTestCaseData} columns={columns}></DataGrid>
-        </div>
+        <div className="space-y-6">
+          {isLoading ? (
+            <Loading isLoading={isLoading} message="データ読み込み中..." size="md" />
+          ) : Object.entries(resultsWithHistory).length > 0 ? (
+            (() => {
+              const { sortedHistoryCounts, resultsByHistoryCount } = getOrganizedResultsByHistoryCount;
 
-        {/* 過去の履歴をアコーディオンで表示 */}
-        {historiesData.map((history) => (
-          <div key={history.historyCount}>
-            <button
-              className="w-full text-left p-4 border border-gray-200"
-              onClick={() => toggleAccordion(history.historyCount)}
-            >
-              {history.historyCount}回目
-            </button>
-            {accordionOpen[history.historyCount] && (
-              <div className="p-4 border border-t-0 border-gray-200">
-                <DataGrid items={history.results} columns={columns}></DataGrid>
-              </div>
-            )}
-          </div>
-        ))}
+              // セクションをレンダリング
+              return sortedHistoryCounts.map((historyCount) => {
+                const sectionLabel = historyCount === 0 ? '最新' : `${historyCount}回目`;
+                const testCasesData = resultsByHistoryCount[historyCount];
+                const sortedTestCaseNos = Array.from(testCasesData.keys()).sort(
+                  (a, b) => parseInt(a, 10) - parseInt(b, 10)
+                );
+                const isExpanded = expandedSections.has(historyCount);
+
+                // DataGridのアイテムを構築
+                const sectionItems: TestCaseResultRow[] = sortedTestCaseNos.map((testCaseNo) => {
+                  const result = testCasesData.get(testCaseNo) as Record<string, unknown>;
+                  const judgmentValue = getResultValue(result, 'judgment');
+                  const judgment = isValidJudgment(judgmentValue) ? judgmentValue : JUDGMENT_OPTIONS.EMPTY;
+
+                  const evidenceValue = getResultValue(result, 'evidence') as string;
+                  const evidence = evidenceValue ? [evidenceValue] : null;
+
+                  return {
+                    historyCount: historyCount,
+                    testCaseNo: parseInt(testCaseNo, 10),
+                    testCase: (getResultValue(result, 'testCase') as string) || '',
+                    expectedValue: (getResultValue(result, 'expectedValue') as string) || '',
+                    result: (getResultValue(result, 'result') as string) || '',
+                    judgment: judgment,
+                    softwareVersion: (getResultValue(result, 'softwareVersion') as string) || '',
+                    hardwareVersion: (getResultValue(result, 'hardwareVersion') as string) || '',
+                    comparatorVersion: (getResultValue(result, 'comparatorVersion') as string) || '',
+                    executionDate: (getResultValue(result, 'executionDate') as string) || '',
+                    executor: (getResultValue(result, 'executor') as string) || '',
+                    evidence: evidence,
+                    note: (getResultValue(result, 'note') as string) || '',
+                  };
+                });
+
+                return (
+                  <div key={historyCount} className="border rounded-lg p-4 bg-gray-50">
+                    <button
+                      onClick={() => historyCount !== 0 && toggleSection(historyCount)}
+                      className={`w-full text-left flex items-center justify-between ${historyCount !== 0 ? 'hover:bg-gray-100' : ''} rounded px-2 py-1 transition-colors`}
+                      disabled={historyCount === 0}
+                    >
+                      <h2 className="text-md font-semibold text-gray-700">{sectionLabel}</h2>
+                      {historyCount !== 0 && (
+                        <span className="text-xl">{isExpanded ? '▼' : '▶'}</span>
+                      )}
+                    </button>
+                    {isExpanded && (
+                      <div className="overflow-x-auto mt-4">
+                        <DataGrid<TestCaseResultRow>
+                          items={sectionItems}
+                          columns={columns}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              });
+            })()
+          ) : (
+            <div className="text-gray-500 text-center py-8">テスト結果がありません</div>
+          )}
+        </div>
       </div>
       {loadError && (
         <div className="text-red-500 mt-4" role="alert">

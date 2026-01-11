@@ -14,6 +14,7 @@ export type Column<T> = {
   isLink?: boolean;
   isExlink?: boolean;
   linkPrefix?: string;
+  linkPattern?: RegExp;
   width?: string | number;
   isImg?: boolean;
 };

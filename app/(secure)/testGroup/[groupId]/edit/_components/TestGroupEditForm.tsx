@@ -156,7 +156,7 @@ export function TestGroupEditForm({
 
   // キャンセルボタン押下時処理
   const handleCansel = () => {
-    router.push('/testGroup', { scroll: false });
+    router.push('/testGroup',);
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement> | { target: { name: string; value: string | string[] } }) => {
@@ -321,7 +321,7 @@ export function TestGroupEditForm({
       {tagError && (
         <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
           <p className="font-bold">タグの読み込みに失敗しました</p>
-          <p className="text-sm">{tagError}</p>
+
         </div>
       )}
 

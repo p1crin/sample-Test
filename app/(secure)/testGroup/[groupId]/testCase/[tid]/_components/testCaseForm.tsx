@@ -1,18 +1,18 @@
-import { Modal } from '@/components/ui/modal';
-import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
+import { Modal } from '@/components/ui/modal';
+import React, { useEffect, useRef, useState } from 'react';
 
 type TestCase = {
   id: number;
   testCase: string;
   expectedValue: string;
-  excluded: boolean;
+  is_target: boolean;
   selected: boolean;
 };
 
 type TestCaseFormProps = {
-  value?: { testCase: string; expectedValue: string; excluded: boolean }[];
-  onChange?: (testCases: { testCase: string; expectedValue: string; excluded: boolean }[]) => void;
+  value?: { testCase: string; expectedValue: string; is_target: boolean }[];
+  onChange?: (testCases: { testCase: string; expectedValue: string; is_target: boolean }[]) => void;
   errors?: Record<string, string>;
 };
 
@@ -29,7 +29,7 @@ const TestCaseForm: React.FC<TestCaseFormProps> = ({ value, onChange, errors = {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isFormVisible, setIsFormVisible] = useState(!!value);
   const [bulkValue, setBulkValue] = useState('');
-  const [bulkField, setBulkField] = useState<'testCase' | 'expectedValue' | 'excluded'>('testCase');
+  const [bulkField, setBulkField] = useState<'testCase' | 'expectedValue' | 'is_target'>('testCase');
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -49,7 +49,7 @@ const TestCaseForm: React.FC<TestCaseFormProps> = ({ value, onChange, errors = {
       const dataToReturn = newTestCases.map(tc => ({
         testCase: tc.testCase,
         expectedValue: tc.expectedValue,
-        excluded: tc.excluded,
+        is_target: tc.is_target,
       }));
       onChange(dataToReturn);
     }
@@ -58,7 +58,7 @@ const TestCaseForm: React.FC<TestCaseFormProps> = ({ value, onChange, errors = {
   const handleAddRow = () => {
     const newTestCases = [
       ...testCases,
-      { id: Date.now(), testCase: '', expectedValue: '', excluded: false, selected: true },
+      { id: Date.now(), testCase: '', expectedValue: '', is_target: true, selected: true },
     ];
     setTestCases(newTestCases);
     notifyParent(newTestCases);
@@ -88,7 +88,7 @@ const TestCaseForm: React.FC<TestCaseFormProps> = ({ value, onChange, errors = {
     notifyParent(newTestCases);
   };
 
-  const handleBulkInput = (field: 'testCase' | 'expectedValue' | 'excluded') => {
+  const handleBulkInput = (field: 'testCase' | 'expectedValue' | 'is_target') => {
     setBulkField(field);
     setBulkValue(''); // モーダルを開く際にbulkValueをリセット
     setIsDialogOpen(true);
@@ -96,9 +96,9 @@ const TestCaseForm: React.FC<TestCaseFormProps> = ({ value, onChange, errors = {
 
   const handleBulkSubmit = () => {
     let newTestCases: TestCase[];
-    if (bulkField === 'excluded') {
-      const isExcluded = bulkValue === '対象外';
-      newTestCases = testCases.map(testCase => testCase.selected ? { ...testCase, excluded: isExcluded } : testCase);
+    if (bulkField === 'is_target') {
+      const isTarget = bulkValue === '対象外';
+      newTestCases = testCases.map(testCase => testCase.selected ? { ...testCase, is_target: isTarget } : testCase);
     } else {
       newTestCases = testCases.map(testCase => testCase.selected ? { ...testCase, [bulkField]: bulkValue } : testCase);
     }
@@ -137,7 +137,7 @@ const TestCaseForm: React.FC<TestCaseFormProps> = ({ value, onChange, errors = {
         </span>
         <span className="w-1/12 text-center whitespace-nowrap">
           対象
-          <button onClick={() => handleBulkInput('excluded')} className="ml-2 text-blue-500">
+          <button onClick={() => handleBulkInput('is_target')} className="ml-2 text-blue-500">
             ∨
           </button>
         </span>
@@ -182,8 +182,8 @@ const TestCaseForm: React.FC<TestCaseFormProps> = ({ value, onChange, errors = {
                 )}
               </div>
               <select
-                value={testCase.excluded ? '対象外' : '対象'}
-                onChange={(e) => handleChange(testCase.id, 'excluded', e.target.value === '対象外')}
+                value={testCase.is_target ? '対象' : '対象外'}
+                onChange={(e) => handleChange(testCase.id, 'is_target', e.target.value === '対象外')}
                 className="accent-[#FF5611] w-1/12 h-10 select-none rounded-lg border border-zinc-100 bg-white shadow-[0_-1px_0_0px_#d4d4d8_inset,0_0_0_1px_#f4f4f5_inset,0_0.5px_0_1.5px_#fff_inset] hover:bg-zinc-50 hover:via-zinc-900 hover:to-zinc-800 active:shadow-[-1px_0px_1px_0px_#e4e4e7_inset,1px_0px_1px_0px_#e4e4e7_inset,0px_0.125rem_1px_0px_#d4d4d8_inset] flex-shrink-0"
               >
                 <option value="対象">対象</option>
@@ -212,7 +212,7 @@ const TestCaseForm: React.FC<TestCaseFormProps> = ({ value, onChange, errors = {
       <Modal open={isDialogOpen} onClose={() => setIsDialogOpen(false)}>
         <h2 >セットする値を入力してください。</h2>
         <h2 className="mb-4">※選択した項目にのみ適用されます。</h2>
-        {bulkField === 'excluded' ? (
+        {bulkField === 'is_target' ? (
           <select
             value={bulkValue}
             onChange={(e) => setBulkValue(e.target.value)}
@@ -234,7 +234,7 @@ const TestCaseForm: React.FC<TestCaseFormProps> = ({ value, onChange, errors = {
           <Button onClick={() => setIsDialogOpen(false)} className="bg-gray-500 hover:bg-gray-400">キャンセル</Button>
         </div>
       </Modal>
-    </div>
+    </div >
   );
 };
 

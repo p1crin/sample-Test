@@ -7,8 +7,7 @@ import Loading from '@/components/ui/loading';
 import { Modal } from '@/components/ui/modal';
 import SeachForm from '@/components/ui/searchForm';
 import { ROLE_OPTIONS, STATUS_OPTIONS } from '@/constants/constants';
-import { STATUS_CODES } from "@/constants/statusCodes";
-import { apiGet, apiDelete } from '@/utils/apiClient';
+import { apiDelete, apiGet } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { formatDateJST } from '@/utils/date-formatter';
 import { buildQueryString, updateUrlParams } from '@/utils/queryUtils';
@@ -64,7 +63,8 @@ export function UserListContainer() {
     tags: [] as string[],
     status: '',
   });
-
+  const [apiError, setApiError] = useState<Error | null>(null);
+  if (apiError) throw apiError;
   // URLパラメータをコンポーネント状態に同期する
   useEffect(() => {
     const params: Record<string, string | string[]> = {
@@ -130,6 +130,7 @@ export function UserListContainer() {
             page,
             error: err.message,
           });
+          setApiError(err instanceof Error ? err : new Error(String(err)));
         }
       } finally {
         if (!ignore) {
@@ -193,7 +194,7 @@ export function UserListContainer() {
     { key: 'company', header: '会社名', },
     { key: 'user_role', header: '権限', },
     { key: 'tags', header: 'タグ', },
-    { key: 'status', header: 'ステータス', },
+    { key: 'is_deleted', header: 'ステータス', },
   ];
 
   // ユーザ新規登録画面遷移
@@ -203,7 +204,7 @@ export function UserListContainer() {
 
   // ユーザ編集画面遷移
   const toUserEditPage = (id: number) => {
-    router.push(`/user/edit/${id}`);
+    router.push(`/user/${id}/edit`);
   };
 
   const userDelete = async () => {
@@ -239,12 +240,12 @@ export function UserListContainer() {
         setIsDelModalOpen(true);
       } else {
         clientLogger.info('ユーザ一覧画面', 'ユーザ削除失敗', { error: result.error });
-        setModalMessage(result.error?.message || 'ユーザの削除に失敗しました');
+        setModalMessage('ユーザの削除に失敗しました');
         setIsDelModalOpen(true);
       }
     } catch (error) {
       clientLogger.error('ユーザ一覧画面', 'ユーザ一削除エラー', { error });
-      setModalMessage(error instanceof Error ? error.message : 'エラーが発生しました');
+      setModalMessage('ユーザの削除に失敗しました');
       setIsDelModalOpen(true);
     } finally {
       setDelLoading(false);
@@ -292,11 +293,11 @@ export function UserListContainer() {
       default:
         userRole = ROLE_OPTIONS.GENERAL;
     }
-
     return {
       ...item,
       user_role: userRole,
-      status: item.status ? '無効' : '有効'
+      is_deleted: item.is_deleted
+        ? '無効' : '有効'
     };
   });
 
@@ -389,13 +390,19 @@ export function UserListContainer() {
 
   return (
     <div>
+      {/* タグ読み込みエラー表示 */}
+      {tagError && (
+        <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
+          <p className="font-bold">{tagError}</p>
+        </div>
+      )}
       {/* ユーザ一覧のデータ読み込み中の表示 */}
       <Loading
         isLoading={tagLoading || delLoading}
-        message={tagLoading ? "データを読み込み中..." : "データ削除中..."}
+        message={tagLoading || userLoading ? "データを読み込み中..." : "データ削除中..."}
         size="md"
       />
-      {!tagLoading && !delLoading && (
+      {!userLoading && !tagLoading && !delLoading && (
         <>
           <SeachForm fields={fields} onClick={handleSearch} onFormDataChange={handleFormDataChange} /><div className="text-right space-x-2 pb-2">
             <Button
@@ -406,22 +413,22 @@ export function UserListContainer() {
             <ExportButton />
             <ImportButton type={'user'} />
           </div>
-          <Loading
-            isLoading={userLoading}
-            message="データ読み込み中..."
-            size="md" />
-          {!userLoading && (
-            <UserList
-              items={updatedItems}
-              columns={columns}
-              sortConfig={sortConfig}
-              page={page}
-              pageCount={pageCount}
-              onSort={handleSort}
-              onPageChange={handlePageChange}
-              renderActions={renderActions}
-            />
-          )}
+          {
+            updatedItems.length > 0 ? (
+              <UserList
+                items={updatedItems}
+                columns={columns}
+                sortConfig={sortConfig}
+                page={page}
+                pageCount={pageCount}
+                onSort={handleSort}
+                onPageChange={handlePageChange}
+                renderActions={renderActions}
+              />
+            ) : (
+              <div className="text-gray-500 text-center py-8">ユーザデータがありません</div>
+            )
+          }
         </>
       )}
       {/* 削除対象表示モーダル */}

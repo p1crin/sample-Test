@@ -1,12 +1,15 @@
+import { isAdmin } from '@/app/lib/auth';
 import { authOptions } from '@/app/lib/authOption';
 import ForbiddenUI from '@/components/ui/forbiddenUI';
 import InternalServerErrorUI from '@/components/ui/internalServerErrorUI';
 import UnauthorizedUI from '@/components/ui/unauthorizedUI';
 import { getServerSession } from 'next-auth';
-import { TestGroupListContainer } from './_components/TestGroupListContainer';
+import { Suspense } from 'react';
+import { UserEditFormContainer } from './_components/UserEditFormContainer';
 
-export default async function TestGroupListPage() {
+export default async function UserEditPage() {
   let session;
+  let isCanView = false;
   try {
     // サーバー側で権限チェック
     session = await getServerSession(authOptions);
@@ -21,6 +24,12 @@ export default async function TestGroupListPage() {
       return <UnauthorizedUI />;
     }
 
+    // ユーザロールが管理者のみが作成可能
+    isCanView = isAdmin(session.user);
+
+    if (!isCanView) {
+      return <ForbiddenUI />;
+    }
   } catch (error) {
     // エラーハンドリング
     if (error instanceof Error && error.message.includes('Forbidden')) {
@@ -30,9 +39,9 @@ export default async function TestGroupListPage() {
   }
 
   return (
-    <>
-      <h1 className="text-2xl font-bold mt-4 pb-3">テストグループ一覧</h1>
-      <TestGroupListContainer />
-    </>
+    <Suspense>
+      <h1 className="text-2xl font-bold mt-4 pb-3">ユーザ編集</h1>
+      <UserEditFormContainer />
+    </Suspense>
   );
 }

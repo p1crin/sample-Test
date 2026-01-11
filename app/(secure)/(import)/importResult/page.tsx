@@ -23,7 +23,7 @@ export default async function Page() {
       return <UnauthorizedUI />;
     }
 
-    // ユーザロールがテストマネージャーまたは管理者のみが作成可能
+    // ユーザロールがテストマネージャーまたは管理者のみが閲覧可能
     isCanView = isAdmin(session.user) || isTestManager(session.user);
 
     if (!isCanView) {

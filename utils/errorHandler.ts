@@ -59,7 +59,6 @@ export function handleError(error: Error, code: number, apiTimer: QueryTimer, me
         { status: STATUS_CODES.BAD_REQUEST }
       );
     default:
-      console.log("wwe:", error.message);
       return NextResponse.json(
         {
           error:

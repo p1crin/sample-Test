@@ -73,12 +73,12 @@ export function TestGroupCopyForm({
       updatedAt: formatDate(new Date())
     };
     setMenuItems([...menuItems, newTestGroup]);
-    router.push('/testGroup', { scroll: false });
+    router.push('/testGroup',);
   };
 
   // キャンセルボタン押下時処理
   const handleCansel = () => {
-    router.push('/testGroup', { scroll: false });
+    router.push('/testGroup',);
   };
 
   const fields = [

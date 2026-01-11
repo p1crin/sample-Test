@@ -1,5 +1,6 @@
 'use client';
 import { loginSchema } from '@/app/login/_components/schemas/login-schema';
+import Loading from '@/components/ui/loading';
 import { ERROR_MESSAGES } from '@/constants/errorMessages';
 import clientLogger from '@/utils/client-logger';
 import { signIn, useSession } from 'next-auth/react';
@@ -66,11 +67,12 @@ export function LoginFormContainer() {
   // セッション読み込み中またはログイン済みの場合
   if (status === 'loading' || status === 'authenticated') {
     return (
-      <div className="fixed inset-0 flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <p>セッションを読み込み中...</p>
-        </div>
-      </div>
+      <Loading
+        isLoading={true}
+        message="セッションを読み込み中..."
+        fullScreen={true}
+        size="lg"
+      />
     );
   }
 

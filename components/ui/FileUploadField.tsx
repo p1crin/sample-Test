@@ -1,6 +1,6 @@
+import { FileInfo, getUniqueFileNames, processClipboardItems, processFileList } from '@/utils/fileUtils';
 import React, { useEffect, useRef, useState } from 'react';
 import { Button } from './button';
-import { FileInfo, processClipboardItems, getUniqueFileNames, processFileList } from '@/utils/fileUtils';
 
 /**
  * ファイルアップロードフィールドのプロパティ
@@ -139,7 +139,14 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
               className="relative m-2 flex items-center justify-between border border-gray-300 p-2 rounded-sm"
               style={{ minHeight: '48px', maxHeight: '96px', width: '200px' }}
             >
-              {file.base64 ? (
+              {file.path ? (
+                <img
+                  src={file.path}
+                  alt={file.name}
+                  className="object-contain h-full"
+                  style={{ maxWidth: '100px' }}
+                />
+              ) : file.base64 && file.type?.includes('image/') ? (
                 <img
                   src={`data:${file.type};base64,${file.base64}`}
                   alt={file.name}
@@ -149,6 +156,7 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
               ) : (
                 <span className="text-sm truncate">{file.name}</span>
               )}
+
               <button
                 type="button"
                 onClick={() => handleRemoveFile(index)}

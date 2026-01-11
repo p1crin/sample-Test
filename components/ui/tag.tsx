@@ -11,9 +11,11 @@ const Tag: React.FC<TagProps> = ({ label }) => {
   return (
     <div>
       {labels.map((item, index) => (
-        <span key={index} className="inline-block bg-gray-200 text-gray-800 text-sm px-2 py-1 m-1">
-          {item.trim()}
-        </span>
+        item.trim() !== "" && (
+          <span key={index} className="inline-block bg-gray-200 text-gray-800 text-sm px-2 py-1 m-1">
+            {item.trim()}
+          </span>
+        )
       ))}
     </div>
   );

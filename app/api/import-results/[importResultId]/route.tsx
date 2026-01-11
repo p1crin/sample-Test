@@ -35,7 +35,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     }
 
     // Prismaのwhere条件を構築
-    const whereConditions: Prisma.tt_import_resultsWhereInput = {
+    const whereConditions: Prisma.tt_import_resultsWhereUniqueInput = {
       id: parseInt(importResultId, 10),
       is_deleted: false,
     };
@@ -49,11 +49,8 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
 
     // インポート結果を取得
     const dataTimer = new QueryTimer();
-    const importResultInfo = await prisma.tt_import_results.findFirst({
+    const importResultInfo = await prisma.tt_import_results.findUnique({
       where: whereConditions,
-      orderBy: {
-        updated_at: 'desc',
-      },
     });
     // 取得した種別がユーザかつユーザがテスト管理者の場合権限エラー
     if (importResultInfo?.import_type === ImportType.USER && !isAdmin(user)) {
@@ -64,7 +61,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
       userId: user.id,
       executionTime: dataTimer.elapsed(),
       rowsReturned: 1,
-      query: 'findFirst',
+      query: 'findUnique',
       params: Object.entries(whereConditions)
     });
 
@@ -77,6 +74,11 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     });
     return NextResponse.json({ success: true, data: importResultInfo })
   } catch (error) {
-    return handleError(error as Error, apiTimer, 'GET', `/api/import-results/${parseInt(importResultId)}`);
+    return handleError(
+      error as Error,
+      STATUS_CODES.INTERNAL_SERVER_ERROR,
+      apiTimer,
+      'GET',
+      `/api/import-results/${parseInt(importResultId)}`);
   }
 }

@@ -24,7 +24,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const h = await headers();
   const url = h.get('x-invoke-path') || '';
   const ua = h.get('user-agent') || '';
-  serverLogger.info(`${url}:${ua}`, 'SSR request');
+  serverLogger.debug(`${url}:${ua}`, 'SSR request');
 
   return (
     <html lang="ja">

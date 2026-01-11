@@ -3,21 +3,16 @@
 import { ERROR_MESSAGES } from '@/constants/errorMessages';
 import { clearAuthSession } from '@/stores/feature/auth';
 import { signOut } from 'next-auth/react';
-import Link from 'next/link';
 import { Button } from './button';
 
 interface ErrorPageProps {
   error: Error & { digest?: string };
-  reset: () => void;
-  backLink: string;
-  backLinkLabel: string;
+  pathname: string
 }
 
 export default function ErrorPage({
   error,
-  reset,
-  backLink,
-  backLinkLabel,
+  pathname
 }: ErrorPageProps) {
   const isForbidden = error.message.includes('403') || error.message.includes('Permission') || error.message.includes('Forbidden');
   const isUnauthorized = error.message.includes('401') || error.message.includes('Unauthorized');
@@ -37,6 +32,10 @@ export default function ErrorPage({
     signOut({ callbackUrl: '/login' });
   };
 
+  const handleToTestGroup = () => {
+    window.location.href = '/testGroup';
+  }
+
   return (
     <div className="flex items-center justify-center min-h-screen bg-gray-50">
       <div className="text-center">
@@ -47,23 +46,23 @@ export default function ErrorPage({
         <p className="text-gray-600 mb-8 max-w-md mx-auto">{description}</p>
 
         <div className="flex gap-4 justify-center">
-          {isUnauthorized ? (
-            <Button
+          {isUnauthorized || pathname === '/testGroup' ? (
+            < Button
               onClick={handleSignOut}
               className="px-6 py-2 bg-stnly text-white font-semibold rounded-md hover:bg-stnly-light transition-colors"
             >
-              ログイン画面に戻る
+              ログイン画面へ戻る
             </Button>
           ) : (
-            <Link
-              href={backLink}
+            <Button
+              onClick={handleToTestGroup}
               className="px-6 py-2 bg-stnly text-white font-semibold rounded-md hover:bg-stnly-light transition-colors"
             >
-              {backLinkLabel}
-            </Link>
+              テストグループ一覧へ戻る
+            </Button>
           )}
         </div>
       </div>
-    </div>
+    </div >
   );
 }

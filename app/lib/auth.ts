@@ -7,6 +7,7 @@ import { prisma } from '@/app/lib/prisma';
 export interface SessionUser {
   id: number;
   email: string;
+  name: string;
   user_role: UserRole;
   department?: string;
   company?: string;
@@ -28,6 +29,7 @@ export async function getAuthUser(
   return {
     id: parseInt(token.sub),
     email: token.email as string,
+    name: token.name as string,
     user_role: token.user_role as UserRole,
     department: token.department as string | undefined,
     company: token.company as string | undefined,
@@ -68,7 +70,7 @@ export async function requireAdmin(req: NextRequest): Promise<SessionUser> {
   return user;
 }
 
-// テストマネージャーまたは管理者ロールが必要
+// テスト管理者ロールが必要
 export async function requireTestManager(req: NextRequest): Promise<SessionUser> {
   const user = await requireAuth(req);
 
@@ -217,17 +219,17 @@ export async function canModifyTestGroup(
     return true;
   }
 
-  // ユーザーがグループを作成したかどうかをチェック
+  // ユーザーがグループを作成または更新したかどうかをチェック
   const group = await prisma.tt_test_groups.findUnique({
     where: { id: testGroupId },
-    select: { created_by: true, is_deleted: true },
+    select: { created_by: true, updated_by: true, is_deleted: true },
   });
 
   if (!group || group.is_deleted) {
     return false;
   }
 
-  return group.created_by === user.id;
+  return group.created_by === user.id || group.updated_by === user.id;
 }
 
 // ユーザーがアクセス可能なすべてのテストグループを取得

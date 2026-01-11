@@ -10,7 +10,7 @@ interface Label {
 
 interface DetailViewProps {
   labels: { [key: string]: Label };
-  values: { [key: string]: string };
+  values: { [key: string]: string | string[] };
   isFull?: boolean;
 }
 
@@ -39,21 +39,31 @@ const DetailView: React.FC<DetailViewProps> = ({ labels, values, isFull = false 
               </th>
               <td className="p-2 min-w-100 max-w-200 align-middle whitespace-pre-wrap overflow-hidden text-ellipsis">
                 {labels[key].type === 'img' ? (
-                  values[key] ? (
+                  Array.isArray(values[key]) ? (
+                    (values[key] as string[]).map((src, index) => (
+                      <img
+                        key={index}
+                        src={src}
+                        alt={`${labels[key].name} ${index + 1}`}
+                        width={500}
+                        height={300}
+                        style={{ cursor: 'pointer', border: '1px solid black', margin: '5px' }}
+                        onClick={() => handleImageClick(src)}
+                      />
+                    ))
+                  ) : (
                     <img
-                      src={values[key]}
+                      src={values[key] as string}
                       alt={labels[key].name}
                       width={500}
                       height={300}
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => handleImageClick(values[key])}
+                      style={{ cursor: 'pointer', border: '1px solid black', margin: '5px' }}
+                      onClick={() => handleImageClick(values[key] as string)}
                     />
-                  ) : (
-                    <span></span>
                   )
                 ) : (
                   values[key] ? (
-                    values[key].split('\n').map((line, index) => (
+                    (values[key] as string).split('\n').map((line, index) => (
                       <React.Fragment key={index}>
                         {line}
                         <br />

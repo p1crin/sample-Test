@@ -1,8 +1,8 @@
 import { requireAdmin } from '@/app/lib/auth';
 import { prisma } from '@/app/lib/prisma';
-import { ERROR_MESSAGES } from '@/constants/errorMessages';
 import { STATUS_CODES } from '@/constants/statusCodes';
 import { logAPIEndpoint, logDatabaseQuery, QueryTimer } from "@/utils/database-logger";
+import { handleError } from '@/utils/errorHandler';
 import { NextRequest, NextResponse } from 'next/server';
 
 // GET /api/users/export - ユーザエクスポート
@@ -86,44 +86,15 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('GET /api/users/export error:', error);
-
-    if (error instanceof Error && error.message === 'Unauthorized') {
-      logAPIEndpoint({
-        method: 'GET',
-        endpoint: '/api/users/export',
-        userId: user.id,
-        statusCode: STATUS_CODES.UNAUTHORIZED,
-        executionTime: apiTimer.elapsed(),
-        dataSize: 0,
-      });
-      return NextResponse.json({ error: ERROR_MESSAGES.UNAUTHORIZED }, { status: STATUS_CODES.UNAUTHORIZED });
-    }
-
-    if (error instanceof Error && error.message === 'Forbidden') {
-      logAPIEndpoint({
-        method: 'GET',
-        endpoint: '/api/users/export',
-        userId: user.id,
-        statusCode: STATUS_CODES.FORBIDDEN,
-        executionTime: apiTimer.elapsed(),
-        dataSize: 0,
-      });
-      return NextResponse.json({ error: ERROR_MESSAGES.PERMISSION_DENIED }, { status: STATUS_CODES.FORBIDDEN });
-    }
-
-    logAPIEndpoint({
-      method: 'GET',
-      endpoint: '/api/users/export',
-      userId: user.id,
-      statusCode: STATUS_CODES.INTERNAL_SERVER_ERROR,
-      executionTime: apiTimer.elapsed(),
-      dataSize: 0,
-    });
-
-    return NextResponse.json(
-      { error: 'ユーザのエクスポートに失敗しました' },
-      { status: STATUS_CODES.INTERNAL_SERVER_ERROR }
+    const statusCode = error instanceof Error && error.message === 'Unauthorized' ? STATUS_CODES.UNAUTHORIZED :
+      error instanceof Error && error.message === 'Forbidden' ? STATUS_CODES.FORBIDDEN :
+        STATUS_CODES.INTERNAL_SERVER_ERROR;
+    handleError(
+      error as Error,
+      statusCode,
+      apiTimer,
+      'GET',
+      '/api/users/export'
     );
   }
 }

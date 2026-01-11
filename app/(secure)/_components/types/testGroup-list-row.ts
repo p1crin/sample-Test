@@ -11,4 +11,8 @@ export type TestGroupListRow = {
   ngPlanCount: string;
   created_at: string;
   updated_at: string;
+  isCanModify: boolean;
 };
+
+// テストグループ情報モーダル表示用エンティティ型
+export type TestGroupModalRow = Omit<TestGroupListRow, 'isCanModify'>

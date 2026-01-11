@@ -5,11 +5,12 @@ import { Button } from '@/components/ui/button';
 import ButtonGroup from '@/components/ui/buttonGroup';
 import { Modal } from '@/components/ui/modal';
 import { VerticalForm } from '@/components/ui/verticalForm';
-import { apiGet, apiFetch } from '@/utils/apiClient';
+import { apiFetch, apiGet } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { FileInfo } from '@/utils/fileUtils';
 import { useParams, useRouter } from 'next/navigation';
 import React, { useState } from 'react';
+import { CreateTestCaseListRow } from '../../../_components/types/testCase-list-row';
 import TestCaseForm from '../../[tid]/_components/testCaseForm';
 import { testCaseRegistSchema } from '../schemas/testCase-regist-schema';
 
@@ -17,7 +18,7 @@ type TestCase = {
   id: number;
   testCase: string;
   expectedValue: string;
-  excluded: boolean;
+  is_target: boolean;
   selected: boolean;
 };
 
@@ -26,7 +27,7 @@ const TestCaseRegistrantion: React.FC = () => {
   const params = useParams();
   const groupId = parseInt(params.groupId as string);
 
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<CreateTestCaseListRow>({
     tid: '',
     firstLayer: '',
     secondLayer: '',
@@ -54,12 +55,12 @@ const TestCaseRegistrantion: React.FC = () => {
     }));
   };
 
-  const handleTestContentsChange = (contents: { testCase: string; expectedValue: string; excluded: boolean }[]) => {
+  const handleTestContentsChange = (contents: { testCase: string; expectedValue: string; is_target: boolean }[]) => {
     setTestContents(contents.map((tc, index) => ({
       id: Date.now() + index,
       testCase: tc.testCase,
       expectedValue: tc.expectedValue,
-      excluded: tc.excluded,
+      is_target: tc.is_target,
       selected: true,
     })));
   };
@@ -287,12 +288,12 @@ const TestCaseRegistrantion: React.FC = () => {
         }, 1500);
       } else {
         clientLogger.error('テストケース新規登録画面', 'テストケース作成失敗', { error: result.error });
-        setModalMessage(result.error || 'テストケースの作成に失敗しました');
+        setModalMessage('テストケースの作成に失敗しました');
         setIsModalOpen(true);
       }
     } catch (error) {
       clientLogger.error('テストケース新規登録画面', 'テストケース作成エラー', { error });
-      setModalMessage(error instanceof Error ? error.message : 'エラーが発生しました');
+      setModalMessage('テストケースの作成に失敗しました');
       setIsModalOpen(true);
     } finally {
       setIsLoading(false);
@@ -300,8 +301,7 @@ const TestCaseRegistrantion: React.FC = () => {
   };
 
   const handleCancel = () => {
-    clientLogger.info('テストケース新規登録画面', 'キャンセルボタン押下');
-    router.push(`/testGroup/${groupId}/testCase`);
+    router.back();
   };
 
   const buttons = [

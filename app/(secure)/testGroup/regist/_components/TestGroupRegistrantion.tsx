@@ -51,7 +51,7 @@ const Resist: React.FC = () => {
           setTagError('タグの取得に失敗しました');
         }
       } catch (error) {
-        clientLogger.error('TestGroupRegistration', 'タグ取得エラー', { error });
+        clientLogger.error('テストグループ新規登録画面', 'タグ取得エラー', { error });
         setTagError(error instanceof Error ? error.message : 'タグの取得に失敗しました');
       } finally {
         setTagLoading(false);
@@ -251,20 +251,20 @@ const Resist: React.FC = () => {
       });
 
       if (result.success) {
-        clientLogger.info('TestGroupRegistration', 'テストグループ作成成功', { groupId: result.data?.id });
+        clientLogger.info('テストグループ新規登録画面', 'テストグループ作成成功', { groupId: result.data?.id });
         setModalMessage('テストグループを作成しました');
         setIsModalOpen(true);
         setTimeout(() => {
           router.push('/testGroup');
         }, 1500); // 1.5秒後にテストグループ一覧に飛ばす
       } else {
-        clientLogger.error('TestGroupRegistration', 'テストグループ作成失敗', { error: result.error });
+        clientLogger.error('テストグループ新規登録画面', 'テストグループ作成失敗', { error: result.error });
         setModalMessage(result.error?.message || 'テストグループの作成に失敗しました');
         setIsModalOpen(true);
       }
     } catch (error) {
-      clientLogger.error('TestGroupRegistration', 'テストグループ作成エラー', { error });
-      setModalMessage(error instanceof Error ? error.message : 'エラーが発生しました');
+      clientLogger.error('テストグループ新規登録画面', 'テストグループ作成エラー', { error });
+      setModalMessage('テストグループの作成に失敗しました');
       setIsModalOpen(true);
     } finally {
       setIsLoading(false);
@@ -272,14 +272,14 @@ const Resist: React.FC = () => {
   };
 
   const handleCancel = () => {
-    router.push('/testGroup');
+    router.back();
   };
 
   const buttons = [
     {
       label: isLoading ? '登録中...' : '登録',
       onClick: () => {
-        clientLogger.info('TestGroupRegistration', '登録ボタン押下');
+        clientLogger.info('テストグループ新規登録画面', '登録ボタン押下');
         handleRegister();
       },
       disabled: isLoading
@@ -287,7 +287,7 @@ const Resist: React.FC = () => {
     {
       label: '戻る',
       onClick: () => {
-        clientLogger.info('TestGroupRegistration', '戻るボタン押下');
+        clientLogger.info('テストグループ新規登録画面', '戻るボタン押下');
         handleCancel();
       },
       isCancel: true,
@@ -301,7 +301,6 @@ const Resist: React.FC = () => {
       {tagError && (
         <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
           <p className="font-bold">タグの読み込みに失敗しました</p>
-          <p className="text-sm">{tagError}</p>
         </div>
       )}
 

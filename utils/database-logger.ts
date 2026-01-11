@@ -107,6 +107,7 @@ export function logDatabaseQuery(log: DatabaseQueryLog): void {
       rowsAffected: log.rowsAffected,
       rowsReturned: log.rowsReturned,
       query: visualization,
+      params: log.params
     });
   } else {
     // 本番環境: メタデータのみ出力（機密情報を避ける）

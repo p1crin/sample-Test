@@ -85,7 +85,7 @@ export async function PUT(req: NextRequest) {
 
     // ユーザIDが一致するユーザ情報を取得
     const selectTimer = new QueryTimer();
-    const userInfo = await prisma?.mt_users.findFirst({
+    const userInfo = await prisma?.mt_users.findUnique({
       where: {
         id: user.id,
         is_deleted: false,

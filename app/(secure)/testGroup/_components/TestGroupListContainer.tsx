@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import Loading from '@/components/ui/loading';
 import { Modal } from '@/components/ui/modal';
 import SeachForm from '@/components/ui/searchForm';
-import { fetchData } from '@/utils/api';
+import { apiDelete, apiGet } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { formatDateJST } from '@/utils/date-formatter';
 import { buildQueryString, updateUrlParams } from '@/utils/queryUtils';
@@ -15,7 +15,6 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { TestGroupListRow } from '../../_components/types/testGroup-list-row';
 import { TestGroupList } from './TestGroupList';
-import { apiGet } from '@/utils/apiClient';
 
 export function TestGroupListContainer() {
   const router = useRouter();
@@ -64,6 +63,8 @@ export function TestGroupListContainer() {
     variation: '',
     destination: '',
   });
+  const [apiError, setApiError] = useState<Error | null>(null);
+  if (apiError) throw apiError;
 
   // URLパラメータをコンポーネント状態に同期する
   useEffect(() => {
@@ -102,9 +103,8 @@ export function TestGroupListContainer() {
         clientLogger.debug('テストグループ一覧画面', 'テストグループリスト取得開始', { page, searchParams });
         setTestGroupLoading(true);
         const queryString = buildQueryString(searchParams, page, pageSize);
-        const result = await apiGet<{ success: boolean; data: unknown; totalCount?: number }>(
-          `/api/test-groups?${queryString}`
-        );
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const result = await apiGet<any>(`/api/test-groups?${queryString}`);
         const count = result.totalCount || (result.data ? result.data.length : 0);
         setTotalCount(count);
         setPageCount(Math.ceil(count / pageSize));
@@ -132,6 +132,7 @@ export function TestGroupListContainer() {
             page,
             error: err.message,
           });
+          setApiError(err instanceof Error ? err : new Error(String(err)));
         }
       } finally {
         if (!ignore) {
@@ -195,7 +196,7 @@ export function TestGroupListContainer() {
     <div className="flex items-center justify-end space-x-4 w-full box-border pr-4">
       <Button
         onClick={() => toTestGroupEditPage(item.id)}
-        disabled={!canEdit}
+        disabled={!item.isCanModify}
       >
         編集
       </Button>
@@ -204,7 +205,7 @@ export function TestGroupListContainer() {
           setSelectedTestGroup(item);
           getTotalTestCase(item.id);
         }}
-        disabled={!canEdit}
+        disabled={!item.isCanModify}
       >
         削除
       </Button>
@@ -215,7 +216,7 @@ export function TestGroupListContainer() {
       </Button>
       <Button
         onClick={() => toTestGroupCopyPage(item.id)}
-        disabled={!canEdit}
+        disabled={!item.isCanModify}
       >
         複製
       </Button>
@@ -283,12 +284,13 @@ export function TestGroupListContainer() {
     clientLogger.info('テストグループ一覧画面', '削除ボタン押下', { id: id });
 
     try {
-      const result = await fetchData(`/api/test-groups/${id}/cases`);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await apiGet<any>(`/api/test-groups/${id}/cases`);
       setTotalTestCase(result.totalCount);
       setIsModalOpen(true);
       setModalContent('initial');
     } catch (error) {
-      clientLogger.error('TestGroupListContainer', '関連テストグループケース件数取得エラー', { error });
+      clientLogger.error('テストグループ一覧画面', '関連テストグループケース件数取得エラー', { error });
     }
   }
 
@@ -323,23 +325,15 @@ export function TestGroupListContainer() {
 
     try {
       setDelLoading(true);
-      const response = await fetch(`/api/test-groups/${selectedTestGroup.id}`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          id: selectedTestGroup.id
-        }),
-      });
-
-      const result = await response.json();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await apiDelete<any>(`/api/test-groups/${selectedTestGroup.id}`);
 
       if (result.success) {
-        clientLogger.info('TestGroupListContainer', 'テストグループ削除成功', { groupId: selectedTestGroup.id });
+        clientLogger.info('テストグループ一覧画面', 'テストグループ削除成功', { groupId: selectedTestGroup.id });
         //テストグループ一覧再描画
         const queryString = buildQueryString(searchParams, 1, pageSize);
-        const newList = await fetchData(`/api/test-groups?${queryString}`);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const newList = await apiGet<any>(`/api/test-groups?${queryString}`);
         const count = newList.totalCount || (newList.data ? newList.data.length : 0);
         setTotalCount(count);
         setPageCount(Math.ceil(count / pageSize));
@@ -348,13 +342,13 @@ export function TestGroupListContainer() {
         setModalMessage('テストグループを削除しました');
         setIsDelModalOpen(true);
       } else {
-        clientLogger.error('TestGroupListContainer', 'テストグループ削除失敗', { error: result.error });
-        setModalMessage(result.error?.message || 'テストグループの削除に失敗しました');
+        clientLogger.error('テストグループ一覧画面', 'テストグループ削除失敗', { error: result.error });
+        setModalMessage('テストグループの削除に失敗しました');
         setIsDelModalOpen(true);
       }
     } catch (error) {
-      clientLogger.error('TestGroupListContainer', 'テストグループ削除エラー', { error });
-      setModalMessage(error instanceof Error ? error.message : 'エラーが発生しました');
+      clientLogger.error('テストグループ一覧画面', 'テストグループ削除エラー', { error });
+      setModalMessage('テストグループの削除に失敗しました');
       setIsDelModalOpen(true);
     } finally {
       setDelLoading(false);
@@ -377,16 +371,21 @@ export function TestGroupListContainer() {
               テストグループ新規登録
             </Button>
           </div>
-          <TestGroupList
-            items={sortedItems}
-            columns={columns}
-            sortConfig={sortConfig}
-            page={page}
-            pageCount={pageCount}
-            onSort={handleSort}
-            onPageChange={handlePageChange}
-            renderActions={renderActions}
-          />
+          {sortedItems.length > 0 ? (
+            <TestGroupList
+              items={sortedItems}
+              columns={columns}
+              sortConfig={sortConfig}
+              page={page}
+              pageCount={pageCount}
+              onSort={handleSort}
+              onPageChange={handlePageChange}
+              renderActions={renderActions}
+            />
+          ) : (
+            <div className="text-gray-500 text-center py-8">テストグループがありません</div>
+          )
+          }
           <Modal open={isModalOpen} onClose={() => setIsModalOpen(false)}>
             <p className="mb-8 text-red-600 font-bold text-center">
               {modalContent === 'initial'

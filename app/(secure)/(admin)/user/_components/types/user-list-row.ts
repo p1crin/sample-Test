@@ -11,13 +11,13 @@ type BaseUserListRow = {
 // 項目のエンティティ型
 export type UserListRow = BaseUserListRow & {
   user_role: number,
-  status: boolean;
+  is_deleted: boolean;
 };
 
 // 項目表示時のエンティティ型
 export type UserListTableRow = BaseUserListRow & {
   user_role: string,
-  status: string;
+  is_deleted: string;
 };
 
 // 項目作成時の入力型

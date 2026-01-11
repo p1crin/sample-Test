@@ -1,4 +1,3 @@
-
 export const ERROR_MESSAGES = {
   DEFAULT: "エラーが発生しました",
   REQUIRED_FIELD: "このフィールドは必須です。",
@@ -27,5 +26,7 @@ export const ERROR_MESSAGES = {
   NOT_FOUND: '該当するデータがありません',
   GROUP_ID_AND_TID_REQUIRED: "groupIdとtidは必須です",
   BAD_REQUEST: 'リクエストが不正です',
-  INTEREANL_SERVER_ERROR: 'リクエストの処理に失敗しました'
+  INTEREANL_SERVER_ERROR: 'リクエストの処理に失敗しました',
+  INVALID_GROUP_ID: 'テストグループIDの形式が不正です',
+  INVALID_TID: 'TIDの形式が不正です',
 };

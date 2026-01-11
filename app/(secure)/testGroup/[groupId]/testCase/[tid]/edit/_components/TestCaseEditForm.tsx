@@ -1,10 +1,13 @@
-import { Button } from '@/components/ui/button';
-import { TestCaseListRow } from '../../../../_components/types/testCase-list-row';
-import { VerticalForm } from '@/components/ui/verticalForm';
-import { useRouter } from 'next/navigation';
 import TestCaseForm from '@/app/(secure)/testGroup/[groupId]/testCase/[tid]/_components/testCaseForm';
-
-export type TestCaseEditFormState = TestCaseListRow;
+import ButtonGroup from '@/components/ui/buttonGroup';
+import FileUploadField from '@/components/ui/FileUploadField';
+import { VerticalForm } from '@/components/ui/verticalForm';
+import { apiFetch } from '@/utils/apiClient';
+import clientLogger from '@/utils/client-logger';
+import { FileInfo } from '@/utils/fileUtils';
+import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { UpdateTestCaseListRow } from '../../../../_components/types/testCase-list-row';
 
 export type TestCaseEditChangeData = {
   target: {
@@ -17,170 +20,264 @@ export type TestCaseEditChangeData = {
 
 export type TestCaseEditFormProps = {
   id?: number;
-  form: TestCaseEditFormState;
-  errors: Record<string, string[]>;
-  toastOpen: boolean;
-  onChange: (e: TestCaseEditChangeData) => void;
-  onClear: () => void;
-  onSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
-  onToastClose: () => void;
+  form: UpdateTestCaseListRow;
+  contents: [] | TestCase[];
+};
+
+export type TestCase = {
+  id: number;
+  testCase: string;
+  expectedValue: string;
+  is_target: boolean;
+  selected: boolean;
 };
 
 export function TestCaseEditForm({
   id,
   form,
-  errors,
-  toastOpen,
-  onChange,
-  onClear,
-  onSubmit,
-  onToastClose,
+  contents,
 }: TestCaseEditFormProps) {
   const router = useRouter();
+  const [formData, setFormData] = useState(form);
+  const [testContents, setTestContents] = useState<[] | TestCase[]>([]);
+  const [editError, setEditErrors] = useState<Record<string, string>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // 更新ボタン押下時処理
-  const handleEditer = () => {
-    // 更新処理をここに記述
-    console.log('テストグループ編集');
-    router.push('/testCase', { scroll: false })
+  // テストケースのフォーマットの各値取得
+  useEffect(() => {
+    setFormData(form);
+    setTestContents(contents);
+  }, [form, contents]);
 
-  }
+  const handleTestContentsChange = (contents: { testCase: string; expectedValue: string; is_target: boolean }[]) => {
+    setTestContents(contents.map((tc, index) => ({
+      id: Date.now() + index,
+      testCase: tc.testCase,
+      expectedValue: tc.expectedValue,
+      is_target: tc.is_target,
+      selected: true,
+    })));
+  };
 
-  // キャンセルボタン押下時処理
-  const handleCansel = () => {
-    history.back();
-  }
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement> | { target: { name: string; value: string | string[] } }) => {
+    if ('target' in e && 'name' in e.target) {
+      const target = e.target as HTMLInputElement | HTMLTextAreaElement;
+      const { name, value } = target;
+      setFormData(prev => ({
+        ...prev,
+        [name]: value
+      }));
+    }
+  };
+
+  const handleFileChange = (fieldName: string, files: FileInfo[]) => {
+    setFormData(prev => ({
+      ...prev,
+      [fieldName]: files
+    }));
+  };
 
   const fields = [
     {
       label: 'TID',
       type: 'text',
       name: 'tid',
-      value: '',
-      onChange: () => { },
-      placeholder: 'TID'
+      value: formData.tid,
+      onChange: handleChange,
+      placeholder: 'TID',
+      disabled: true
     },
     {
       label: '第1層',
       type: 'text',
       name: 'firstLayer',
-      value: '',
-      onChange: () => { },
+      value: formData.firstLayer,
+      onChange: handleChange,
       placeholder: '第1層'
     },
     {
       label: '第2層',
       type: 'text',
       name: 'secondLayer',
-      value: '',
-      onChange: () => { },
+      value: formData.secondLayer,
+      onChange: handleChange,
       placeholder: '第2層'
     },
     {
       label: '第3層',
       type: 'text',
       name: 'thirdLayer',
-      value: '',
-      onChange: () => { },
+      value: formData.thirdLayer,
+      onChange: handleChange,
       placeholder: '第3層'
     },
     {
       label: '第4層',
       type: 'text',
       name: 'fourthLayer',
-      value: '',
-      onChange: () => { },
+      value: formData.fourthLayer,
+      onChange: handleChange,
       placeholder: '第4層'
     },
     {
       label: '目的',
       type: 'text',
       name: 'purpose',
-      value: '',
-      onChange: () => { },
+      value: formData.purpose,
+      onChange: handleChange,
       placeholder: '目的'
     },
     {
       label: '要求ID',
       type: 'text',
       name: 'requestId',
-      value: '',
-      onChange: () => { },
+      value: formData.requestId,
+      onChange: handleChange,
       placeholder: '要求ID'
     },
     {
       label: '確認観点',
       type: 'textarea',
       name: 'checkItems',
-      value: '',
-      onChange: () => { },
+      value: formData.checkItems,
+      onChange: handleChange,
       placeholder: '確認観点'
-    },
-    {
-      label: '制御仕様',
-      type: 'file',
-      name: 'controlSpec',
-      value: '',
-      isCopyable: true,
-      onChange: () => { },
-      placeholder: '制御仕様'
-    },
-    {
-      label: 'データフロー',
-      type: 'file',
-      name: 'dataFlow',
-      value: '',
-      isCopyable: true,
-      onChange: () => { },
-      placeholder: 'データフロー'
     },
     {
       label: 'テスト手順',
       type: 'textarea',
       name: 'testProcedure',
-      value: '',
-      onChange: () => { },
-      placeholder: 'テスト手順'
+      value: formData.testProcedure,
+      onChange: handleChange,
+      placeholder: 'テスト手順',
+      required: true,
     }
   ];
 
-  const sampleValue = {
-    tid: "1-1-1-1",
-    firstLayer: "第1層-1",
-    secondLayer: "第2層-1",
-    thirdLayer: "第3層-1",
-    fourthLayer: "第4層-1",
-    controlSpec: "制御仕様サンプル.png",
-    dataFlow: "データフローサンプル.png",
-    checkItems: "確認観点サンプル",
-    requestId: "要求ID1",
-    purpose: "目的1",
-    testProcedure: "テスト手順サンプル"
-  };
+  // 更新ボタン押下時処理
+  const handleEditer = async () => {
+    // 更新処理をここに記述
+    console.log('テストグループ編集');
+    const validationData = {
+      ...formData,
+      testContents
+    }
 
-  const handleCancel = () => {
+    // const validationResult = testCaseEditSchema.safeParse(validationData);
+    // if (!validationResult.success) {
+    //   const newErrors: Record<string, string> = {};
+    //   validationResult.error.errors.forEach(err => {
+    //     const fieldPath = err.path[0] as string;
+    //     newErrors[fieldPath] = err.message;
+    //   });
+    //   setEditErrors(newErrors);
+    //   return;
+    // }
+
+    // // バリデーション成功時にエラークリア
+    // setEditErrors({});
+
+    clientLogger.info('テストケース編集画面', 'テストケース更新開始', { formData, testContents });
+
+    try {
+      const formDataObj = new FormData();
+      formDataObj.append('tid', formData.tid);
+      formDataObj.append('firstLayer', formData.firstLayer);
+      formDataObj.append('secondLayer', formData.secondLayer);
+      formDataObj.append('thirdLayer', formData.thirdLayer);
+      formDataObj.append('fourthLayer', formData.fourthLayer);
+      formDataObj.append('purpose', formData.purpose);
+      formDataObj.append('requestId', formData.requestId);
+      formDataObj.append('checkItems', formData.checkItems);
+      formDataObj.append('testProcedure', formData.testProcedure);
+
+      // 複数のファイルを処理
+      formData.controlSpecFile.forEach((fileInfo, index) => {
+        formDataObj.append(`controlSpecFile[${index}]`, JSON.stringify(fileInfo));
+      });
+      formData.dataFlowFile.forEach((fileInfo, index) => {
+        formDataObj.append(`dataFlowFile[${index}]`, JSON.stringify(fileInfo));
+      });
+
+      if (testContents.length > 0) {
+        formDataObj.append('testContents', JSON.stringify(testContents));
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const response = await apiFetch(`/api/test-groups/${id}/cases/${encodeURIComponent(formData.tid)}`, {
+        method: 'PUT',
+        body: formDataObj
+      });
+
+      if (response.ok) {
+        setTimeout(() => {
+          router.push(`/testGroup/${id}/testCase`);
+        }, 1500);
+      }
+    } catch (error) {
+
+    }
+  }
+
+  // キャンセルボタン押下時処理
+  const handleCansel = () => {
     console.log('キャンセルされました');
-    history.back();
-  };
+    router.push(`/testGroup/${id}/testCase`);
+  }
+
+  const buttons = [
+    {
+      label: '更新',
+      onClick: () => {
+        handleEditer();
+      },
+    },
+    {
+      label: '戻る',
+      onClick: handleCansel,
+      isCancel: true
+    }
+  ];
 
   return (
     <div>
       <h1 className="text-lg font-bold">テスト情報</h1>
       <div>
-        <VerticalForm fields={fields} values={sampleValue} />
+        <VerticalForm fields={fields} />
       </div>
-      <div className="my-10"></div>
-      <h1 className="text-lg font-bold">テスト内容</h1>
-      <div className="flex justify-center space-x-4">
-        <TestCaseForm value={[
-          { testCase: 'テストケース1', expectedValue: '期待値1', excluded: true },
-          { testCase: 'テストケース2', expectedValue: '期待値2', excluded: false },
-          { testCase: 'テストケース3', expectedValue: '期待値3', excluded: true }
-        ]} />
+      {/* ファイルアップロードセレクション */}
+      <div className="pb-2 w-4/5 grid gap-4 grid-cols-1">
+        <FileUploadField
+          label="制御仕様書"
+          name="controlSpecFile"
+          value={formData.controlSpecFile}
+          onChange={(e) => handleFileChange('controlSpecFile', e.target.value)}
+          error={''}
+          isCopyable={true}
+        />
+        <FileUploadField
+          label="データフロー"
+          name="dataFlowFile"
+          value={formData.dataFlowFile}
+          onChange={(e) => handleFileChange('dataFlowFile', e.target.value)}
+          error={''}
+          isCopyable={true}
+        />
       </div>
+      {/* テスト内容セクション */}
+      <div className="my-10">
+        <h2 className="text-lg font-bold mb-4">テスト内容</h2>
+        <div className="bg-gray-50 p-4 rounded-md flex justify-center">
+          <TestCaseForm
+            value={testContents}
+            onChange={handleTestContentsChange}
+
+          />
+        </div>
+      </div>
+
       <div className="flex justify-center space-x-4">
-        <Button type="submit" >更新</Button>
-        <Button type="button" className="bg-gray-500 hover:bg-gray-400" onClick={handleCancel}>戻る</Button>
+        <ButtonGroup buttons={buttons} />
       </div>
     </div>
   );

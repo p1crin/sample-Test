@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
     const offset = (page - 1) * limit;
 
     // WHERE句を動的に構築
-    const whereConditions = [`u.is_deleted = ${status || 'FALSE'}`];
+    const whereConditions = [];
     const whereParams: unknown[] = [];
     let paramsIndex = 1;
 
@@ -91,6 +91,11 @@ export async function GET(req: NextRequest) {
       whereParams.push(`${role}`);
       paramsIndex++;
     }
+    if (status !== "") {
+      whereConditions.push(`u.is_deleted = $${paramsIndex}`);
+      whereParams.push(`${status}`);
+      paramsIndex++;
+    }
 
     if (tags.length > 0) {
       const tagPlaceholders = tags.map((_, index) => `$${paramsIndex + index}`).join(',');
@@ -119,8 +124,8 @@ export async function GET(req: NextRequest) {
       queryParams: searchParams,
     });
 
-    // ページネーションように合計件数を取得
-    const countQuery = `SELECT COUNT(*) FROM mt_users u WHERE ${whereClause}`;
+    // ページネーション用に合計件数を取得
+    const countQuery = `SELECT COUNT(*) FROM mt_users u ${whereClause ? `WHERE ${whereClause}` : ''}`;
     const countTimer = new QueryTimer();
     const countResult = await query<{ count: string | number }>(countQuery, whereParams);
     const totalCount = parseInt(String(countResult.rows[0]?.count || '0'), 10);
@@ -149,7 +154,7 @@ export async function GET(req: NextRequest) {
                         WHERE ut.is_deleted = FALSE
                         GROUP BY ut.user_id
                       ) tags ON u.id = tags.user_id
-                       WHERE ${whereClause}
+                       ${whereClause ? `WHERE ${whereClause}` : ''}
                        ORDER BY u.updated_at
                       LIMIT $${limitParamIndex} OFFSET $${offsetParamIndex}`;
 
@@ -192,24 +197,26 @@ export async function GET(req: NextRequest) {
 // POST /api/users - 新しいユーザ情報を作成
 export async function POST(req: NextRequest) {
   const apiTimer = new QueryTimer();
-  let statusCode = STATUS_CODES.CREATED;
 
   try {
     const user = await requireAuth(req);
 
     // ユーザが管理者か確認
     if (!isAdmin(user)) {
-      statusCode = STATUS_CODES.FORBIDDEN;
       logAPIEndpoint({
         method: 'POST',
         endpoint: '/api/users',
         userId: user.id,
-        statusCode,
+        statusCode: STATUS_CODES.FORBIDDEN,
         executionTime: apiTimer.elapsed(),
         error: ERROR_MESSAGES.PERMISSION_DENIED
       });
-      return NextResponse.json(
-        { error: { message: ERROR_MESSAGES.PERMISSION_DENIED }, status: STATUS_CODES.FORBIDDEN }
+      return handleError(
+        new Error(ERROR_MESSAGES.PERMISSION_DENIED),
+        STATUS_CODES.FORBIDDEN,
+        apiTimer,
+        'POST',
+        '/api/users'
       );
     }
 
@@ -229,44 +236,48 @@ export async function POST(req: NextRequest) {
       endpoint: '/api/users',
       userId: user.id,
       executionTime: apiTimer.elapsed(),
-      queryParams: new URLSearchParams(req.url.split('?')[1])
     });
 
     // 必須フィールドをバリデーション
-    if (!email || !name || !department || !company || !user_role || !password) {
-      statusCode = STATUS_CODES.BAD_REQUEST;
+    if (!email || !name || !department || !company || user_role === null || !password) {
       logAPIEndpoint({
         method: 'POST',
         endpoint: '/api/users',
         userId: user.id,
-        statusCode,
+        statusCode: STATUS_CODES.BAD_REQUEST,
         executionTime: apiTimer.elapsed(),
         error: ERROR_MESSAGES.VALIDATION_ERROR_REQUIRED_FIELDS
       });
-      return NextResponse.json(
-        { success: false, error: { message: ERROR_MESSAGES.VALIDATION_ERROR_REQUIRED_FIELDS }, status: STATUS_CODES.BAD_REQUEST }
+      return handleError(
+        new Error(ERROR_MESSAGES.VALIDATION_ERROR_REQUIRED_FIELDS),
+        STATUS_CODES.BAD_REQUEST,
+        apiTimer,
+        'POST',
+        '/api/users'
       );
     }
 
     // メールアドレス重複確認
-    const existingUser = await prisma.mt_users.findFirst({
+    const existingUser = await prisma.mt_users.findUnique({
       where: {
         email: email,
       },
     });
-
     if (existingUser) {
-      statusCode = STATUS_CODES.BAD_REQUEST;
       logAPIEndpoint({
         method: 'POST',
         endpoint: '/api/users',
         userId: user.id,
-        statusCode,
+        statusCode: STATUS_CODES.BAD_REQUEST,
         executionTime: apiTimer.elapsed(),
         error: ERROR_MESSAGES.VALIDATION_ERROR_DUPLICATION_EMAIL
       });
-      return NextResponse.json(
-        { success: false, error: { message: ERROR_MESSAGES.VALIDATION_ERROR_DUPLICATION_EMAIL }, status: STATUS_CODES.BAD_REQUEST }
+      return handleError(
+        new Error(ERROR_MESSAGES.VALIDATION_ERROR_DUPLICATION_EMAIL),
+        STATUS_CODES.BAD_REQUEST,
+        apiTimer,
+        'POST',
+        '/api/users'
       );
     }
 
@@ -276,25 +287,32 @@ export async function POST(req: NextRequest) {
     const passMinlength = 8;
     if (email.length > maxLength || name.length > maxLength || company.length > maxLength
       || (password.length > passMaxLength || password.length < passMinlength)) {
-      statusCode = STATUS_CODES.BAD_REQUEST;
       logAPIEndpoint({
         method: 'POST',
         endpoint: '/api/users',
         userId: user.id,
-        statusCode,
+        statusCode: STATUS_CODES.BAD_REQUEST,
         executionTime: apiTimer.elapsed(),
         error: ERROR_MESSAGES.VALIDATION_ERROR_FIELD_LENGTH_FOR_USER
       });
-      return NextResponse.json(
-        { success: false, error: { message: ERROR_MESSAGES.VALIDATION_ERROR_FIELD_LENGTH_FOR_USER }, status: STATUS_CODES.BAD_REQUEST }
+      return handleError(
+        new Error(ERROR_MESSAGES.VALIDATION_ERROR_FIELD_LENGTH_FOR_USER),
+        STATUS_CODES.BAD_REQUEST,
+        apiTimer,
+        'POST',
+        '/api/users'
       );
     }
 
     //パスワードの文字種のバリデーション
     const passwordPattern = /(?=.*[0-9])(?=.*[a-z])(?=.*[A-Z])(?=.*[!-/:-@[-`{-~])/;
     if (!passwordPattern.test(password)) {
-      return NextResponse.json(
-        { success: false, error: { message: ERROR_MESSAGES.VALIDATION_ERROR_PASSWORD_CONTENT }, status: STATUS_CODES.BAD_REQUEST }
+      return handleError(
+        new Error(ERROR_MESSAGES.VALIDATION_ERROR_PASSWORD_CONTENT),
+        STATUS_CODES.BAD_REQUEST,
+        apiTimer,
+        'POST',
+        '/api/users'
       );
     }
 
@@ -304,17 +322,20 @@ export async function POST(req: NextRequest) {
     }
     if (userTags && Array.isArray(userTags) && userTags.length > 0) {
       if (userTagNgScript(userTags)) {
-        statusCode = STATUS_CODES.BAD_REQUEST;
         logAPIEndpoint({
           method: 'POST',
           endpoint: '/api/users',
           userId: user.id,
-          statusCode,
+          statusCode: STATUS_CODES.BAD_REQUEST,
           executionTime: apiTimer.elapsed(),
           error: ERROR_MESSAGES.VALIDATION_ERROR_NG_USER_TAG
         });
-        return NextResponse.json(
-          { success: false, error: { message: ERROR_MESSAGES.VALIDATION_ERROR_NG_USER_TAG }, status: STATUS_CODES.BAD_REQUEST }
+        return handleError(
+          new Error(ERROR_MESSAGES.VALIDATION_ERROR_NG_USER_TAG),
+          STATUS_CODES.BAD_REQUEST,
+          apiTimer,
+          'POST',
+          '/api/users'
         );
       }
     }
@@ -359,7 +380,7 @@ export async function POST(req: NextRequest) {
         for (const tag of userTags) {
           // タグ名からタグIDを取得
           const tagLookupTimer = new QueryTimer();
-          let foundTag = await tx.mt_tags.findFirst({
+          let foundTag = await tx.mt_tags.findUnique({
             where: {
               name: tag,
               is_deleted: false
@@ -371,7 +392,7 @@ export async function POST(req: NextRequest) {
             table: 'mt_tags',
             executionTime: tagLookupTimer.elapsed(),
             rowsReturned: foundTag ? 1 : 0,
-            query: 'findFirst',
+            query: 'findUnique',
             params: [
               {
                 name: tag
@@ -431,17 +452,16 @@ export async function POST(req: NextRequest) {
       return newUser;
     });
 
-    statusCode = STATUS_CODES.CREATED;
     logAPIEndpoint({
       method: 'POST',
       endpoint: '/api/users',
       userId: user.id,
-      statusCode,
+      statusCode: STATUS_CODES.CREATED,
       executionTime: apiTimer.elapsed(),
       dataSize: 1
     });
 
-    return NextResponse.json({ success: true, status: STATUS_CODES.CREATED, data: userData });
+    return NextResponse.json({ success: true, data: userData }, { status: STATUS_CODES.CREATED });
   } catch (error) {
     return handleError(
       error as Error,

@@ -28,8 +28,7 @@ export function ImportInfo({ labels, values }: ImportInfoProps) {
   const router = useRouter();
 
   const handleCancel = () => {
-    console.log('キャンセルされました');
-    router.push('/importResult', { scroll: false });
+    router.back();
   };
 
   const buttons = [

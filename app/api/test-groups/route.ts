@@ -1,4 +1,4 @@
-import { getAccessibleTestGroups, isAdmin, isTestManager, requireAuth } from '@/app/lib/auth';
+import { canModifyTestGroup, getAccessibleTestGroups, isAdmin, isTestManager, requireAdmin, requireAuth } from '@/app/lib/auth';
 import { prisma } from '@/app/lib/prisma';
 import { ERROR_MESSAGES } from '@/constants/errorMessages';
 import { STATUS_CODES } from '@/constants/statusCodes';
@@ -11,10 +11,8 @@ import { NextRequest, NextResponse } from 'next/server';
 export async function GET(req: NextRequest) {
   const apiTimer = new QueryTimer();
   let statusCode = STATUS_CODES.OK;
-
   try {
     const user = await requireAuth(req);
-
     // アクセス可能なテストグループのIDを取得
     const accessibleIds = await getAccessibleTestGroups(user.id, user.user_role);
 
@@ -122,6 +120,12 @@ export async function GET(req: NextRequest) {
       take: limit,
     });
 
+    // 各テストグループに対してcanModifyTestGroupをチェック
+    const testGroupsWithCanModify = await Promise.all(testGroups.map(async (group) => {
+      const isCanModify = await canModifyTestGroup(user, group.id);
+      return { ...group, isCanModify };
+    }));
+
     logDatabaseQuery({
       operation: 'SELECT',
       table: 'tt_test_groups',
@@ -139,11 +143,11 @@ export async function GET(req: NextRequest) {
       userId: user.id,
       statusCode,
       executionTime: apiTimer.elapsed(),
-      dataSize: testGroups.length,
+      dataSize: testGroupsWithCanModify.length,
       queryParams: searchParams,
     });
 
-    return NextResponse.json({ success: true, data: testGroups, totalCount });
+    return NextResponse.json({ success: true, data: testGroupsWithCanModify, totalCount });
   } catch (error) {
     return handleError(
       error as Error,
@@ -340,7 +344,7 @@ export async function POST(req: NextRequest) {
         for (const tag of tag_names) {
           // タグ名からタグIDを取得
           const tagLookupTimer = new QueryTimer();
-          const foundTag = await tx.mt_tags.findFirst({
+          const foundTag = await tx.mt_tags.findUnique({
             where: {
               name: tag.tag_name,
               is_deleted: false,
@@ -352,7 +356,7 @@ export async function POST(req: NextRequest) {
             table: 'mt_tags',
             executionTime: tagLookupTimer.elapsed(),
             rowsReturned: foundTag ? 1 : 0,
-            query: 'findFirst',
+            query: 'findUnique',
             params: [{ name: tag.tag_name }],
           });
 

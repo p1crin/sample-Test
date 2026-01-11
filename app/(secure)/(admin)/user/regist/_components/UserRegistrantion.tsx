@@ -6,6 +6,7 @@ import { Modal } from '@/components/ui/modal';
 import { VerticalForm } from '@/components/ui/verticalForm';
 import { ROLE_OPTIONS } from '@/constants/constants';
 import { ERROR_MESSAGES } from '@/constants/errorMessages';
+import { UserRole } from '@/types';
 import { apiGet, apiPost } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { useRouter } from 'next/navigation';
@@ -29,7 +30,7 @@ const Resist: React.FC = () => {
     company: '',
     password: '',
     tags: [] as string[],
-    status: '',
+    is_deleted: '',
   });
   const router = useRouter();
 
@@ -92,7 +93,7 @@ const Resist: React.FC = () => {
     clientLogger.info('ユーザ新規登録画面', 'ID(メールアドレス)重複チェック開始', { email: formData.email });
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const result = await apiGet<any>(`/api/users/check-email?email=${formData.email}`);
+      const result = await apiGet<any>(`/api/users/check-email?email=${encodeURIComponent(formData.email)}`);
 
       if (result.success && result.isDuplicate) {
         setErrors(prev => ({
@@ -208,7 +209,8 @@ const Resist: React.FC = () => {
       setIsLoading(true);
 
       // 権限の取得
-      const roleChange = userRoleChange(formData.user_role);
+      const roleChange = formData.user_role === ROLE_OPTIONS.SYSTEM_ADMIN ? UserRole.ADMIN :
+        formData.user_role === ROLE_OPTIONS.TEST_MANAGER ? UserRole.TEST_MANAGER : UserRole.GENERAL;
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await apiPost<any>('/api/users', {
@@ -230,12 +232,12 @@ const Resist: React.FC = () => {
         }, 1500);
       } else {
         clientLogger.error('ユーザ新規登録画面', 'ユーザ新規登録失敗', { error: result.error });
-        setModalMessage(result.error?.message || 'ユーザの登録に失敗しました');
+        setModalMessage('ユーザの登録に失敗しました');
         setIsModalOpen(true);
       }
     } catch (error) {
       clientLogger.error('ユーザ新規登録画面', '新規登録失敗', { error });
-      setModalMessage(error instanceof Error ? error.message : 'エラーが発生しました');
+      setModalMessage('ユーザの登録に失敗しました');
       setIsModalOpen(true);
     } finally {
       setIsLoading(false);
@@ -244,7 +246,7 @@ const Resist: React.FC = () => {
 
   // キャンセルボタン押下時
   const handleCancel = () => {
-    router.push('/user');
+    router.back();
   };
 
   const buttons = [
@@ -269,7 +271,7 @@ const Resist: React.FC = () => {
       {tagError && (
         <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
           <p className="font-bold">タグの読み込みに失敗しました</p>
-          <p className="text-sm">{tagError}</p>
+
         </div>
       )}
       {/* タグ読み込み中の表示 */}

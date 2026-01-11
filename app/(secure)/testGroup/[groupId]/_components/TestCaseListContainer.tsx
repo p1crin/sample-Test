@@ -6,7 +6,7 @@ import ImportButton from '@/components/ui/importButton';
 import Loading from '@/components/ui/loading';
 import { Modal } from '@/components/ui/modal';
 import SeachForm from '@/components/ui/searchForm';
-import { apiGet } from '@/utils/apiClient';
+import { apiDelete, apiGet } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { formatDateJST } from '@/utils/date-formatter';
 import { buildQueryString, updateUrlParams } from '@/utils/queryUtils';
@@ -30,6 +30,10 @@ export function TestCaseListContainer() {
   const [selectedTestCase, setSelectedTestCase] = useState<TestCaseListRow | null>(null);
   const [newid, setNewid] = useState<number | null>(null);
   const [testCaseLoading, setTestCaseLoading] = useState(true);
+  const [canEdit, setCanEdit] = useState(false);
+  const [isDelModalOpen, setIsDelModalOpen] = useState(false);
+  const [delLoading, setDelLoading] = useState(false);
+  const [modalMessage, setModalMessage] = useState('');
 
   const pageSize = 10;
   const router = useRouter();
@@ -38,10 +42,6 @@ export function TestCaseListContainer() {
   const params = useParams();
   const testGroupId = params.groupId;
   const pagePath = `/testGroup/${testGroupId}/testCase`;
-
-  // 権限チェック: テスト管理者(1)または管理者(0)のみが編集・削除・複製可能
-  const { data: session, status } = useSession();
-  const canEdit = session?.user?.user_role !== undefined && session.user.user_role <= 1
 
   // フォーム入力値(リアルタイムで変更)
   const [formValues, setFormValues] = useState<Record<string, string | string[]>>({
@@ -100,6 +100,7 @@ export function TestCaseListContainer() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const result = await apiGet<any>(`/api/test-groups/${testGroupId}/cases?${queryString}`);
         const count = result.totalCount || (result.data ? result.data.length : 0);
+        setCanEdit(result.isCanModify);
         setTotalCount(count);
         setPageCount(Math.ceil(count / pageSize));
 
@@ -118,7 +119,6 @@ export function TestCaseListContainer() {
           page,
           count: result.data.length,
         });
-
       } catch (err: unknown) {
         if (!ignore) setMenuItems([]);
         if (err instanceof Error) {
@@ -171,10 +171,40 @@ export function TestCaseListContainer() {
     router.push(`${pathName}/${id}/edit`);
   };
 
-  const testCaseDelete = () => {
-    if (selectedTestCase) {
-      clientLogger.info('テストケース一覧画面', '削除ボタン押下', selectedTestCase.tid);
-      setIsModalOpen(false);
+  const testCaseDelete = async () => {
+    if (!selectedTestCase) {
+      throw new Error('tid is null');
+    }
+
+    clientLogger.info('テストケース一覧画面', '削除ボタン押下', selectedTestCase.tid);
+    try {
+      setDelLoading(true);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await apiDelete<any>(`/api/test-groups/${testGroupId}/cases/${selectedTestCase.tid}`);
+      if (result.success) {
+        clientLogger.info('テストケース一覧画面', 'テストケース削除成功', { tid: selectedTestCase.tid });
+        // テストケース一覧再描画
+        const queryString = buildQueryString(searchParams, 1, pageSize);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const newList = await apiGet<any>(`/api/test-groups/${testGroupId}/cases?/${queryString}`);
+        const count = newList.totalCount || (newList.data ? newList.data.length : 0);
+        setTotalCount(count);
+        setPageCount(Math.ceil(count / pageSize));
+        setMenuItems(newList.data);
+
+        setModalMessage('テストケースを削除しました');
+        setIsDelModalOpen(true);
+      } else {
+        clientLogger.error('テストケース一覧画面', 'テストケース削除失敗', { error: result.error });
+        setModalMessage('テストケースの削除に失敗しました');
+        setIsDelModalOpen(true);
+      }
+    } catch (error) {
+      clientLogger.error('テストケース一覧画面', 'テストケース削除エラー', { error });
+      setModalMessage('テストケースの削除に失敗しました');
+      setIsDelModalOpen(true);
+    } finally {
+      setDelLoading(false);
     }
   };
 
@@ -281,41 +311,58 @@ export function TestCaseListContainer() {
 
   return (
     <div>
-      <SeachForm fields={fields} values={formValues} onClick={handleSearch} onFormDataChange={handleFormDataChange} />
-      <div className="text-right space-x-2 pb-2">
-        <Button onClick={handleAddTestCase} disabled={!canEdit}>
-          テストケース新規登録
-        </Button>
-        <ImportButton
-          type={'test'}
-          disabled={!canEdit}
-        />
-      </div>
       {/* テストケース一覧データ読み込み中の表示 */}
       <Loading
-        isLoading={testCaseLoading}
-        message="データ読み込み中..."
+        isLoading={delLoading || testCaseLoading}
+        message={delLoading ? "データ削除中..." : "データ読み込み中..."}
         size="md"
       />
-      {!testCaseLoading && (
+      {!testCaseLoading && !delLoading && (
         <>
-          <TestCaseList
-            items={sortedItems}
-            columns={columns}
-            sortConfig={sortConfig}
-            page={page}
-            pageCount={pageCount}
-            onSort={handleSort}
-            onPageChange={handlePageChange}
-            renderActions={renderActions} />
+          <SeachForm fields={fields} values={formValues} onClick={handleSearch} onFormDataChange={handleFormDataChange} /><div className="text-right space-x-2 pb-2">
+            <Button onClick={handleAddTestCase} disabled={!canEdit}>
+              テストケース新規登録
+            </Button>
+            <ImportButton
+              type={'test'}
+              disabled={!canEdit} />
+          </div>
+          {sortedItems.length > 0 ? (
+            <TestCaseList
+              items={sortedItems}
+              columns={columns}
+              sortConfig={sortConfig}
+              page={page}
+              pageCount={pageCount}
+              onSort={handleSort}
+              onPageChange={handlePageChange}
+              renderActions={renderActions}
+            />
+          ) : (
+            <div className="text-gray-500 text-center py-8">テストケースがありません</div>
+          )}
+          <Modal open={isModalOpen} onClose={() => setIsModalOpen(false)}>
+            <p className="mb-8">本当にこのテストケースを削除しますか？</p>
+            {selectedTestCase && <p className="mb-8">対象テストケース: {selectedTestCase.tid}</p>}
+            <div className="flex justify-center space-x-5">
+              <Button className="w-24 bg-red-600 text-white" onClick={
+                () => {
+                  setIsModalOpen(false)
+                  testCaseDelete();
+                }}>削除</Button>
+              <Button className="w-24 bg-gray-500 hover:bg-gray-400" onClick={() => setIsModalOpen(false)}>閉じる</Button>
+            </div>
+          </Modal>
         </>
       )}
-      <Modal open={isModalOpen} onClose={() => setIsModalOpen(false)}>
-        <p className="mb-8">本当にこのテストケースを削除しますか？</p>
-        {selectedTestCase && <p className="mb-8">対象テストケース: {selectedTestCase.tid}</p>}
-        <div className="flex justify-center space-x-5">
-          <Button className="w-24 bg-red-600 text-white" onClick={testCaseDelete}>削除</Button>
-          <Button className="w-24 bg-gray-500 hover:bg-gray-400" onClick={() => setIsModalOpen(false)}>閉じる</Button>
+      <Modal open={isDelModalOpen} onClose={() => setIsDelModalOpen(false)}>
+        <p className="mb-8 text-black font-bold text-center">
+          {modalMessage}
+        </p>
+        <div className="flex justify-center">
+          <Button className="w-24 bg-gray-500 hover:bg-gray-400" onClick={() => setIsDelModalOpen(false)}>
+            閉じる
+          </Button>
         </div>
       </Modal>
     </div>

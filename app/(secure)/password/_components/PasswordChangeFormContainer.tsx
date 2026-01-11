@@ -1,16 +1,15 @@
 'use client';
+import { Button } from '@/components/ui/button';
 import ButtonGroup from '@/components/ui/buttonGroup';
+import { Modal } from '@/components/ui/modal';
 import { VerticalForm } from '@/components/ui/verticalForm';
+import { ERROR_MESSAGES } from '@/constants/errorMessages';
 import { clearAuthSession } from '@/stores/feature/auth';
+import { apiPut } from '@/utils/apiClient';
+import clientLogger from '@/utils/client-logger';
 import { signOut } from 'next-auth/react';
 import { useState } from 'react';
 import { passwordChangeSchema } from './schemas/password-change-schema';
-import clientLogger from '@/utils/client-logger';
-import { Button } from '@/components/ui/button';
-import { Modal } from '@/components/ui/modal';
-import { STATUS_CODES } from '@/constants/statusCodes';
-import { ERROR_MESSAGES } from '@/constants/errorMessages';
-import { apiPut } from '@/utils/apiClient';
 
 export function PasswordChangeFormContainer() {
   const [isLoading, setIsLoading] = useState(false);
@@ -82,12 +81,12 @@ export function PasswordChangeFormContainer() {
         }, 1500);
       } else {
         clientLogger.error('パスワード変更画面', 'パスワード変更失敗', { error: result.error });
-        setModalMessage(result.error?.message || 'パスワード変更に失敗しました');
+        setModalMessage('パスワード変更に失敗しました');
         setIsModalOpen(true);
       }
     } catch (error) {
       clientLogger.error('パスワード変更画面', 'パスワード変更失敗', { error });
-      setModalMessage(error instanceof Error ? error.message : 'エラーが発生しました');
+      setModalMessage('パスワード変更に失敗しました');
       setIsModalOpen(true);
     } finally {
       setIsLoading(false);
