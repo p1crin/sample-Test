@@ -128,8 +128,9 @@ export function TestCaseEditFormContainer() {
         }
         setForm(fomatTestGroupEditData);
         setTestContents(editData.contents);
+        setEditLoading(false);
 
-        clientLogger.info('TestCaseEditFormContainer', 'データ取得成功', { data: testCaseEditData.data.testCase.tid });
+        clientLogger.info('TestCaseEditFormContainer', 'データ取得成功', { tid: editData.tid });
       } catch (err) {
         clientLogger.error('TestCaseEditFormContainer', 'データ取得失敗', {
           error: err instanceof Error ? err.message : String(err),

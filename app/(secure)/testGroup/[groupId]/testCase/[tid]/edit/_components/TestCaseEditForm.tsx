@@ -32,6 +32,17 @@ export type TestCase = {
   selected: boolean;
 };
 
+// 削除されたファイルの情報
+export type DeletedFile = {
+  fileNo: number;
+  fileType: number; // 1: controlSpec, 2: dataFlow
+};
+
+// 削除されたテスト内容の情報
+export type DeletedContent = {
+  testCaseNo: number;
+};
+
 export function TestCaseEditForm({
   id,
   form,
@@ -42,6 +53,10 @@ export function TestCaseEditForm({
   const [testContents, setTestContents] = useState<[] | TestCase[]>([]);
   const [editError, setEditErrors] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // 削除追跡用ステート
+  const [deletedFiles, setDeletedFiles] = useState<DeletedFile[]>([]);
+  const [deletedContents, setDeletedContents] = useState<DeletedContent[]>([]);
 
   // テストケースのフォーマットの各値取得
   useEffect(() => {
@@ -72,11 +87,22 @@ export function TestCaseEditForm({
     }
   };
 
-  const handleFileChange = (fieldName: string, files: FileInfo[]) => {
+  const handleFileChange = (fieldName: string, files: FileInfo[], deletedFile?: FileInfo) => {
+    // 削除されたファイルがある場合、削除リストに追加
+    if (deletedFile && deletedFile.fileNo !== undefined) {
+      const fileType = fieldName === 'controlSpecFile' ? 1 : 2;
+      setDeletedFiles(prev => [...prev, { fileNo: deletedFile.fileNo, fileType }]);
+    }
+
     setFormData(prev => ({
       ...prev,
       [fieldName]: files
     }));
+  };
+
+  // テスト内容が削除されたときのハンドラー
+  const handleTestContentDelete = (deletedDbId: number) => {
+    setDeletedContents(prev => [...prev, { testCaseNo: deletedDbId }]);
   };
 
   const fields = [
@@ -179,7 +205,7 @@ export function TestCaseEditForm({
     // // バリデーション成功時にエラークリア
     // setEditErrors({});
 
-    clientLogger.info('テストケース編集画面', 'テストケース更新開始', { formData, testContents });
+    clientLogger.info('テストケース編集画面', 'テストケース更新開始', { formData, testContents, deletedFiles, deletedContents });
 
     try {
       const formDataObj = new FormData();
@@ -205,6 +231,16 @@ export function TestCaseEditForm({
         formDataObj.append('testContents', JSON.stringify(testContents));
       }
 
+      // 削除されたファイルのリストを送信
+      if (deletedFiles.length > 0) {
+        formDataObj.append('deletedFiles', JSON.stringify(deletedFiles));
+      }
+
+      // 削除されたテスト内容のリストを送信
+      if (deletedContents.length > 0) {
+        formDataObj.append('deletedContents', JSON.stringify(deletedContents));
+      }
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const response = await apiFetch(`/api/test-groups/${id}/cases/${encodeURIComponent(formData.tid)}`, {
         method: 'PUT',
@@ -217,7 +253,7 @@ export function TestCaseEditForm({
         }, 1500);
       }
     } catch (error) {
-
+      clientLogger.error('テストケース編集画面', 'テストケース更新失敗', { error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -253,7 +289,7 @@ export function TestCaseEditForm({
           label="制御仕様書"
           name="controlSpecFile"
           value={formData.controlSpecFile}
-          onChange={(e) => handleFileChange('controlSpecFile', e.target.value)}
+          onChange={(e, deletedFile) => handleFileChange('controlSpecFile', e.target.value, deletedFile)}
           error={''}
           isCopyable={true}
         />
@@ -261,7 +297,7 @@ export function TestCaseEditForm({
           label="データフロー"
           name="dataFlowFile"
           value={formData.dataFlowFile}
-          onChange={(e) => handleFileChange('dataFlowFile', e.target.value)}
+          onChange={(e, deletedFile) => handleFileChange('dataFlowFile', e.target.value, deletedFile)}
           error={''}
           isCopyable={true}
         />
@@ -273,7 +309,7 @@ export function TestCaseEditForm({
           <TestCaseForm
             value={testContents}
             onChange={handleTestContentsChange}
-
+            onDelete={handleTestContentDelete}
           />
         </div>
       </div>

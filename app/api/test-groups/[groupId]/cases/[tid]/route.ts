@@ -6,7 +6,7 @@ import { logAPIEndpoint, logDatabaseQuery, QueryTimer } from '@/utils/database-l
 import { handleError } from '@/utils/errorHandler';
 import { FileInfo } from '@/utils/fileUtils';
 import { existsSync } from 'fs';
-import { mkdir, rm } from 'fs/promises';
+import { mkdir, rm, writeFile } from 'fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
 import { join } from 'path';
 
@@ -134,6 +134,7 @@ export async function GET(
         file_no: file.file_no
       })),
       contents: testContents.map(content => ({
+        id: content.test_case_no,
         testCase: content.test_case,
         expectedValue: content.expected_value,
         is_target: content.is_target
@@ -212,6 +213,12 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ grou
     const testContentsStr = editFormData.get('testContents') as string;
 
     const testContents = testContentsStr ? JSON.parse(testContentsStr) : [];
+
+    // 削除リストを取得
+    const deletedFilesStr = editFormData.get('deletedFiles') as string;
+    const deletedContentsStr = editFormData.get('deletedContents') as string;
+    const deletedFiles = deletedFilesStr ? JSON.parse(deletedFilesStr) : [];
+    const deletedContents = deletedContentsStr ? JSON.parse(deletedContentsStr) : [];
 
     const controlSpecFiles: FileInfo[] = [];
     const dataFlowFiles: FileInfo[] = [];
@@ -301,6 +308,29 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ grou
         }
       });
 
+      // 削除されたテスト内容を削除
+      for (const deletedContent of deletedContents) {
+        await tx.tt_test_contents.deleteMany({
+          where: {
+            test_group_id: testGroupId,
+            tid: tid,
+            test_case_no: deletedContent.testCaseNo
+          }
+        });
+      }
+
+      // 削除されたファイルを削除
+      for (const deletedFile of deletedFiles) {
+        await tx.tt_test_case_files.deleteMany({
+          where: {
+            test_group_id: testGroupId,
+            tid: tid,
+            file_no: deletedFile.fileNo,
+            file_type: deletedFile.fileType === 1 ? 0 : 1 // fileType: 1=controlSpec(DB:0), 2=dataFlow(DB:1)
+          }
+        });
+      }
+
       // ファイル保存処理
       const uploadDir = join(process.cwd(), 'public', 'uploads', 'test-cases', String(testGroupId), tid);
 
@@ -309,44 +339,102 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ grou
         await mkdir(uploadDir, { recursive: true });
       }
 
-      // tt_test_case_filesの内容を更新
-      await tx.tt_test_case_files.deleteMany({
-        where: {
-          test_group_id: testGroupId,
-          tid: tid
+      // 制御仕様書ファイル保存・更新
+      for (const file of controlSpecFiles) {
+        if (file.fileNo !== undefined && file.path) {
+          // 既存ファイル：パスとファイル名のみ更新可能
+          await tx.tt_test_case_files.updateMany({
+            where: {
+              test_group_id: testGroupId,
+              tid: tid,
+              file_type: 0,
+              file_no: file.fileNo
+            },
+            data: {
+              file_name: file.name,
+              file_path: file.path
+            }
+          });
+        } else if (file.base64) {
+          // 新規ファイル：base64データがある場合のみ作成
+          const controlSpecFileName = `control_spec_${Date.now()}_${file.name}`;
+          const controlSpecPath = join(uploadDir, controlSpecFileName);
+          const buffer = Buffer.from(file.base64, 'base64');
+          await writeFile(controlSpecPath, buffer);
+
+          // 最大file_noを取得して+1
+          const maxFileNo = await tx.tt_test_case_files.findFirst({
+            where: {
+              test_group_id: testGroupId,
+              tid: tid,
+              file_type: 0
+            },
+            orderBy: {
+              file_no: 'desc'
+            }
+          });
+          const newFileNo = (maxFileNo?.file_no ?? 0) + 1;
+
+          await tx.tt_test_case_files.create({
+            data: {
+              test_group_id: testGroupId,
+              tid: tid,
+              file_type: 0,
+              file_no: newFileNo,
+              file_name: file.name,
+              file_path: `/uploads/test-cases/${testGroupId}/${tid}/${controlSpecFileName}`,
+            }
+          });
         }
-      });
-
-      // 制御仕様書ファイル保存
-      for (const [index, file] of controlSpecFiles.entries()) {
-        const controlSpecFileName = `control_spec_${Date.now()}_${index}_${file.name}`;
-
-        await tx.tt_test_case_files.create({
-          data: {
-            test_group_id: testGroupId,
-            tid: tid,
-            file_type: 0,
-            file_no: index + 1,
-            file_name: file.name,
-            file_path: `/uploads/test-cases/${testGroupId}/${tid}/${controlSpecFileName}`,
-          }
-        });
       }
 
-      // データフローファイル保存
-      for (const [index, file] of dataFlowFiles.entries()) {
-        const dataFlowFileName = `control_spec_${Date.now()}_${index}_${file.name}`;
+      // データフローファイル保存・更新
+      for (const file of dataFlowFiles) {
+        if (file.fileNo !== undefined && file.path) {
+          // 既存ファイル：パスとファイル名のみ更新可能
+          await tx.tt_test_case_files.updateMany({
+            where: {
+              test_group_id: testGroupId,
+              tid: tid,
+              file_type: 1,
+              file_no: file.fileNo
+            },
+            data: {
+              file_name: file.name,
+              file_path: file.path
+            }
+          });
+        } else if (file.base64) {
+          // 新規ファイル：base64データがある場合のみ作成
+          const dataFlowFileName = `data_flow_${Date.now()}_${file.name}`;
+          const dataFlowPath = join(uploadDir, dataFlowFileName);
+          const buffer = Buffer.from(file.base64, 'base64');
+          await writeFile(dataFlowPath, buffer);
 
-        await tx.tt_test_case_files.create({
-          data: {
-            test_group_id: testGroupId,
-            tid: tid,
-            file_type: 1,
-            file_no: index + 1,
-            file_name: file.name,
-            file_path: `/uploads/test-cases/${testGroupId}/${tid}/${dataFlowFileName}`,
-          }
-        });
+          // 最大file_noを取得して+1
+          const maxFileNo = await tx.tt_test_case_files.findFirst({
+            where: {
+              test_group_id: testGroupId,
+              tid: tid,
+              file_type: 1
+            },
+            orderBy: {
+              file_no: 'desc'
+            }
+          });
+          const newFileNo = (maxFileNo?.file_no ?? 0) + 1;
+
+          await tx.tt_test_case_files.create({
+            data: {
+              test_group_id: testGroupId,
+              tid: tid,
+              file_type: 1,
+              file_no: newFileNo,
+              file_name: file.name,
+              file_path: `/uploads/test-cases/${testGroupId}/${tid}/${dataFlowFileName}`,
+            }
+          });
+        }
       }
 
       //
@@ -371,7 +459,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ grou
             test_case_no: testCaseNo,
             test_case: content.testCase,
             expected_value: content.expectedValue,
-            is_target: !content.is_target,
+            is_target: content.is_target,
           }
         })
         testCaseNo++;

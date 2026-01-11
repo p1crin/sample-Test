@@ -16,6 +16,10 @@ export interface FileInfo {
   type?: string;
   /** ファイルパス */
   path?: string;
+  /** ファイル番号（データベースのID） */
+  fileNo?: number;
+  /** ファイル種別（1: 制御仕様書, 2: データフロー） */
+  fileType?: number;
 }
 
 /**

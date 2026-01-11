@@ -3,7 +3,8 @@ import { Modal } from '@/components/ui/modal';
 import React, { useEffect, useRef, useState } from 'react';
 
 type TestCase = {
-  id: number;
+  id: number;              // クライアント側のユニークID（レンダリング用）
+  dbId?: number;           // データベースのID（編集時に既存データから取得）
   testCase: string;
   expectedValue: string;
   is_target: boolean;
@@ -11,8 +12,9 @@ type TestCase = {
 };
 
 type TestCaseFormProps = {
-  value?: { testCase: string; expectedValue: string; is_target: boolean }[];
+  value?: { testCase: string; expectedValue: string; is_target: boolean; id?: number }[];
   onChange?: (testCases: { testCase: string; expectedValue: string; is_target: boolean }[]) => void;
+  onDelete?: (deletedDbId: number) => void; // 削除されたDBのIDを通知
   errors?: Record<string, string>;
 };
 
@@ -25,7 +27,7 @@ const generateId = () => {
   return idCounter;
 };
 
-const TestCaseForm: React.FC<TestCaseFormProps> = ({ value, onChange, errors = {} }) => {
+const TestCaseForm: React.FC<TestCaseFormProps> = ({ value, onChange, onDelete, errors = {} }) => {
   const [testCases, setTestCases] = useState<TestCase[]>([]);
   const [allChecked, setAllChecked] = useState(true);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -41,7 +43,10 @@ const TestCaseForm: React.FC<TestCaseFormProps> = ({ value, onChange, errors = {
       isInitializedRef.current = true;
       setTestCases(value.map((testCase) => ({
         id: generateId(),
-        ...testCase,
+        dbId: testCase.id, // データベースのIDを保持
+        testCase: testCase.testCase,
+        expectedValue: testCase.expectedValue,
+        is_target: testCase.is_target,
         selected: true
       })));
       setIsFormVisible(true);
@@ -73,6 +78,14 @@ const TestCaseForm: React.FC<TestCaseFormProps> = ({ value, onChange, errors = {
   };
 
   const handleRemoveRow = (id: number) => {
+    // 削除対象のテストケースを取得
+    const deletedTestCase = testCases.find((testCase) => testCase.id === id);
+
+    // DBのIDがある場合（既存データの場合）は親に通知
+    if (deletedTestCase?.dbId && onDelete) {
+      onDelete(deletedTestCase.dbId);
+    }
+
     const newTestCases = testCases.filter((testCase) => testCase.id !== id);
     setTestCases(newTestCases);
     notifyParent(newTestCases);

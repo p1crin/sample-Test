@@ -13,7 +13,7 @@ export interface FileUploadFieldProps {
   /** 入力フィールドの値 (カンマ区切りのファイル名またはFileInfo配列) */
   value: string | FileInfo[];
   /** ファイルが変更されたときに呼び出される関数 */
-  onChange: (e: { target: { name: string; value: FileInfo[] } }) => void;
+  onChange: (e: { target: { name: string; value: FileInfo[] } }, deletedFile?: FileInfo) => void;
   /** プレースホルダーのテキスト (オプション) */
   placeholder?: string;
   /** コピペ可能/不可能 (オプション) */
@@ -87,9 +87,10 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
    * ファイル削除のハンドラー
    */
   const handleRemoveFile = (index: number) => {
+    const deletedFile = files[index]; // 削除対象のファイル情報を保持
     const newFiles = files.filter((_, i) => i !== index);
     setFiles(newFiles);
-    onChange({ target: { name, value: newFiles } });
+    onChange({ target: { name, value: newFiles } }, deletedFile);
   };
 
   const defaultPlaceholder = isCopyable
