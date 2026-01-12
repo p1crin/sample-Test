@@ -14,6 +14,8 @@ export interface FileUploadFieldProps {
   value: string | FileInfo[];
   /** ファイルが変更されたときに呼び出される関数 */
   onChange: (e: { target: { name: string; value: FileInfo[] } }, deletedFile?: FileInfo) => void;
+  /** ファイルアップロード処理（オプション）- 設定された場合、ファイル選択時に即座にアップロード */
+  onFileUpload?: (file: FileInfo) => Promise<FileInfo>;
   /** プレースホルダーのテキスト (オプション) */
   placeholder?: string;
   /** コピペ可能/不可能 (オプション) */
@@ -33,11 +35,13 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
   name,
   value,
   onChange,
+  onFileUpload,
   placeholder,
   isCopyable = true,
   error
 }) => {
   const [files, setFiles] = useState<FileInfo[]>([]);
+  const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 初期値の設定: 文字列の場合はファイル名の配列として扱う
@@ -58,7 +62,24 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
     if (items.length === 0 || items[0].kind !== 'file') return;
 
     const newFiles = await processClipboardItems(items);
-    const uniqueFiles = getUniqueFileNames([...files, ...newFiles]);
+
+    // アップロード処理が設定されている場合は各ファイルをアップロード
+    let processedFiles = newFiles;
+    if (onFileUpload) {
+      setUploading(true);
+      try {
+        processedFiles = await Promise.all(
+          newFiles.map(file => onFileUpload(file))
+        );
+      } catch (error) {
+        console.error('File upload failed:', error);
+        setUploading(false);
+        return;
+      }
+      setUploading(false);
+    }
+
+    const uniqueFiles = getUniqueFileNames([...files, ...processedFiles]);
 
     setFiles(uniqueFiles);
     onChange({ target: { name, value: uniqueFiles } });
@@ -72,7 +93,24 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
     if (!fileList || fileList.length === 0) return;
 
     const newFiles = await processFileList(fileList);
-    const uniqueFiles = getUniqueFileNames([...files, ...newFiles]);
+
+    // アップロード処理が設定されている場合は各ファイルをアップロード
+    let processedFiles = newFiles;
+    if (onFileUpload) {
+      setUploading(true);
+      try {
+        processedFiles = await Promise.all(
+          newFiles.map(file => onFileUpload(file))
+        );
+      } catch (error) {
+        console.error('File upload failed:', error);
+        setUploading(false);
+        return;
+      }
+      setUploading(false);
+    }
+
+    const uniqueFiles = getUniqueFileNames([...files, ...processedFiles]);
 
     setFiles(uniqueFiles);
     onChange({ target: { name, value: uniqueFiles } });
@@ -117,8 +155,9 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
               type="button"
               onClick={() => fileInputRef.current?.click()}
               className="whitespace-nowrap"
+              disabled={uploading}
             >
-              ファイルを選択
+              {uploading ? 'アップロード中...' : 'ファイルを選択'}
             </Button>
             <input
               type="file"
@@ -126,6 +165,7 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
               ref={fileInputRef}
               onChange={handleFileChange}
               style={{ display: 'none' }}
+              disabled={uploading}
             />
           </div>
         </div>

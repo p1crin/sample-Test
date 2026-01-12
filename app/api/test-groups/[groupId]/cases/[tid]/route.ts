@@ -4,11 +4,36 @@ import { ERROR_MESSAGES } from '@/constants/errorMessages';
 import { STATUS_CODES } from '@/constants/statusCodes';
 import { logAPIEndpoint, logDatabaseQuery, QueryTimer } from '@/utils/database-logger';
 import { handleError } from '@/utils/errorHandler';
-import { FileInfo } from '@/utils/fileUtils';
-import { existsSync } from 'fs';
-import { mkdir, rm, writeFile } from 'fs/promises';
+import { rm } from 'fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
 import { join } from 'path';
+
+/**
+ * ========================
+ * AWS S3移行時の変更点（DELETE /api/test-groups/[groupId]/cases/[tid]）
+ * ========================
+ *
+ * 【必要なライブラリ】
+ * npm install @aws-sdk/client-s3
+ *
+ * 【インポート追加】
+ * import { S3Client, ListObjectsV2Command, DeleteObjectsCommand } from '@aws-sdk/client-s3';
+ *
+ * 【環境変数の追加（.env.local）】
+ * AWS_REGION=ap-northeast-1
+ * AWS_S3_BUCKET_NAME=your-bucket-name
+ * AWS_ACCESS_KEY_ID=your-access-key-id
+ * AWS_SECRET_ACCESS_KEY=your-secret-access-key
+ *
+ * 【S3クライアントの初期化（ファイル上部に追加）】
+ * const s3Client = new S3Client({
+ *   region: process.env.AWS_REGION,
+ *   credentials: {
+ *     accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+ *     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+ *   },
+ * });
+ */
 
 // GET /api/test-groups/[groupId]/cases/[tid] - テストケース詳細を取得
 export async function GET(
@@ -107,7 +132,7 @@ export async function GET(
       },
     });
 
-    // レスポンスデータをフォーマット
+    // ==================== レスポンスデータをフォーマット（現在の実装：ローカルパス） ====================
     const responseData = {
       test_group_id: testCase.test_group_id,
       tid: testCase.tid,
@@ -123,13 +148,13 @@ export async function GET(
       updated_at: testCase.updated_at,
       control_spec: testCaseFiles.filter(file => file.file_type === 0).map(file => ({
         file_name: file.file_name,
-        file_path: file.file_path,
+        file_path: file.file_path, // ローカル: /uploads/test-cases/...
         file_type: file.file_type,
         file_no: file.file_no
       })),
       data_flow: testCaseFiles.filter(file => file.file_type === 1).map(file => ({
         file_name: file.file_name,
-        file_path: file.file_path,
+        file_path: file.file_path, // ローカル: /uploads/test-cases/...
         file_type: file.file_type,
         file_no: file.file_no
       })),
@@ -140,6 +165,62 @@ export async function GET(
         is_target: content.is_target
       }))
     };
+
+    /**
+     * ==================== AWS S3からファイル取得（移行後の実装） ====================
+     *
+     * 【インポート追加】
+     * import { GetObjectCommand } from '@aws-sdk/client-s3';
+     * import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+     *
+     * 【file_pathを署名付きURLに変換する場合の実装例】
+     * S3キーをfile_pathに保存している場合、フロントエンドでアクセス可能な署名付きURLを生成する必要があります。
+     *
+     * // 署名付きURL生成のヘルパー関数
+     * async function generatePresignedUrl(s3Key: string): Promise<string> {
+     *   const command = new GetObjectCommand({
+     *     Bucket: process.env.AWS_S3_BUCKET_NAME,
+     *     Key: s3Key,
+     *   });
+     *
+     *   // 署名付きURL（有効期限：3600秒 = 1時間）
+     *   const signedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+     *   return signedUrl;
+     * }
+     *
+     * // レスポンスデータのフォーマット時に署名付きURLを生成
+     * const responseData = {
+     *   // ... 他のフィールド
+     *   control_spec: await Promise.all(
+     *     testCaseFiles.filter(file => file.file_type === 0).map(async file => ({
+     *       file_name: file.file_name,
+     *       file_path: await generatePresignedUrl(file.file_path), // 署名付きURLに変換
+     *       file_type: file.file_type,
+     *       file_no: file.file_no
+     *     }))
+     *   ),
+     *   data_flow: await Promise.all(
+     *     testCaseFiles.filter(file => file.file_type === 1).map(async file => ({
+     *       file_name: file.file_name,
+     *       file_path: await generatePresignedUrl(file.file_path), // 署名付きURLに変換
+     *       file_type: file.file_type,
+     *       file_no: file.file_no
+     *     }))
+     *   ),
+     *   // ...
+     * };
+     *
+     * 【注意点】
+     * 1. 署名付きURLには有効期限がある（上記例：1時間）
+     * 2. 有効期限が切れた後は再度APIを呼び出してURLを取得する必要がある
+     * 3. パブリックアクセスを許可する場合は署名なしの直URLを返すことも可能
+     * 4. 大量のファイルがある場合、URL生成に時間がかかる可能性がある
+     * 5. セキュリティ要件に応じてURLの有効期限を調整する
+     *
+     * 【別のアプローチ：専用のファイルダウンロードAPIを作成】
+     * GET /api/files/download?fileNo=123&fileType=0&testGroupId=1&tid=TID-001
+     * このAPIで署名付きURLを生成してリダイレクトまたは返す方が管理しやすい場合もあります。
+     */
 
     statusCode = STATUS_CODES.OK;
     logAPIEndpoint({
@@ -200,44 +281,23 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ grou
       );
     }
 
-    // FormData をパース
-    const editFormData = await req.formData();
-    const firstLayer = editFormData.get('firstLayer') as string;
-    const secondLayer = editFormData.get('secondLayer') as string;
-    const thirdLayer = editFormData.get('thirdLayer') as string;
-    const fourthLayer = editFormData.get('fourthLayer') as string;
-    const purpose = editFormData.get('purpose') as string;
-    const requestId = editFormData.get('requestId') as string;
-    const checkItems = editFormData.get('checkItems') as string;
-    const testProcedure = editFormData.get('testProcedure') as string;
-    const testContentsStr = editFormData.get('testContents') as string;
-
-    const testContents = testContentsStr ? JSON.parse(testContentsStr) : [];
-
-    // 削除リストを取得
-    const deletedFilesStr = editFormData.get('deletedFiles') as string;
-    const deletedContentsStr = editFormData.get('deletedContents') as string;
-    const deletedFiles = deletedFilesStr ? JSON.parse(deletedFilesStr) : [];
-    const deletedContents = deletedContentsStr ? JSON.parse(deletedContentsStr) : [];
-
-    const controlSpecFiles: FileInfo[] = [];
-    const dataFlowFiles: FileInfo[] = [];
-
-    // controlSpecFile[0], controlSpecFile[1], ... をパース
-    let controlSpecIndex = 0;
-    while (editFormData.has(`controlSpecFile[${controlSpecIndex}]`)) {
-      const fileStr = editFormData.get(`controlSpecFile[${controlSpecIndex}]`) as string;
-      controlSpecFiles.push(JSON.parse(fileStr));
-      controlSpecIndex++;
-    }
-
-    // dataFlowFile[0], dataFlowFile[1], ... をパース
-    let dataFlowIndex = 0;
-    while (editFormData.has(`dataFlowFile[${dataFlowIndex}]`)) {
-      const fileStr = editFormData.get(`dataFlowFile[${dataFlowIndex}]`) as string;
-      dataFlowFiles.push(JSON.parse(fileStr));
-      dataFlowIndex++;
-    }
+    // JSONボディをパース
+    const body = await req.json();
+    const {
+      firstLayer,
+      secondLayer,
+      thirdLayer,
+      fourthLayer,
+      purpose,
+      requestId,
+      checkItems,
+      testProcedure,
+      testContents = [],
+      controlSpecFileIds = [],
+      dataFlowFileIds = [],
+      deletedFiles = [],
+      deletedContents = [],
+    } = body;
 
     logAPIEndpoint({
       method: 'PUT',
@@ -319,123 +379,70 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ grou
         });
       }
 
-      // 削除されたファイルを削除
+      // ==================== 削除されたファイルを削除（現在の実装：ローカルディスク） ====================
       for (const deletedFile of deletedFiles) {
+        // データベースからファイル情報を取得
+        const fileRecord = await tx.tt_test_case_files.findFirst({
+          where: {
+            test_group_id: testGroupId,
+            tid: tid,
+            file_no: deletedFile.fileNo,
+            file_type: deletedFile.fileType // 0=controlSpec, 1=dataFlow
+          }
+        });
+
+        // 物理ファイルを削除
+        if (fileRecord?.file_path) {
+          const filePath = join(process.cwd(), 'public', fileRecord.file_path);
+          try {
+            await rm(filePath, { force: true });
+          } catch (error) {
+            // ファイルが既に存在しない場合はエラーを無視
+            console.warn(`Failed to delete file: ${filePath}`, error);
+          }
+        }
+
+        /**
+         * ==================== AWS S3からファイル削除（移行後の実装） ====================
+         *
+         * 【上記のローカルファイル削除を以下のS3削除に置き換える】
+         *
+         * if (fileRecord?.file_path) {
+         *   // S3キーを取得
+         *   const s3Key = fileRecord.file_path;
+         *
+         *   // S3から削除
+         *   const deleteCommand = new DeleteObjectCommand({
+         *     Bucket: process.env.AWS_S3_BUCKET_NAME,
+         *     Key: s3Key,
+         *   });
+         *
+         *   try {
+         *     await s3Client.send(deleteCommand);
+         *   } catch (s3Error) {
+         *     console.warn(`Failed to delete file from S3: ${s3Key}`, s3Error);
+         *   }
+         * }
+         *
+         * 【注意点】
+         * - トランザクション内でS3削除を実行するが、S3はトランザクションをサポートしていない
+         * - DBロールバックが発生してもS3削除は取り消されない
+         * - S3削除が失敗してもトランザクションを継続するか判断が必要
+         */
+
+        // データベースから削除
         await tx.tt_test_case_files.deleteMany({
           where: {
             test_group_id: testGroupId,
             tid: tid,
             file_no: deletedFile.fileNo,
-            file_type: deletedFile.fileType === 1 ? 0 : 1 // fileType: 1=controlSpec(DB:0), 2=dataFlow(DB:1)
+            file_type: deletedFile.fileType // 0=controlSpec, 1=dataFlow
           }
         });
       }
 
-      // ファイル保存処理
-      const uploadDir = join(process.cwd(), 'public', 'uploads', 'test-cases', String(testGroupId), tid);
-
-      // ディレクトリが存在しない場合は作成
-      if (!existsSync(uploadDir)) {
-        await mkdir(uploadDir, { recursive: true });
-      }
-
-      // 制御仕様書ファイル保存・更新
-      for (const file of controlSpecFiles) {
-        if (file.fileNo !== undefined && file.path) {
-          // 既存ファイル：パスとファイル名のみ更新可能
-          await tx.tt_test_case_files.updateMany({
-            where: {
-              test_group_id: testGroupId,
-              tid: tid,
-              file_type: 0,
-              file_no: file.fileNo
-            },
-            data: {
-              file_name: file.name,
-              file_path: file.path
-            }
-          });
-        } else if (file.base64) {
-          // 新規ファイル：base64データがある場合のみ作成
-          const controlSpecFileName = `control_spec_${Date.now()}_${file.name}`;
-          const controlSpecPath = join(uploadDir, controlSpecFileName);
-          const buffer = Buffer.from(file.base64, 'base64');
-          await writeFile(controlSpecPath, buffer);
-
-          // 最大file_noを取得して+1
-          const maxFileNo = await tx.tt_test_case_files.findFirst({
-            where: {
-              test_group_id: testGroupId,
-              tid: tid,
-              file_type: 0
-            },
-            orderBy: {
-              file_no: 'desc'
-            }
-          });
-          const newFileNo = (maxFileNo?.file_no ?? 0) + 1;
-
-          await tx.tt_test_case_files.create({
-            data: {
-              test_group_id: testGroupId,
-              tid: tid,
-              file_type: 0,
-              file_no: newFileNo,
-              file_name: file.name,
-              file_path: `/uploads/test-cases/${testGroupId}/${tid}/${controlSpecFileName}`,
-            }
-          });
-        }
-      }
-
-      // データフローファイル保存・更新
-      for (const file of dataFlowFiles) {
-        if (file.fileNo !== undefined && file.path) {
-          // 既存ファイル：パスとファイル名のみ更新可能
-          await tx.tt_test_case_files.updateMany({
-            where: {
-              test_group_id: testGroupId,
-              tid: tid,
-              file_type: 1,
-              file_no: file.fileNo
-            },
-            data: {
-              file_name: file.name,
-              file_path: file.path
-            }
-          });
-        } else if (file.base64) {
-          // 新規ファイル：base64データがある場合のみ作成
-          const dataFlowFileName = `data_flow_${Date.now()}_${file.name}`;
-          const dataFlowPath = join(uploadDir, dataFlowFileName);
-          const buffer = Buffer.from(file.base64, 'base64');
-          await writeFile(dataFlowPath, buffer);
-
-          // 最大file_noを取得して+1
-          const maxFileNo = await tx.tt_test_case_files.findFirst({
-            where: {
-              test_group_id: testGroupId,
-              tid: tid,
-              file_type: 1
-            },
-            orderBy: {
-              file_no: 'desc'
-            }
-          });
-          const newFileNo = (maxFileNo?.file_no ?? 0) + 1;
-
-          await tx.tt_test_case_files.create({
-            data: {
-              test_group_id: testGroupId,
-              tid: tid,
-              file_type: 1,
-              file_no: newFileNo,
-              file_name: file.name,
-              file_path: `/uploads/test-cases/${testGroupId}/${tid}/${dataFlowFileName}`,
-            }
-          });
-        }
-      }
+      // ファイルは既にアップロードAPIで登録済みなので、ここでは何もしない
+      // controlSpecFileIds, dataFlowFileIds は確認用に保持
 
       //
       let testCaseNo = 0;
@@ -588,9 +595,81 @@ export async function DELETE(
         `/api/test-groups/${groupIdParam}/cases/${tid}`
       );
     }
-    // 紐づいているファイルの削除 TODO:AWS S3上のディレクトリを削除
+    // ==================== 紐づいているファイルの削除（現在の実装：ローカルディスク） ====================
     const deleteDir = join(process.cwd(), 'public', 'uploads', 'test-cases', String(groupId), tid);
     await rm(deleteDir, { recursive: true, force: true })
+
+    /**
+     * ==================== AWS S3からディレクトリ削除（移行後の実装） ====================
+     *
+     * 【上記のローカルディレクトリ削除を以下のS3バッチ削除に置き換える】
+     *
+     * // S3プレフィックス（ディレクトリ相当）を定義
+     * const s3Prefix = `test-cases/${groupId}/${tid}/`;
+     *
+     * // 1. プレフィックス配下のすべてのオブジェクトをリストアップ
+     * const listCommand = new ListObjectsV2Command({
+     *   Bucket: process.env.AWS_S3_BUCKET_NAME,
+     *   Prefix: s3Prefix,
+     * });
+     *
+     * try {
+     *   const listedObjects = await s3Client.send(listCommand);
+     *
+     *   if (listedObjects.Contents && listedObjects.Contents.length > 0) {
+     *     // 2. リストアップされたオブジェクトを一括削除
+     *     const deleteCommand = new DeleteObjectsCommand({
+     *       Bucket: process.env.AWS_S3_BUCKET_NAME,
+     *       Delete: {
+     *         Objects: listedObjects.Contents.map(item => ({ Key: item.Key! })),
+     *         Quiet: false,
+     *       },
+     *     });
+     *
+     *     const deleteResult = await s3Client.send(deleteCommand);
+     *
+     *     // エラーがあった場合はログに記録
+     *     if (deleteResult.Errors && deleteResult.Errors.length > 0) {
+     *       console.error('S3 deletion errors:', deleteResult.Errors);
+     *     }
+     *   }
+     * } catch (s3Error) {
+     *   console.error(`Failed to delete S3 objects with prefix: ${s3Prefix}`, s3Error);
+     *   // エラーハンドリング：S3削除が失敗してもテストケース削除を続行するか判断
+     * }
+     *
+     * 【注意点】
+     * 1. S3には「ディレクトリ」の概念がない。プレフィックスでオブジェクトをグループ化する
+     * 2. 1000個以上のオブジェクトがある場合はページネーションが必要
+     * 3. DeleteObjectsCommandは最大1000個まで一度に削除可能
+     * 4. S3削除はトランザクション外で実行されるため、DB削除が成功してもS3削除が失敗する可能性がある
+     * 5. 大量のファイルがある場合は非同期ジョブで削除することを推奨
+     * 6. S3のバケットバージョニングが有効な場合、削除マーカーが追加されるだけで物理削除されない
+     *
+     * 【1000個以上のオブジェクトがある場合の実装例】
+     * let continuationToken: string | undefined;
+     * do {
+     *   const listCommand = new ListObjectsV2Command({
+     *     Bucket: process.env.AWS_S3_BUCKET_NAME,
+     *     Prefix: s3Prefix,
+     *     ContinuationToken: continuationToken,
+     *   });
+     *
+     *   const listedObjects = await s3Client.send(listCommand);
+     *
+     *   if (listedObjects.Contents && listedObjects.Contents.length > 0) {
+     *     const deleteCommand = new DeleteObjectsCommand({
+     *       Bucket: process.env.AWS_S3_BUCKET_NAME,
+     *       Delete: {
+     *         Objects: listedObjects.Contents.map(item => ({ Key: item.Key! })),
+     *       },
+     *     });
+     *     await s3Client.send(deleteCommand);
+     *   }
+     *
+     *   continuationToken = listedObjects.NextContinuationToken;
+     * } while (continuationToken);
+     */
 
     const deleteTimer = new QueryTimer();
     // Prisma トランザクション内でテストケースを削除
