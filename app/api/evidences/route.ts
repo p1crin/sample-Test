@@ -98,13 +98,14 @@ export async function POST(req: NextRequest) {
       await mkdir(uploadDir, { recursive: true });
     }
 
-    // 最大evidence_noを取得
+    // 最大evidence_noを取得（全history_count対象）
+    // historyCount=0の場合は、まだDBレコードがないため、全履歴から最大値を取得して一意性を確保
     const maxEvidence = await prisma.tt_test_evidences.findFirst({
       where: {
         test_group_id: parsedTestGroupId,
         tid: tid,
         test_case_no: parsedTestCaseNo,
-        history_count: parsedHistoryCount,
+        // history_countは指定せず、全履歴から最大値を取得
       },
       orderBy: {
         evidence_no: 'desc',
@@ -164,17 +165,24 @@ export async function POST(req: NextRequest) {
      */
 
     // ==================== データベースに記録（現在の実装：ローカルパス） ====================
-    const evidenceRecord = await prisma.tt_test_evidences.create({
-      data: {
-        test_group_id: parsedTestGroupId,
-        tid: tid,
-        test_case_no: parsedTestCaseNo,
-        history_count: parsedHistoryCount,
-        evidence_no: newEvidenceNo,
-        evidence_name: file.name,
-        evidence_path: `/uploads/evidences/${testGroupId}/${tid}/${fileName}`, // ローカル: publicからの相対パス
-      },
-    });
+    // historyCount=0の場合は、まだ履歴レコードが存在しないため、ファイルのみ保存してデータベースには記録しない
+    // 結果保存時にまとめてデータベースに記録される
+    let evidenceRecord = null;
+
+    if (parsedHistoryCount > 0) {
+      // 既存の履歴に対するエビデンス追加の場合のみデータベースに記録
+      evidenceRecord = await prisma.tt_test_evidences.create({
+        data: {
+          test_group_id: parsedTestGroupId,
+          tid: tid,
+          test_case_no: parsedTestCaseNo,
+          history_count: parsedHistoryCount,
+          evidence_no: newEvidenceNo,
+          evidence_name: file.name,
+          evidence_path: `/uploads/evidences/${testGroupId}/${tid}/${fileName}`, // ローカル: publicからの相対パス
+        },
+      });
+    }
 
     /**
      * ==================== データベースに記録（移行後：S3キーまたはURL） ====================
@@ -208,10 +216,12 @@ export async function POST(req: NextRequest) {
       {
         success: true,
         data: {
-          evidenceId: evidenceRecord.id,
-          evidenceNo: evidenceRecord.evidence_no,
-          evidenceName: evidenceRecord.evidence_name,
-          evidencePath: evidenceRecord.evidence_path,
+          evidenceId: evidenceRecord ? evidenceRecord.id : null,
+          evidenceNo: newEvidenceNo,
+          evidenceName: file.name,
+          evidencePath: `/uploads/evidences/${testGroupId}/${tid}/${fileName}`,
+          testCaseNo: parsedTestCaseNo,
+          historyCount: parsedHistoryCount,
         },
       },
       { status: STATUS_CODES.CREATED }

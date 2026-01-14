@@ -1,0 +1,101 @@
+@startuml システムアーキテクチャ図
+title システムアーキテクチャ図
+
+skinparam rectangle { 
+  BackgroundColor<<aws>> LightYellow 
+  BackgroundColor<<app>> LightBlue 
+  BackgroundColor<<data>> LightGreen
+}
+
+actor "管理者" as Admin
+actor "テスト管理者" as TestManager
+actor "一般ユーザ" as GeneralUser
+
+rectangle "客先NW" {
+  [Webブラウザ] as Browser
+  [VPN Gateway] as VPN
+}
+
+rectangle "AWS Cloud" <<aws>> {    
+  rectangle "VPC (10.0.0.0/16)" {        
+
+    rectangle "Public Subnet" {
+      [NAT Gateway]
+    }
+
+    rectangle "Private Subnet" {      
+
+      rectangle "Internal ELB" <<aws>> {        
+        [Application Load Balancer]
+        [WAF]
+        note right: Internal ALB\nVPN経由のみ到達可
+      }
+
+      rectangle "EC2 / ECS Fargate" <<app>> {        
+        [テストケースDBアプリ]                            
+        [Prisma Client]      
+      }      
+
+      database "RDS PostgreSQL\nMulti-AZ" as RDS      
+
+      rectangle "AWS Batch" {        
+        [Job Queue]        
+        [Job Definition]        
+        note right: ファイル処理\nExcelインポート  
+      }    
+    }  
+  }    
+
+  storage "S3" as S3 {    
+    [制御仕様書]    
+    [データフロー]    
+    [エビデンス]  
+    [インポートファイル]
+    [CAPLファイル]
+  }    
+
+  rectangle "CloudWatch" {    
+    [Logs]    
+    [Alarms]
+  }    
+
+  rectangle "Secrets Manager" {    
+    [DB接続情報]    
+    [JWT秘密鍵]  
+  }    
+
+  rectangle "IAM" {    
+    [ECS Task Role]    
+    [Batch Role]  
+  }
+}
+
+' --- アクセス経路 ---
+Admin --> Browser
+TestManager --> Browser
+GeneralUser --> Browser
+
+Browser --> VPN : 社内NW
+VPN --> [Application Load Balancer] : HTTPS (VPN経由)
+
+' --- アプリケーション通信 ---
+[Application Load Balancer] --> [テストケースDBアプリ] : HTTPS
+[テストケースDBアプリ] --> [Prisma Client]
+[Prisma Client] --> RDS : SQL
+
+[テストケースDBアプリ] --> S3 : ファイル操作
+[テストケースDBアプリ] --> [Job Queue] : ジョブ起動
+
+[Job Queue] --> [Job Definition]
+[Job Definition] --> S3 : 読込
+[Job Definition] --> RDS : 書込
+
+[テストケースDBアプリ] --> [Logs] : ログ送信
+[Job Definition] --> [Logs]
+
+[テストケースDBアプリ] --> [Secrets Manager]
+[Prisma Client] --> [Secrets Manager]
+
+[EC2 / ECS Fargate] ..> [ECS Task Role] : 使用
+[AWS Batch] ..> [Batch Role] : 使用
+@enduml

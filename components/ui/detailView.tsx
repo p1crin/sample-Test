@@ -40,7 +40,7 @@ const DetailView: React.FC<DetailViewProps> = ({ labels, values, isFull = false 
               <td className="p-2 min-w-100 max-w-200 align-middle whitespace-pre-wrap overflow-hidden text-ellipsis">
                 {labels[key].type === 'img' ? (
                   Array.isArray(values[key]) ? (
-                    (values[key] as string[]).map((src, index) => (
+                    (values[key] as string[]).filter(src => src).map((src, index) => (
                       <img
                         key={index}
                         src={src}
@@ -52,14 +52,18 @@ const DetailView: React.FC<DetailViewProps> = ({ labels, values, isFull = false 
                       />
                     ))
                   ) : (
-                    <img
-                      src={values[key] as string}
-                      alt={labels[key].name}
-                      width={500}
-                      height={300}
-                      style={{ cursor: 'pointer', border: '1px solid black', margin: '5px' }}
-                      onClick={() => handleImageClick(values[key] as string)}
-                    />
+                    values[key] && (values[key] as string).trim() !== '' ? (
+                      <img
+                        src={values[key] as string}
+                        alt={labels[key].name}
+                        width={500}
+                        height={300}
+                        style={{ cursor: 'pointer', border: '1px solid black', margin: '5px' }}
+                        onClick={() => handleImageClick(values[key] as string)}
+                      />
+                    ) : (
+                      <span></span>
+                    )
                   )
                 ) : (
                   values[key] ? (

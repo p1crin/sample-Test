@@ -386,7 +386,6 @@ export async function POST(
             data: {
               is_deleted: true,
               updated_at: new Date(),
-              updated_by: user.id,
             },
           });
         }
@@ -396,8 +395,19 @@ export async function POST(
       for (const result of testResults) {
         const testCaseNo = result.testCaseNo;
 
-        // 判定が空または"未実施"の場合はスキップ
-        if (!result.judgment || result.judgment === '未実施') {
+        // テスト内容を取得してis_targetを確認
+        const testContent = await tx.tt_test_contents.findUnique({
+          where: {
+            test_group_id_tid_test_case_no: {
+              test_group_id: groupId,
+              tid: tid,
+              test_case_no: testCaseNo,
+            },
+          },
+        });
+
+        // is_target=falseの場合はスキップ
+        if (testContent && testContent.is_target === false) {
           continue;
         }
 
@@ -437,9 +447,7 @@ export async function POST(
             note: result.note || null,
             version: 1, // デフォルト値
             created_at: new Date(),
-            created_by: user.id,
             updated_at: new Date(),
-            updated_by: user.id,
           },
         });
 
@@ -466,9 +474,7 @@ export async function POST(
             note: result.note || null,
             version: 1,
             created_at: new Date(),
-            created_by: user.id,
             updated_at: new Date(),
-            updated_by: user.id,
           },
           update: {
             result: result.result || null,
@@ -480,11 +486,11 @@ export async function POST(
             executor: result.executor || null,
             note: result.note || null,
             updated_at: new Date(),
-            updated_by: user.id,
           },
         });
 
-        // エビデンスのhistory_countを更新
+        // エビデンスの処理
+        // 1. 既存のエビデンス（evidenceIdあり）のhistory_countを更新
         if (result.evidenceIds && Array.isArray(result.evidenceIds)) {
           for (const evidenceId of result.evidenceIds) {
             await tx.tt_test_evidences.updateMany({
@@ -497,7 +503,25 @@ export async function POST(
               data: {
                 history_count: newHistoryCount,
                 updated_at: new Date(),
-                updated_by: user.id,
+              },
+            });
+          }
+        }
+
+        // 2. 新規エビデンス（evidenceIdなし、historyCount=0でアップロードされたファイル）をデータベースに記録
+        if (result.pendingEvidences && Array.isArray(result.pendingEvidences)) {
+          for (const pendingEvidence of result.pendingEvidences) {
+            await tx.tt_test_evidences.create({
+              data: {
+                test_group_id: groupId,
+                tid: tid,
+                test_case_no: testCaseNo,
+                history_count: newHistoryCount,
+                evidence_no: pendingEvidence.evidenceNo,
+                evidence_name: pendingEvidence.evidenceName,
+                evidence_path: pendingEvidence.evidencePath,
+                created_at: new Date(),
+                updated_at: new Date(),
               },
             });
           }

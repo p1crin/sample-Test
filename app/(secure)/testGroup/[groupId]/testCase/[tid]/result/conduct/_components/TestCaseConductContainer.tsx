@@ -6,9 +6,10 @@ import { TestCaseConduct } from './TestCaseConduct';
 import { TestCaseResultRow } from '../../_components/types/testCase-result-list-row';
 import { TestCaseDetailRow } from './types/testCase-detail-list-row';
 import { Button } from '@/components/ui/button';
-import { RootState } from '@/stores/store';
-import { useSelector } from 'react-redux';
+import { useSession } from 'next-auth/react';
 import Loading from '@/components/ui/loading';
+import { Modal } from '@/components/ui/modal';
+import { useRouter } from 'next/navigation';
 
 const labels = {
   tid: { name: "TID", type: "text" as 'text' },
@@ -28,16 +29,86 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
   const [data, setData] = useState<TestCaseDetailRow | null>(null);
   const [pastTestCases, setPastTestCases] = useState<TestCaseResultRow[][]>([]);
   const [initialTestCaseData, setInitialTestCaseData] = useState<TestCaseResultRow[]>([]);
+  const [newTestCaseData, setNewTestCaseData] = useState<TestCaseResultRow[]>([]);
   const [labelData, setLabelData] = useState(labels);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [accordionOpen, setAccordionOpen] = useState<boolean[]>([]);
   const [showNewTestCaseConduct, setShowNewTestCaseConduct] = useState(false);
   const [buttonDisabled, setButtonDisabled] = useState(false);
+  const [deletedEvidences, setDeletedEvidences] = useState<Array<{ testCaseNo: number; historyCount: number; evidenceNo: number }>>([]);
+  const [executorsList, setExecutorsList] = useState<Array<{ id: number; name: string; email: string }>>([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalMessage, setModalMessage] = useState('');
+  const router = useRouter();
 
-  const user = useSelector((state: RootState) => state.auth.user);
-  console.log("user:", user)
+  const { data: session } = useSession();
+  const user = session?.user;
+
+  const handleEvidenceDeleted = (deletedEvidence: { testCaseNo: number; historyCount: number; evidenceNo: number }) => {
+    setDeletedEvidences(prev => [...prev, deletedEvidence]);
+  };
 
   useEffect(() => {
+    const fetchExecutors = async () => {
+      // userがnullの場合は何もしない
+      if (!user) {
+        return;
+      }
+
+      try {
+        // ユーザーロールに応じてAPIエンドポイントを選択
+        const userRole = user.user_role === 0 ? 'システム管理者' :
+                        user.user_role === 1 ? 'テスト管理者' :
+                        '一般';
+
+        let url = '';
+        if (userRole === 'システム管理者') {
+          // 管理者: 全ユーザーを取得
+          url = '/api/users?limit=1000';
+        } else if (userRole === 'テスト管理者') {
+          // テスト管理者: テストグループに許可されたユーザーを取得
+          url = `/api/test-groups/${groupId}/permitted-users`;
+        } else {
+          // 一般ユーザー: 自分自身のみ
+          const selfList = [{
+            id: user.id,
+            name: user.name,
+            email: user.email || '',
+          }];
+          setExecutorsList(selfList);
+          return;
+        }
+
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error('Failed to fetch executors');
+        }
+
+        const result = await response.json();
+        const fetchedExecutors = result.data?.map((u: { id: number; name: string; email: string }) => ({
+          id: u.id,
+          name: u.name,
+          email: u.email,
+        })) || [];
+
+        setExecutorsList(fetchedExecutors);
+        clientLogger.info('TestCaseConductContainer', 'Executors fetched', { count: fetchedExecutors.length });
+      } catch (err) {
+        clientLogger.error('TestCaseConductContainer', 'Failed to fetch executors', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        // エラーの場合、少なくとも自分自身は選択できるようにする
+        if (user) {
+          const fallbackList = [{
+            id: user.id,
+            name: user.name,
+            email: user.email || '',
+          }];
+          setExecutorsList(fallbackList);
+        }
+      }
+    };
+
     const fetchData = async () => {
       try {
         // テストケース詳細を取得
@@ -125,7 +196,19 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
           const data = groupedResults[testCaseNo];
           const latest = data.latestValidResult;
 
+          // エビデンスデータを適切な形式に変換
+          let evidence = null;
+          if (latest.evidence && typeof latest.evidence === 'string') {
+            // エビデンスパスがある場合
+            evidence = [{
+              id: `evidence_${testCaseNo}`,
+              name: latest.evidence.split('/').pop() || 'evidence',
+              evidencePath: latest.evidence,
+            }];
+          }
+
           return {
+            testCaseNo: parseInt(testCaseNo.toString(), 10),
             testCase: latest.test_case || '',
             expectedValue: latest.expected_value || '',
             result: latest.result || '',
@@ -135,8 +218,9 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
             comparatorVersion: latest.comparator_version || '',
             executionDate: latest.execution_date ? new Date(latest.execution_date).toLocaleDateString('ja-JP') : '',
             executor: latest.executor || '',
-            evidence: latest.evidence || null,
+            evidence: evidence,
             note: latest.note || '',
+            isTarget: latest.is_target !== false, // is_targetがfalseの場合のみfalse、それ以外はtrue
           };
         });
 
@@ -158,7 +242,20 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
             const historyEntry = data.allHistory.find((h: Record<string, unknown>) => h.history_count === historyCount);
 
             if (historyEntry) {
+              // エビデンスデータを適切な形式に変換
+              let evidence = null;
+              if (historyEntry.evidence && typeof historyEntry.evidence === 'string') {
+                evidence = [{
+                  id: `evidence_${testCaseNo}_${historyCount}`,
+                  name: (historyEntry.evidence as string).split('/').pop() || 'evidence',
+                  evidencePath: historyEntry.evidence as string,
+                  testCaseNo: parseInt(testCaseNo.toString(), 10),
+                  historyCount: historyCount,
+                }];
+              }
+
               return {
+                testCaseNo: parseInt(testCaseNo.toString(), 10),
                 testCase: historyEntry.test_case || '',
                 expectedValue: historyEntry.expected_value || '',
                 result: historyEntry.result || '',
@@ -170,13 +267,16 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
                   ? new Date(historyEntry.execution_date as string).toLocaleDateString('ja-JP')
                   : '',
                 executor: historyEntry.executor || '',
-                evidence: historyEntry.evidence || null,
+                evidence: evidence,
                 note: historyEntry.note || '',
+                historyCount: historyCount,
+                isTarget: historyEntry.is_target !== false, // is_targetがfalseの場合のみfalse、それ以外はtrue
               };
             } else {
               // 履歴にないテストケースは空の状態で表示
               const latest = data.latestValidResult;
               return {
+                testCaseNo: parseInt(testCaseNo.toString(), 10),
                 testCase: latest.test_case || '',
                 expectedValue: latest.expected_value || '',
                 result: '',
@@ -188,6 +288,7 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
                 executor: '',
                 evidence: null,
                 note: '',
+                isTarget: latest.is_target !== false, // is_targetがfalseの場合のみfalse、それ以外はtrue
               };
             }
           });
@@ -214,28 +315,73 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
       }
     };
 
+    fetchExecutors();
     fetchData();
     fetchTestResults();
-  }, [groupId, tid]);
+  }, [groupId, tid, user]);
 
   const handleSubmit = async () => {
     try {
-      // TODO: 実装未完了 - evidenceIdsとdeletedEvidencesの実装が必要
-      // 現状は判定以外のデータのみ送信
-      const testResults = initialTestCaseData.map((row, index) => ({
-        testCaseNo: index,
-        result: row.result || '',
-        judgment: row.judgment || '',
-        softwareVersion: row.softwareVersion || '',
-        hardwareVersion: row.hardwareVersion || '',
-        comparatorVersion: row.comparatorVersion || '',
-        executionDate: row.executionDate || '',
-        executor: row.executor || '',
-        note: row.note || '',
-        evidenceIds: [], // TODO: エビデンスIDの追跡が必要
-      }));
+      // バリデーション：エビデンスと備考以外は必須
+      const validationErrors: string[] = [];
+      newTestCaseData.forEach((row) => {
+        // is_target=falseの場合はバリデーションスキップ
+        if (row.isTarget === false) return;
 
-      clientLogger.info('TestCaseConductContainer', 'saveData Request', { groupId, tid });
+        const errors: string[] = [];
+        if (!row.result || row.result.trim() === '') errors.push('結果');
+        if (!row.judgment || row.judgment.trim() === '') errors.push('判定');
+        if (!row.softwareVersion || row.softwareVersion.trim() === '') errors.push('ソフトウェアバージョン');
+        if (!row.hardwareVersion || row.hardwareVersion.trim() === '') errors.push('ハードウェアバージョン');
+        if (!row.comparatorVersion || row.comparatorVersion.trim() === '') errors.push('比較器バージョン');
+        if (!row.executionDate || row.executionDate.trim() === '') errors.push('実施日');
+        if (!row.executor || row.executor.trim() === '') errors.push('実施者');
+
+        if (errors.length > 0) {
+          validationErrors.push(`テストケース番号 ${row.testCaseNo}: ${errors.join('、')}が未入力です`);
+        }
+      });
+
+      if (validationErrors.length > 0) {
+        setModalMessage('入力エラー:\n' + validationErrors.join('\n'));
+        setIsModalOpen(true);
+        return;
+      }
+
+      // エビデンスIDを含むテスト結果データを作成（is_target=falseの行は除外）
+      const testResults = newTestCaseData
+        .filter(row => row.isTarget !== false)
+        .map((row) => {
+          // アップロード済みのエビデンスID（データベースに既に存在）を抽出
+          const evidenceIds = row.evidence
+            ?.filter(e => e.evidenceId !== undefined)
+            .map(e => e.evidenceId as number) || [];
+
+          // 新規アップロード済みエビデンス（データベース未登録、historyCount=0でアップロードされたファイル）を抽出
+          const pendingEvidences = row.evidence
+            ?.filter(e => e.evidenceId === undefined && e.evidencePath)
+            .map(e => ({
+              evidenceNo: e.evidenceNo || 0,
+              evidenceName: e.name,
+              evidencePath: e.evidencePath as string,
+            })) || [];
+
+          return {
+            testCaseNo: row.testCaseNo,
+            result: row.result || '',
+            judgment: row.judgment || '',
+            softwareVersion: row.softwareVersion || '',
+            hardwareVersion: row.hardwareVersion || '',
+            comparatorVersion: row.comparatorVersion || '',
+            executionDate: row.executionDate || '',
+            executor: row.executor || '',
+            note: row.note || '',
+            evidenceIds: evidenceIds,
+            pendingEvidences: pendingEvidences,
+          };
+        });
+
+      clientLogger.info('TestCaseConductContainer', 'saveData Request', { groupId, tid, deletedEvidencesCount: deletedEvidences.length });
 
       const response = await fetch(`/api/test-groups/${groupId}/cases/${tid}/results`, {
         method: 'POST',
@@ -244,7 +390,7 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
         },
         body: JSON.stringify({
           testResults,
-          deletedEvidences: [], // TODO: 削除されたエビデンスの追跡が必要
+          deletedEvidences: deletedEvidences,
         }),
       });
 
@@ -256,18 +402,21 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
       const result = await response.json();
 
       clientLogger.info('TestCaseConductContainer', '保存成功', { message: result.message });
-      alert('テスト結果を保存しました');
-      history.back();
+      setModalMessage('テスト結果を保存しました');
+      setIsModalOpen(true);
+      setTimeout(() => {
+        router.back();
+      }, 1500); // 1.5秒後に前の画面に戻る
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : '保存中にエラーが発生しました';
-      setLoadError(errorMessage);
+      setModalMessage(errorMessage);
+      setIsModalOpen(true);
       clientLogger.error('TestCaseConductContainer', '保存エラー', { error: errorMessage });
     }
   };
 
   const handleCancel = () => {
-    console.log('キャンセルされました');
-    history.back();
+    router.back();
   };
 
   const toggleAccordion = (index: number) => {
@@ -279,6 +428,24 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
   };
 
   const handleShowTestTable = () => {
+    // まっさらな状態のデータを作成（テストケース番号、テストケース、期待値、is_targetのみ保持）
+    const emptyData: TestCaseResultRow[] = initialTestCaseData.map((row) => ({
+      testCaseNo: row.testCaseNo,
+      testCase: row.testCase,
+      expectedValue: row.expectedValue,
+      isTarget: row.isTarget,
+      result: '',
+      judgment: '',
+      softwareVersion: '',
+      hardwareVersion: '',
+      comparatorVersion: '',
+      executionDate: '',
+      executor: '',
+      evidence: null,
+      note: '',
+      historyCount: 0,
+    }));
+    setNewTestCaseData(emptyData);
     setShowNewTestCaseConduct(true);
     setButtonDisabled(true);
   };
@@ -308,7 +475,24 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
       <div className="space-y-2">
         <h1 className="text-lg font-bold">テスト結果</h1>
         <div className="space-y-4">
-          {showNewTestCaseConduct && <TestTable data={initialTestCaseData} setData={setInitialTestCaseData} isPast={false} />}
+          {showNewTestCaseConduct && (
+            <TestTable
+              data={newTestCaseData}
+              setData={setNewTestCaseData}
+              isPast={false}
+              groupId={groupId}
+              tid={tid}
+              onEvidenceDeleted={handleEvidenceDeleted}
+              userRole={
+                user?.user_role === 0 ? 'システム管理者' :
+                user?.user_role === 1 ? 'テスト管理者' :
+                '一般'
+              }
+              userId={user?.id || 0}
+              userName={user?.name || ''}
+              executorsList={executorsList}
+            />
+          )}
         </div>
         {pastTestCases.map((historyData, index) => (
           <div key={index}>
@@ -320,11 +504,26 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
             </button>
             {accordionOpen[index] && (
               <div className="p-4 border border-t-0 border-gray-200">
-                <TestTable data={historyData} setData={(newData: SetStateAction<TestCaseResultRow[]>) => {
-                  const newPastTestCases = [...pastTestCases];
-                  newPastTestCases[index] = newData as TestCaseResultRow[];
-                  setPastTestCases(newPastTestCases);
-                }} isPast={true} />
+                <TestTable
+                  data={historyData}
+                  setData={(newData: SetStateAction<TestCaseResultRow[]>) => {
+                    const newPastTestCases = [...pastTestCases];
+                    newPastTestCases[index] = newData as TestCaseResultRow[];
+                    setPastTestCases(newPastTestCases);
+                  }}
+                  isPast={true}
+                  groupId={groupId}
+                  tid={tid}
+                  onEvidenceDeleted={handleEvidenceDeleted}
+                  userRole={
+                    user?.user_role === 0 ? 'システム管理者' :
+                    user?.user_role === 1 ? 'テスト管理者' :
+                    '一般'
+                  }
+                  userId={user?.id || 0}
+                  userName={user?.name || ''}
+                  executorsList={executorsList}
+                />
               </div>
             )}
           </div>
@@ -339,6 +538,14 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
         <Button type="submit" onClick={handleSubmit} >登録</Button>
         <Button type="button" onClick={handleCancel} className="bg-gray-500 hover:bg-gray-400">戻る</Button>
       </div>
+
+      {/* 結果モーダル */}
+      <Modal open={isModalOpen} onClose={() => setIsModalOpen(false)}>
+        <p className="mb-8 whitespace-pre-wrap">{modalMessage}</p>
+        <div className="flex justify-center">
+          <Button className="w-24" onClick={() => setIsModalOpen(false)}>閉じる</Button>
+        </div>
+      </Modal>
     </div>
   );
 }
