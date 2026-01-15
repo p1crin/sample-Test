@@ -158,7 +158,7 @@ async function main(): Promise<void> {
         file_name: inputKey,
         import_status: 0, // 0: 実施中
         executor_name: executorName,
-        import_type: 1, // 1: ユーザインポート
+        import_type: 2, // 2: ユーザインポート
         count: 0,
         message: 'インポート処理を開始しました',
       },
@@ -317,7 +317,7 @@ async function main(): Promise<void> {
             file_name: process.env.INPUT_S3_KEY || 'unknown',
             import_status: 2, // 2: エラー
             executor_name: process.env.EXECUTOR_NAME || 'system',
-            import_type: 1, // 1: ユーザインポート
+            import_type: 2, // 2: ユーザインポート
             count: 0,
             message: errorMessage,
           },

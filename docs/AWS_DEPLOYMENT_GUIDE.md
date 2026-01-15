@@ -16,12 +16,17 @@
 12. [WAF の設定（必須）](#12-waf-の設定必須)
 13. [Application Load Balancer の作成](#13-application-load-balancer-の作成)
 14. [Route 53 DNS 設定](#14-route-53-dns-設定)
-15. [AWS Batch の設定](#15-aws-batch-の設定)
+15. [AWS Batch の設定（ユーザインポート用）](#15-aws-batch-の設定ユーザインポート用)
 16. [CloudWatch の設定](#16-cloudwatch-の設定)
 17. [アプリケーションのデプロイ](#17-アプリケーションのデプロイ)
 18. [動作確認](#18-動作確認)
 19. [セキュリティチェックリスト](#19-セキュリティチェックリスト)
 20. [注意事項・トラブルシューティング](#20-注意事項トラブルシューティング)
+21. [付録](#付録)
+    - [A. コスト見積もり](#a-コスト見積もり月額概算)
+    - [B. プロキシIP制限のベストプラクティス](#b-プロキシip制限のベストプラクティス)
+    - [C. 参考リンク](#c-参考リンク)
+    - [D. 開発環境のセッティング手順](#付録d-開発環境のセッティング手順)
 
 ---
 
@@ -836,59 +841,257 @@ WAF のログを CloudWatch に送信します:
 
 ---
 
-## 15. AWS Batch の設定
+## 15. AWS Batch の設定（ユーザインポート用）
 
-### 15.1 コンピュート環境の作成
+### 15.1 概要
+
+AWS Batchを使用して、大量のユーザデータをCSVからインポートします。バッチジョブはFargateで実行され、S3からCSVを読み込み、PostgreSQLにデータを投入します。
+
+**処理フロー:**
+```
+[Webアプリ] → [CSVをS3アップロード] → [AWS Batch起動] → [Fargateでバッチ実行]
+                                                           ↓
+                                                     [PostgreSQL更新]
+                                                           ↓
+                                                     [結果をS3保存]
+```
+
+### 15.2 事前準備
+
+#### 15.2.1 必要な変数の確認
+
+以下のコマンドで、必要な情報を取得しておきます:
+
+```bash
+# AWSアカウントID
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+echo "Account ID: ${AWS_ACCOUNT_ID}"
+
+# VPCとサブネットID
+VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=testcasedb-vpc" --query 'Vpcs[0].VpcId' --output text)
+PRIVATE_SUBNET_1=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=*private1*" --query 'Subnets[0].SubnetId' --output text)
+PRIVATE_SUBNET_2=$(aws ec2 describe-subnets --filters "Name=tag:Name,Values=*private2*" --query 'Subnets[0].SubnetId' --output text)
+BATCH_SG=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=testcasedb-batch-sg" --query 'SecurityGroups[0].GroupId' --output text)
+
+echo "VPC ID: ${VPC_ID}"
+echo "Private Subnet 1: ${PRIVATE_SUBNET_1}"
+echo "Private Subnet 2: ${PRIVATE_SUBNET_2}"
+echo "Batch SG: ${BATCH_SG}"
+```
+
+### 15.3 コンピュート環境の作成
 
 ```bash
 aws batch create-compute-environment \
   --compute-environment-name testcasedb-compute-env \
   --type MANAGED \
   --state ENABLED \
-  --compute-resources '{
-    "type": "FARGATE",
-    "maxvCpus": 4,
-    "subnets": ["subnet-xxxxx", "subnet-yyyyy"],
-    "securityGroupIds": ["sg-xxxxx"]
-  }' \
+  --compute-resources "{
+    \"type\": \"FARGATE\",
+    \"maxvCpus\": 4,
+    \"subnets\": [\"${PRIVATE_SUBNET_1}\", \"${PRIVATE_SUBNET_2}\"],
+    \"securityGroupIds\": [\"${BATCH_SG}\"]
+  }" \
   --region ap-northeast-1
 ```
 
-### 15.2 ジョブキューの作成
+**確認:**
+```bash
+aws batch describe-compute-environments \
+  --compute-environments testcasedb-compute-env \
+  --region ap-northeast-1
+```
+
+### 15.4 ジョブキューの作成
 
 ```bash
 aws batch create-job-queue \
   --job-queue-name testcasedb-job-queue \
   --state ENABLED \
   --priority 1 \
-  --compute-environment-order '[
+  --compute-environment-order "[
     {
-      "order": 1,
-      "computeEnvironment": "testcasedb-compute-env"
+      \"order\": 1,
+      \"computeEnvironment\": \"testcasedb-compute-env\"
     }
-  ]' \
+  ]" \
   --region ap-northeast-1
 ```
 
-### 15.3 ジョブ定義の作成
+**確認:**
+```bash
+aws batch describe-job-queues \
+  --job-queues testcasedb-job-queue \
+  --region ap-northeast-1
+```
 
-```json
+### 15.5 CloudWatch ロググループの作成
+
+```bash
+aws logs create-log-group \
+  --log-group-name /aws/batch/testcasedb \
+  --region ap-northeast-1
+
+# ログ保持期間を90日に設定
+aws logs put-retention-policy \
+  --log-group-name /aws/batch/testcasedb \
+  --retention-in-days 90 \
+  --region ap-northeast-1
+```
+
+### 15.6 IAM ロールの作成
+
+#### 15.6.1 Batch タスク実行ロール
+
+```bash
+# 信頼関係ポリシー
+cat > batch-execution-trust-policy.json <<'EOF'
 {
-  "jobDefinitionName": "testcasedb-import-job",
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+
+# ロール作成
+aws iam create-role \
+  --role-name testcasedb-batch-execution-role \
+  --assume-role-policy-document file://batch-execution-trust-policy.json
+
+# 管理ポリシーをアタッチ
+aws iam attach-role-policy \
+  --role-name testcasedb-batch-execution-role \
+  --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+# Secrets Manager アクセス許可
+cat > batch-execution-policy.json <<'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:GetSecretValue"
+      ],
+      "Resource": [
+        "arn:aws:secretsmanager:ap-northeast-1:*:secret:testcasedb/*",
+        "arn:aws:secretsmanager:ap-northeast-1:*:secret:rds!*"
+      ]
+    }
+  ]
+}
+EOF
+
+aws iam put-role-policy \
+  --role-name testcasedb-batch-execution-role \
+  --policy-name SecretsManagerAccess \
+  --policy-document file://batch-execution-policy.json
+```
+
+#### 15.6.2 Batch タスクロール
+
+```bash
+# タスクロール作成
+aws iam create-role \
+  --role-name testcasedb-batch-task-role \
+  --assume-role-policy-document file://batch-execution-trust-policy.json
+
+# S3, Secrets Manager, CloudWatch アクセス許可
+cat > batch-task-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::testcasedb-files-${AWS_ACCOUNT_ID}",
+        "arn:aws:s3:::testcasedb-files-${AWS_ACCOUNT_ID}/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:GetSecretValue"
+      ],
+      "Resource": [
+        "arn:aws:secretsmanager:ap-northeast-1:*:secret:testcasedb/*",
+        "arn:aws:secretsmanager:ap-northeast-1:*:secret:rds!*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogStream",
+        "logs:PutLogEvents"
+      ],
+      "Resource": "arn:aws:logs:ap-northeast-1:*:log-group:/aws/batch/testcasedb:*"
+    }
+  ]
+}
+EOF
+
+aws iam put-role-policy \
+  --role-name testcasedb-batch-task-role \
+  --policy-name BatchTaskPolicy \
+  --policy-document file://batch-task-policy.json
+```
+
+### 15.7 Dockerイメージのビルドとプッシュ
+
+```bash
+cd batch
+
+# Dockerイメージのビルド
+docker build -t testcasedb/batch:latest .
+
+# ECRにログイン
+aws ecr get-login-password --region ap-northeast-1 | \
+  docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.ap-northeast-1.amazonaws.com
+
+# タグ付けとプッシュ
+docker tag testcasedb/batch:latest ${AWS_ACCOUNT_ID}.dkr.ecr.ap-northeast-1.amazonaws.com/testcasedb/batch:latest
+docker push ${AWS_ACCOUNT_ID}.dkr.ecr.ap-northeast-1.amazonaws.com/testcasedb/batch:latest
+```
+
+### 15.8 ジョブ定義の作成（ユーザインポート用）
+
+```bash
+# DATABASE_URLのSecrets Manager ARNを取得
+DATABASE_SECRET_ARN=$(aws secretsmanager describe-secret \
+  --secret-id rds!cluster-xxxxxx \
+  --query 'ARN' \
+  --output text)
+
+# ジョブ定義JSONを作成
+cat > user-import-job-definition.json <<EOF
+{
+  "jobDefinitionName": "testcasedb-user-import",
   "type": "container",
   "platformCapabilities": ["FARGATE"],
   "containerProperties": {
-    "image": "123456789012.dkr.ecr.ap-northeast-1.amazonaws.com/testcasedb/batch:latest",
-    "jobRoleArn": "arn:aws:iam::123456789012:role/testcasedb-batch-task-role",
-    "executionRoleArn": "arn:aws:iam::123456789012:role/testcasedb-batch-execution-role",
+    "image": "${AWS_ACCOUNT_ID}.dkr.ecr.ap-northeast-1.amazonaws.com/testcasedb/batch:latest",
+    "jobRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/testcasedb-batch-task-role",
+    "executionRoleArn": "arn:aws:iam::${AWS_ACCOUNT_ID}:role/testcasedb-batch-execution-role",
     "resourceRequirements": [
       {
         "type": "VCPU",
-        "value": "0.25"
+        "value": "0.5"
       },
       {
         "type": "MEMORY",
-        "value": "512"
+        "value": "1024"
       }
     ],
     "environment": [
@@ -904,7 +1107,7 @@ aws batch create-job-queue \
     "secrets": [
       {
         "name": "DATABASE_URL",
-        "valueFrom": "arn:aws:secretsmanager:ap-northeast-1:123456789012:secret:testcasedb/database-url"
+        "valueFrom": "${DATABASE_SECRET_ARN}"
       }
     ],
     "logConfiguration": {
@@ -912,15 +1115,165 @@ aws batch create-job-queue \
       "options": {
         "awslogs-group": "/aws/batch/testcasedb",
         "awslogs-region": "ap-northeast-1",
-        "awslogs-stream-prefix": "import"
+        "awslogs-stream-prefix": "user-import"
       }
     },
     "fargatePlatformConfiguration": {
       "platformVersion": "LATEST"
+    },
+    "networkConfiguration": {
+      "assignPublicIp": "DISABLED"
     }
+  },
+  "timeout": {
+    "attemptDurationSeconds": 3600
+  },
+  "retryStrategy": {
+    "attempts": 1
   }
 }
+EOF
+
+# ジョブ定義を登録
+aws batch register-job-definition \
+  --cli-input-json file://user-import-job-definition.json \
+  --region ap-northeast-1
 ```
+
+**確認:**
+```bash
+aws batch describe-job-definitions \
+  --job-definition-name testcasedb-user-import \
+  --status ACTIVE \
+  --region ap-northeast-1
+```
+
+### 15.9 アプリケーション環境変数の設定
+
+メインアプリケーションのECSタスク定義に以下の環境変数を追加します:
+
+```json
+{
+  "name": "AWS_BATCH_JOB_QUEUE",
+  "value": "arn:aws:batch:ap-northeast-1:${AWS_ACCOUNT_ID}:job-queue/testcasedb-job-queue"
+},
+{
+  "name": "AWS_BATCH_USER_IMPORT_JOB_DEFINITION",
+  "value": "arn:aws:batch:ap-northeast-1:${AWS_ACCOUNT_ID}:job-definition/testcasedb-user-import:1"
+},
+{
+  "name": "S3_IMPORT_BUCKET",
+  "value": "testcasedb-files-${AWS_ACCOUNT_ID}"
+}
+```
+
+### 15.10 動作確認
+
+#### 15.10.1 テスト用CSVの準備
+
+```csv
+id,name,email,user_role,department,company,password
+,山田太郎,yamada.taro@example.com,1,開発部,株式会社ABC,testpass123
+,佐藤花子,sato.hanako@example.com,2,品質保証部,株式会社ABC,testpass456
+```
+
+#### 15.10.2 S3へアップロード
+
+```bash
+echo 'id,name,email,user_role,department,company,password
+,山田太郎,yamada.taro@example.com,1,開発部,株式会社ABC,testpass123
+,佐藤花子,sato.hanako@example.com,2,品質保証部,株式会社ABC,testpass456' > test-users.csv
+
+aws s3 cp test-users.csv s3://testcasedb-files-${AWS_ACCOUNT_ID}/user-import/test-users.csv
+```
+
+#### 15.10.3 ジョブの手動実行（テスト）
+
+```bash
+aws batch submit-job \
+  --job-name test-user-import-$(date +%Y%m%d-%H%M%S) \
+  --job-queue testcasedb-job-queue \
+  --job-definition testcasedb-user-import \
+  --container-overrides "{
+    \"environment\": [
+      {\"name\": \"INPUT_S3_BUCKET\", \"value\": \"testcasedb-files-${AWS_ACCOUNT_ID}\"},
+      {\"name\": \"INPUT_S3_KEY\", \"value\": \"user-import/test-users.csv\"},
+      {\"name\": \"OUTPUT_S3_BUCKET\", \"value\": \"testcasedb-files-${AWS_ACCOUNT_ID}\"},
+      {\"name\": \"EXECUTOR_NAME\", \"value\": \"admin\"}
+    ]
+  }" \
+  --region ap-northeast-1
+```
+
+#### 15.10.4 ジョブステータスの確認
+
+```bash
+# ジョブIDを取得（前のコマンドの出力から）
+JOB_ID="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+# ステータス確認
+aws batch describe-jobs \
+  --jobs ${JOB_ID} \
+  --region ap-northeast-1 \
+  --query 'jobs[0].status' \
+  --output text
+
+# ログ確認
+aws logs tail /aws/batch/testcasedb --follow
+```
+
+#### 15.10.5 結果の確認
+
+```bash
+# S3から結果ファイルを取得
+aws s3 ls s3://testcasedb-files-${AWS_ACCOUNT_ID}/user-import-results/
+
+# 最新の結果をダウンロード
+aws s3 cp s3://testcasedb-files-${AWS_ACCOUNT_ID}/user-import-results/result-latest.json ./
+
+# 結果を表示
+cat result-latest.json | jq
+```
+
+#### 15.10.6 データベース確認
+
+```bash
+# RDSに接続して確認
+psql -h testcasedb-postgres.xxxxxx.ap-northeast-1.rds.amazonaws.com \
+     -U postgres \
+     -d testcase_db \
+     -c "SELECT id, name, email, user_role FROM mt_users WHERE email LIKE '%@example.com';"
+```
+
+### 15.11 トラブルシューティング
+
+#### ジョブが RUNNABLE で止まる
+
+| 原因 | 対処法 |
+|------|--------|
+| コンピュート環境のリソース不足 | maxvCpus を増やす |
+| サブネットの IP 枯渇 | サブネットの CIDR を拡張 |
+
+#### ジョブが FAILED になる
+
+```bash
+# エラーログを確認
+aws batch describe-jobs \
+  --jobs ${JOB_ID} \
+  --region ap-northeast-1 \
+  --query 'jobs[0].container.reason'
+
+# CloudWatch Logsを確認
+aws logs tail /aws/batch/testcasedb --follow
+```
+
+#### DATABASE_URL が取得できない
+
+| 確認項目 | 対処法 |
+|---------|--------|
+| Secrets Manager の ARN | 正しいARNが設定されているか確認 |
+| IAM ロール権限 | batch-execution-role に GetSecretValue 権限があるか |
+| Secrets Manager の値 | シークレットに正しいDATABASE_URLが保存されているか |
 
 ---
 
@@ -1237,3 +1590,336 @@ curl https://testcasedb.example.com/api/health
 - [ECS Fargate ベストプラクティス](https://docs.aws.amazon.com/AmazonECS/latest/bestpracticesguide/)
 - [ACM ユーザーガイド](https://docs.aws.amazon.com/acm/)
 - [ALB ユーザーガイド](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/)
+- [AWS Batch ユーザーガイド](https://docs.aws.amazon.com/batch/)
+
+---
+
+## 付録D: 開発環境のセッティング手順
+
+本付録では、ローカル開発環境でアプリケーションとバッチジョブをセットアップする手順を説明します。
+
+### D.1 前提条件
+
+#### D.1.1 必要なソフトウェア
+
+| ソフトウェア | バージョン | インストール方法 |
+|------------|-----------|----------------|
+| Node.js | 20.x LTS | [公式サイト](https://nodejs.org/) |
+| Docker Desktop | 最新版 | [公式サイト](https://www.docker.com/products/docker-desktop) |
+| PostgreSQL | 15.x | [公式サイト](https://www.postgresql.org/download/) or Docker |
+| AWS CLI | 2.x | [公式サイト](https://aws.amazon.com/cli/) |
+| Git | 最新版 | [公式サイト](https://git-scm.com/) |
+
+#### D.1.2 環境確認
+
+```bash
+# バージョン確認
+node -v    # v20.x.x
+npm -v     # 10.x.x
+docker -v  # Docker version 24.x.x
+psql --version  # psql (PostgreSQL) 15.x
+aws --version   # aws-cli/2.x.x
+```
+
+### D.2 プロジェクトのクローン
+
+```bash
+# リポジトリをクローン
+git clone https://github.com/your-org/testcasedb.git
+cd testcasedb
+```
+
+### D.3 PostgreSQLのセットアップ
+
+#### D.3.1 Dockerを使用する場合（推奨）
+
+```bash
+# PostgreSQL コンテナを起動
+docker run --name testcasedb-postgres \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=testcase_db \
+  -p 5432:5432 \
+  -d postgres:15
+
+# 起動確認
+docker ps | grep testcasedb-postgres
+```
+
+#### D.3.2 ローカルインストールを使用する場合
+
+```bash
+# PostgreSQLサービスを起動（macOS）
+brew services start postgresql@15
+
+# データベース作成
+createdb testcase_db -U postgres
+```
+
+### D.4 メインアプリケーションのセットアップ
+
+#### D.4.1 依存関係のインストール
+
+```bash
+# プロジェクトルートで実行
+npm install
+```
+
+#### D.4.2 環境変数の設定
+
+```bash
+# .env.localファイルを作成
+cp .env.example .env.local
+
+# .env.localを編集
+cat > .env.local <<'EOF'
+# Database
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/testcase_db
+
+# NextAuth
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=development-secret-key-change-in-production
+
+# AWS Configuration (開発環境ではローカルのみで動作)
+AWS_REGION=ap-northeast-1
+S3_IMPORT_BUCKET=testcasedb-dev-bucket
+
+# AWS Batch (開発環境では使用しない場合はコメントアウト)
+# AWS_BATCH_JOB_QUEUE=
+# AWS_BATCH_USER_IMPORT_JOB_DEFINITION=
+EOF
+```
+
+#### D.4.3 Prismaのセットアップ
+
+```bash
+# Prisma Clientを生成
+npx prisma generate
+
+# データベースマイグレーション実行
+npx prisma migrate dev
+
+# 初期データ投入（必要に応じて）
+npx prisma db seed
+```
+
+#### D.4.4 アプリケーション起動
+
+```bash
+# 開発サーバー起動
+npm run dev
+
+# ブラウザで確認
+# http://localhost:3000
+```
+
+### D.5 バッチジョブのセットアップ
+
+#### D.5.1 依存関係のインストール
+
+```bash
+cd batch
+npm install
+```
+
+#### D.5.2 Prisma Client生成
+
+```bash
+# batchディレクトリで実行
+npx prisma generate
+```
+
+#### D.5.3 環境変数の設定
+
+```bash
+# batch/.envファイルを作成
+cat > .env <<'EOF'
+# Database connection
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/testcase_db
+
+# AWS Configuration
+AWS_REGION=ap-northeast-1
+
+# User Import Configuration (ローカルテスト用)
+INPUT_S3_BUCKET=testcasedb-dev-bucket
+INPUT_S3_KEY=user-import/test-users.csv
+OUTPUT_S3_BUCKET=testcasedb-dev-bucket
+EXECUTOR_NAME=developer
+EOF
+```
+
+### D.6 ローカルでのバッチテスト
+
+#### D.6.1 ローカルファイルシステムを使用
+
+S3の代わりにローカルファイルシステムを使用する場合、バッチコードを一時的に修正します。
+
+```bash
+# テスト用CSVファイルを作成
+mkdir -p /tmp/testcasedb/user-import
+cat > /tmp/testcasedb/user-import/test-users.csv <<'EOF'
+id,name,email,user_role,department,company,password
+,開発太郎,dev.taro@example.local,0,開発部,ローカル株式会社,devpass123
+,テスト花子,test.hanako@example.local,2,QA部,ローカル株式会社,testpass456
+EOF
+```
+
+#### D.6.2 バッチを直接実行
+
+```bash
+cd batch
+
+# TypeScriptを直接実行
+npm run user-import
+```
+
+#### D.6.3 Dockerコンテナでテスト
+
+```bash
+# Dockerイメージをビルド
+docker build -t testcasedb-batch:dev .
+
+# コンテナで実行
+docker run --rm \
+  --network host \
+  -e DATABASE_URL=postgresql://postgres:postgres@localhost:5432/testcase_db \
+  -e AWS_REGION=ap-northeast-1 \
+  -e INPUT_S3_BUCKET=testcasedb-dev-bucket \
+  -e INPUT_S3_KEY=user-import/test-users.csv \
+  -e OUTPUT_S3_BUCKET=testcasedb-dev-bucket \
+  -e EXECUTOR_NAME=developer \
+  testcasedb-batch:dev
+```
+
+### D.7 AWS開発環境との連携
+
+#### D.7.1 AWS認証情報の設定
+
+```bash
+# AWS CLIの設定
+aws configure --profile testcasedb-dev
+
+# 以下を入力
+# AWS Access Key ID: [開発用アクセスキー]
+# AWS Secret Access Key: [開発用シークレットキー]
+# Default region name: ap-northeast-1
+# Default output format: json
+
+# プロファイルを環境変数で指定
+export AWS_PROFILE=testcasedb-dev
+```
+
+#### D.7.2 開発用S3バケットの作成
+
+```bash
+# バケット作成
+aws s3 mb s3://testcasedb-dev-bucket-$(aws sts get-caller-identity --query Account --output text)
+
+# フォルダ構造作成
+aws s3api put-object --bucket testcasedb-dev-bucket-$(aws sts get-caller-identity --query Account --output text) --key user-import/
+aws s3api put-object --bucket testcasedb-dev-bucket-$(aws sts get-caller-identity --query Account --output text) --key user-import-results/
+```
+
+#### D.7.3 開発用RDSへの接続
+
+開発用RDSインスタンスがある場合:
+
+```bash
+# セキュリティグループで開発者のIPを許可（一時的）
+MY_IP=$(curl -s https://checkip.amazonaws.com)
+aws ec2 authorize-security-group-ingress \
+  --group-id sg-xxxxxxxx \
+  --protocol tcp \
+  --port 5432 \
+  --cidr ${MY_IP}/32
+
+# 接続確認
+psql -h testcasedb-dev.xxxxxx.ap-northeast-1.rds.amazonaws.com \
+     -U postgres \
+     -d testcase_db
+```
+
+### D.8 ローカル開発のTips
+
+#### D.8.1 ホットリロード
+
+```bash
+# メインアプリケーション
+npm run dev  # ファイル変更時に自動リロード
+
+# バッチ（tsx使用）
+npm run user-import  # 変更後は再実行が必要
+```
+
+#### D.8.2 デバッグ
+
+```bash
+# Next.jsアプリのデバッグ
+NODE_OPTIONS='--inspect' npm run dev
+
+# VS Codeのデバッガーを使用
+# .vscode/launch.jsonを参照
+```
+
+#### D.8.3 ログ確認
+
+```bash
+# アプリケーションログ
+# ブラウザの開発者ツールコンソール
+
+# サーバーログ
+# ターミナルの出力を確認
+
+# データベースログ（Docker使用時）
+docker logs testcasedb-postgres
+```
+
+### D.9 データのリセット
+
+```bash
+# データベース全削除
+npx prisma migrate reset
+
+# 再度マイグレーション
+npx prisma migrate dev
+
+# 初期データ再投入
+npx prisma db seed
+```
+
+### D.10 開発環境での注意事項
+
+#### D.10.1 セキュリティ
+
+- **本番データは使用しない**: 開発環境では必ずテストデータを使用
+- **認証情報の管理**: `.env.local`はGitに含めない（`.gitignore`で除外されていることを確認）
+- **AWS認証情報**: 開発用の限定的な権限のみを持つIAMユーザーを使用
+
+#### D.10.2 パフォーマンス
+
+- **Dockerリソース**: Docker Desktopに十分なメモリ（4GB以上推奨）を割り当てる
+- **Node.jsメモリ**: 大量データ処理時は `NODE_OPTIONS=--max-old-space-size=4096` を設定
+
+#### D.10.3 トラブルシューティング
+
+| 問題 | 解決方法 |
+|------|---------|
+| PostgreSQL接続エラー | Dockerコンテナが起動しているか確認 `docker ps` |
+| Prisma Client エラー | `npx prisma generate` を実行 |
+| ポート競合 | 他のアプリケーションが3000, 5432を使用していないか確認 |
+| npm install失敗 | `rm -rf node_modules package-lock.json && npm install` |
+
+### D.11 本番環境への移行
+
+開発環境での動作確認後、本番環境にデプロイする際は:
+
+1. **環境変数の確認**: 本番用の環境変数を設定（Secrets Manager使用）
+2. **データベースマイグレーション**: 本番RDSでマイグレーション実行
+3. **Dockerイメージビルド**: 本番用イメージをECRにプッシュ
+4. **ECSタスク定義更新**: 本番環境のタスク定義を更新
+5. **動作確認**: ヘルスチェックとログ監視
+
+```bash
+# 本番デプロイスクリプト実行例
+./scripts/deploy-production.sh
+```

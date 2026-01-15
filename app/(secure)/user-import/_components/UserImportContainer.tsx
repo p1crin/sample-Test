@@ -51,7 +51,7 @@ const UserImportContainer: React.FC = () => {
       try {
         setIsLoadingResults(true);
         const result = await apiGet<{ data: ImportResult[]; totalCount: number }>(
-          '/api/import-results?import_type=1&limit=20'
+          '/api/import-results?import_type=2&limit=20'
         );
         if (result.success && result.data) {
           setImportResults(result.data.data);
@@ -85,7 +85,7 @@ const UserImportContainer: React.FC = () => {
 
             // インポート結果を再取得
             const resultsResponse = await apiGet<{ data: ImportResult[]; totalCount: number }>(
-              '/api/import-results?import_type=1&limit=20'
+              '/api/import-results?import_type=2&limit=20'
             );
             if (resultsResponse.success && resultsResponse.data) {
               setImportResults(resultsResponse.data.data);
