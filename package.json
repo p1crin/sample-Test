@@ -13,6 +13,9 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
+    "@aws-sdk/client-batch": "^3.969.0",
+    "@aws-sdk/client-s3": "^3.969.0",
+    "@aws-sdk/s3-request-presigner": "^3.969.0",
     "@radix-ui/react-popover": "^1.1.14",
     "@reduxjs/toolkit": "^2.8.2",
     "autoprefixer": "^10.4.21",

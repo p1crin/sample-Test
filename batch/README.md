@@ -215,6 +215,54 @@ AWS Batchコンソールまたはアプリケーションからジョブを実�
 4,tanaka@example.com,田中次郎,成功,更新,
 ```
 
+## アプリケーションからの実行
+
+### 環境変数設定
+
+メインアプリケーションの`.env`に以下を追加:
+
+```bash
+# AWS Configuration
+AWS_REGION=ap-northeast-1
+
+# S3 Configuration
+S3_IMPORT_BUCKET=your-import-bucket-name
+
+# AWS Batch Configuration
+AWS_BATCH_JOB_QUEUE=your-job-queue-arn
+AWS_BATCH_USER_IMPORT_JOB_DEFINITION=your-user-import-job-definition-arn
+```
+
+### 実行フロー
+
+1. **ユーザインポート画面にアクセス** (`/user-import`)
+   - システム管理者のみアクセス可能
+
+2. **CSVファイルを選択してアップロード**
+   - `POST /api/batch/upload-url` でプリサインドURL取得
+   - ブラウザから直接S3にアップロード
+
+3. **バッチジョブを起動**
+   - `POST /api/batch/user-import` でAWS Batchジョブ起動
+   - ジョブIDを受け取り
+
+4. **ジョブステータスを監視**
+   - `GET /api/batch/status/[jobId]` で5秒ごとにポーリング
+   - ジョブステータス: SUBMITTED → PENDING → RUNNABLE → STARTING → RUNNING → SUCCEEDED/FAILED
+
+5. **インポート結果を確認**
+   - `GET /api/import-results` でインポート履歴を取得
+   - `tt_import_results`テーブルの`message`にエラー詳細が記録
+
+### 実装済みAPI
+
+| エンドポイント | メソッド | 説明 |
+|--------------|---------|------|
+| `/api/batch/upload-url` | POST | S3プリサインドURL生成 |
+| `/api/batch/user-import` | POST | ユーザインポートジョブ起動 |
+| `/api/batch/status/[jobId]` | GET | ジョブステータス取得 |
+| `/api/import-results` | GET | インポート結果履歴取得 |
+
 ## 今後の拡張
 
 - テストインポートバッチの実装
