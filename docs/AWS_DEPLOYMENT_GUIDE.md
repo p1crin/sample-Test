@@ -1793,15 +1793,219 @@ docker run --rm \
 
 ### D.7 AWS開発環境との連携
 
-#### D.7.1 AWS認証情報の設定
+開発環境でS3を使用する方法は2つあります：
+1. **LocalStackを使用したローカルS3エミュレーション**（推奨）
+2. **実際のAWS S3を使用**
+
+#### D.7.1 LocalStackを使用したローカルS3エミュレーション（推奨）
+
+LocalStackは、AWSサービスをローカルでエミュレートするツールです。開発環境でS3を使用する場合に推奨されます。
+
+##### D.7.1.1 LocalStackのインストールと起動
 
 ```bash
-# AWS CLIの設定
+# docker-compose.ymlを作成
+cat > docker-compose.yml <<'EOF'
+version: '3.8'
+
+services:
+  localstack:
+    image: localstack/localstack:latest
+    ports:
+      - "4566:4566"  # LocalStackのメインエンドポイント
+    environment:
+      - SERVICES=s3
+      - DEBUG=1
+      - DATA_DIR=/tmp/localstack/data
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    volumes:
+      - "./localstack-data:/tmp/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: testcase_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+volumes:
+  postgres-data:
+EOF
+
+# LocalStackとPostgreSQLを起動
+docker-compose up -d
+
+# LocalStackが起動するまで待機（約10秒）
+sleep 10
+```
+
+##### D.7.1.2 LocalStack用のS3バケット作成
+
+```bash
+# AWS CLIをLocalStackに向ける
+export AWS_ENDPOINT_URL=http://localhost:4566
+export AWS_ACCESS_KEY_ID=test
+export AWS_SECRET_ACCESS_KEY=test
+export AWS_REGION=ap-northeast-1
+
+# バケット作成
+aws s3 mb s3://testcasedb-dev-bucket --endpoint-url=http://localhost:4566
+
+# フォルダ構造作成
+aws s3api put-object \
+  --bucket testcasedb-dev-bucket \
+  --key user-import/ \
+  --endpoint-url=http://localhost:4566
+
+aws s3api put-object \
+  --bucket testcasedb-dev-bucket \
+  --key user-import-results/ \
+  --endpoint-url=http://localhost:4566
+
+aws s3api put-object \
+  --bucket testcasedb-dev-bucket \
+  --key control-specs/ \
+  --endpoint-url=http://localhost:4566
+
+aws s3api put-object \
+  --bucket testcasedb-dev-bucket \
+  --key dataflows/ \
+  --endpoint-url=http://localhost:4566
+
+aws s3api put-object \
+  --bucket testcasedb-dev-bucket \
+  --key evidences/ \
+  --endpoint-url=http://localhost:4566
+
+# バケット一覧確認
+aws s3 ls --endpoint-url=http://localhost:4566
+```
+
+##### D.7.1.3 環境変数の設定（LocalStack用）
+
+```bash
+# .env.localに追加
+cat >> .env.local <<'EOF'
+
+# LocalStack S3設定
+AWS_REGION=ap-northeast-1
+AWS_S3_BUCKET=testcasedb-dev-bucket
+AWS_ENDPOINT_URL=http://localhost:4566
+AWS_ACCESS_KEY_ID=test
+AWS_SECRET_ACCESS_KEY=test
+
+# 開発環境ではS3署名なしアクセスを許可
+S3_FORCE_PATH_STYLE=true
+EOF
+```
+
+##### D.7.1.4 S3クライアントのローカル設定
+
+アプリケーションコードでLocalStackを使用するために、S3クライアントの設定を調整します。
+
+**開発環境用S3クライアントヘルパー (`lib/s3-client.ts`):**
+
+```typescript
+import { S3Client } from '@aws-sdk/client-s3';
+
+// 開発環境でLocalStackを使用する場合の設定
+export const s3Client = new S3Client({
+  region: process.env.AWS_REGION || 'ap-northeast-1',
+  endpoint: process.env.AWS_ENDPOINT_URL, // LocalStack: http://localhost:4566
+  forcePathStyle: process.env.S3_FORCE_PATH_STYLE === 'true', // LocalStackではtrue
+  credentials: process.env.AWS_ENDPOINT_URL ? {
+    // LocalStack使用時はダミー認証情報
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID || 'test',
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'test',
+  } : undefined, // 本番環境ではIAMロールから自動取得
+});
+```
+
+##### D.7.1.5 LocalStackでのS3操作テスト
+
+```bash
+# テストファイルをアップロード
+echo "Test content" > test.txt
+aws s3 cp test.txt s3://testcasedb-dev-bucket/test.txt \
+  --endpoint-url=http://localhost:4566
+
+# ファイル一覧確認
+aws s3 ls s3://testcasedb-dev-bucket/ \
+  --endpoint-url=http://localhost:4566
+
+# ファイルをダウンロード
+aws s3 cp s3://testcasedb-dev-bucket/test.txt downloaded.txt \
+  --endpoint-url=http://localhost:4566
+
+# 内容確認
+cat downloaded.txt
+
+# クリーンアップ
+rm test.txt downloaded.txt
+```
+
+#### D.7.2 実際のAWS S3を使用する場合
+
+本番環境に近い環境でテストする場合は、実際のAWS S3を使用します。
+
+##### D.7.2.1 開発用IAMユーザーの作成
+
+```bash
+# IAMユーザー作成（AWS Management Consoleまたは以下のCLIで）
+aws iam create-user --user-name testcasedb-dev-user
+
+# S3アクセス用のポリシーを作成
+cat > dev-s3-policy.json <<'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::testcasedb-dev-bucket-*",
+        "arn:aws:s3:::testcasedb-dev-bucket-*/*"
+      ]
+    }
+  ]
+}
+EOF
+
+# ポリシーを作成
+aws iam create-policy \
+  --policy-name testcasedb-dev-s3-access \
+  --policy-document file://dev-s3-policy.json
+
+# ユーザーにポリシーをアタッチ
+aws iam attach-user-policy \
+  --user-name testcasedb-dev-user \
+  --policy-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):policy/testcasedb-dev-s3-access
+
+# アクセスキーを作成
+aws iam create-access-key --user-name testcasedb-dev-user
+
+# ⚠️ 出力されたAccessKeyIdとSecretAccessKeyを安全に保存してください
+```
+
+##### D.7.2.2 AWS認証情報の設定
+
+```bash
+# AWS CLIの設定（プロファイル使用）
 aws configure --profile testcasedb-dev
 
 # 以下を入力
-# AWS Access Key ID: [開発用アクセスキー]
-# AWS Secret Access Key: [開発用シークレットキー]
+# AWS Access Key ID: [上記で作成したアクセスキー]
+# AWS Secret Access Key: [上記で作成したシークレットキー]
 # Default region name: ap-northeast-1
 # Default output format: json
 
@@ -1809,18 +2013,191 @@ aws configure --profile testcasedb-dev
 export AWS_PROFILE=testcasedb-dev
 ```
 
-#### D.7.2 開発用S3バケットの作成
+##### D.7.2.3 開発用S3バケットの作成
 
 ```bash
-# バケット作成
-aws s3 mb s3://testcasedb-dev-bucket-$(aws sts get-caller-identity --query Account --output text)
+# アカウントIDを取得
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+# バケット作成（アカウントIDをサフィックスに付ける）
+aws s3 mb s3://testcasedb-dev-bucket-${AWS_ACCOUNT_ID}
+
+# バージョニング有効化
+aws s3api put-bucket-versioning \
+  --bucket testcasedb-dev-bucket-${AWS_ACCOUNT_ID} \
+  --versioning-configuration Status=Enabled
+
+# パブリックアクセスブロック（セキュリティ）
+aws s3api put-public-access-block \
+  --bucket testcasedb-dev-bucket-${AWS_ACCOUNT_ID} \
+  --public-access-block-configuration \
+    "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
 
 # フォルダ構造作成
-aws s3api put-object --bucket testcasedb-dev-bucket-$(aws sts get-caller-identity --query Account --output text) --key user-import/
-aws s3api put-object --bucket testcasedb-dev-bucket-$(aws sts get-caller-identity --query Account --output text) --key user-import-results/
+aws s3api put-object --bucket testcasedb-dev-bucket-${AWS_ACCOUNT_ID} --key user-import/
+aws s3api put-object --bucket testcasedb-dev-bucket-${AWS_ACCOUNT_ID} --key user-import-results/
+aws s3api put-object --bucket testcasedb-dev-bucket-${AWS_ACCOUNT_ID} --key control-specs/
+aws s3api put-object --bucket testcasedb-dev-bucket-${AWS_ACCOUNT_ID} --key dataflows/
+aws s3api put-object --bucket testcasedb-dev-bucket-${AWS_ACCOUNT_ID} --key evidences/
+aws s3api put-object --bucket testcasedb-dev-bucket-${AWS_ACCOUNT_ID} --key capl-files/
+
+# バケット確認
+aws s3 ls s3://testcasedb-dev-bucket-${AWS_ACCOUNT_ID}/
 ```
 
-#### D.7.3 開発用RDSへの接続
+##### D.7.2.4 環境変数の設定（実AWS用）
+
+```bash
+# .env.localに追加（LocalStack設定を置き換え）
+cat > .env.local <<EOF
+# Database
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/testcase_db
+
+# NextAuth
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=development-secret-key-change-in-production
+
+# AWS S3設定（実環境）
+AWS_REGION=ap-northeast-1
+AWS_S3_BUCKET=testcasedb-dev-bucket-${AWS_ACCOUNT_ID}
+# 開発環境では認証情報をここに記載するか、AWS CLIのプロファイルを使用
+# AWS_ACCESS_KEY_ID=（IAMユーザーのアクセスキー）
+# AWS_SECRET_ACCESS_KEY=（IAMユーザーのシークレットキー）
+
+# AWS Batch（開発環境では通常使用しない）
+# AWS_BATCH_JOB_QUEUE=
+# AWS_BATCH_USER_IMPORT_JOB_DEFINITION=
+EOF
+```
+
+**セキュリティのベストプラクティス:**
+
+環境変数にアクセスキーを直接記載する代わりに、AWS CLIのプロファイルを使用することを推奨します。
+
+```bash
+# プロファイルを使用する場合
+export AWS_PROFILE=testcasedb-dev
+npm run dev
+```
+
+#### D.7.3 S3を使ったアプリケーションのテスト
+
+##### D.7.3.1 ユーザーインポート機能のテスト
+
+```bash
+# テスト用CSVファイルを作成
+cat > test-users.csv <<'EOF'
+id,name,email,user_role,department,company,password
+,開発太郎,dev.taro@example.local,0,開発部,ローカル株式会社,devpass123
+,テスト花子,test.hanako@example.local,2,QA部,ローカル株式会社,testpass456
+EOF
+
+# LocalStackの場合
+aws s3 cp test-users.csv s3://testcasedb-dev-bucket/user-import/test-users.csv \
+  --endpoint-url=http://localhost:4566
+
+# 実AWS S3の場合
+aws s3 cp test-users.csv s3://testcasedb-dev-bucket-${AWS_ACCOUNT_ID}/user-import/test-users.csv
+
+# バッチジョブを起動（アプリケーションのUIまたはAPIから）
+# または直接バッチスクリプトを実行
+cd batch
+npm run user-import
+
+# 結果を確認
+# LocalStackの場合
+aws s3 ls s3://testcasedb-dev-bucket/user-import-results/ \
+  --endpoint-url=http://localhost:4566
+
+# 実AWS S3の場合
+aws s3 ls s3://testcasedb-dev-bucket-${AWS_ACCOUNT_ID}/user-import-results/
+```
+
+##### D.7.3.2 ファイルアップロード機能のテスト
+
+アプリケーションのファイルアップロード機能をテストする場合:
+
+```bash
+# アプリケーションを起動
+npm run dev
+
+# ブラウザで http://localhost:3000 にアクセス
+# テストケースにファイル（制御仕様書やデータフロー）をアップロード
+
+# S3にファイルがアップロードされたことを確認
+# LocalStackの場合
+aws s3 ls s3://testcasedb-dev-bucket/control-specs/ --recursive \
+  --endpoint-url=http://localhost:4566
+
+# 実AWS S3の場合
+aws s3 ls s3://testcasedb-dev-bucket-${AWS_ACCOUNT_ID}/control-specs/ --recursive
+```
+
+##### D.7.3.3 S3クライアントの動作確認スクリプト
+
+開発環境でS3クライアントが正しく設定されているか確認するためのスクリプト:
+
+```typescript
+// scripts/test-s3-connection.ts
+import { S3Client, ListBucketsCommand, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+
+const s3Client = new S3Client({
+  region: process.env.AWS_REGION || 'ap-northeast-1',
+  endpoint: process.env.AWS_ENDPOINT_URL,
+  forcePathStyle: process.env.S3_FORCE_PATH_STYLE === 'true',
+  credentials: process.env.AWS_ENDPOINT_URL ? {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID || 'test',
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'test',
+  } : undefined,
+});
+
+async function testS3Connection() {
+  try {
+    // バケット一覧取得
+    const listCommand = new ListBucketsCommand({});
+    const listResponse = await s3Client.send(listCommand);
+    console.log('✅ S3接続成功');
+    console.log('バケット一覧:', listResponse.Buckets?.map(b => b.Name));
+
+    // テストファイルをアップロード
+    const bucketName = process.env.AWS_S3_BUCKET || 'testcasedb-dev-bucket';
+    const testKey = 'test/connection-test.txt';
+    const putCommand = new PutObjectCommand({
+      Bucket: bucketName,
+      Key: testKey,
+      Body: 'Test content from S3 connection test',
+      ContentType: 'text/plain',
+    });
+    await s3Client.send(putCommand);
+    console.log(`✅ アップロード成功: s3://${bucketName}/${testKey}`);
+
+    // ファイルをダウンロード
+    const getCommand = new GetObjectCommand({
+      Bucket: bucketName,
+      Key: testKey,
+    });
+    const getResponse = await s3Client.send(getCommand);
+    const content = await getResponse.Body?.transformToString();
+    console.log('✅ ダウンロード成功');
+    console.log('内容:', content);
+
+  } catch (error) {
+    console.error('❌ S3接続エラー:', error);
+    process.exit(1);
+  }
+}
+
+testS3Connection();
+```
+
+実行:
+
+```bash
+# TypeScriptを直接実行
+npx tsx scripts/test-s3-connection.ts
+```
+
+#### D.7.4 開発用RDSへの接続
 
 開発用RDSインスタンスがある場合:
 
@@ -1902,12 +2279,92 @@ npx prisma db seed
 
 #### D.10.3 トラブルシューティング
 
+##### 基本的な問題
+
 | 問題 | 解決方法 |
 |------|---------|
 | PostgreSQL接続エラー | Dockerコンテナが起動しているか確認 `docker ps` |
 | Prisma Client エラー | `npx prisma generate` を実行 |
 | ポート競合 | 他のアプリケーションが3000, 5432を使用していないか確認 |
 | npm install失敗 | `rm -rf node_modules package-lock.json && npm install` |
+
+##### S3関連の問題
+
+| 問題 | 原因 | 解決方法 |
+|------|------|---------|
+| LocalStackに接続できない | LocalStackが起動していない | `docker-compose ps` で確認、`docker-compose up -d` で再起動 |
+| S3バケットが見つからない | バケットが作成されていない | `aws s3 ls --endpoint-url=http://localhost:4566` で確認、未作成なら作成 |
+| 認証情報エラー（LocalStack） | 環境変数が設定されていない | `.env.local` に `AWS_ACCESS_KEY_ID=test` `AWS_SECRET_ACCESS_KEY=test` を追加 |
+| 認証情報エラー（実AWS） | IAMユーザーの認証情報が正しくない | `aws configure --profile testcasedb-dev` で再設定 |
+| ファイルアップロードが失敗 | S3クライアントの設定が正しくない | `endpoint`, `forcePathStyle`, `credentials` の設定を確認 |
+| `InvalidAccessKeyId` | アクセスキーが無効 | AWS Management Consoleで新しいアクセスキーを生成 |
+| `NoSuchBucket` | バケット名が正しくない | 環境変数 `AWS_S3_BUCKET` の値を確認 |
+| `AccessDenied` | IAMポリシーが不足 | IAMユーザーに適切なS3ポリシーがアタッチされているか確認 |
+
+##### S3接続の診断コマンド
+
+```bash
+# LocalStackの状態確認
+docker-compose ps
+
+# LocalStackのログ確認
+docker-compose logs localstack
+
+# LocalStackのS3エンドポイント確認
+curl http://localhost:4566/_localstack/health | jq
+
+# バケット一覧確認（LocalStack）
+aws s3 ls --endpoint-url=http://localhost:4566
+
+# バケット一覧確認（実AWS）
+aws s3 ls --profile testcasedb-dev
+
+# 環境変数の確認
+echo "AWS_ENDPOINT_URL: $AWS_ENDPOINT_URL"
+echo "AWS_S3_BUCKET: $AWS_S3_BUCKET"
+echo "AWS_REGION: $AWS_REGION"
+
+# S3クライアント接続テスト
+npx tsx scripts/test-s3-connection.ts
+```
+
+##### よくあるエラーメッセージと対処法
+
+**エラー: `connect ECONNREFUSED 127.0.0.1:4566`**
+
+LocalStackが起動していません。
+
+```bash
+docker-compose up -d localstack
+sleep 10  # 起動を待つ
+```
+
+**エラー: `The bucket you are attempting to access must be addressed using the specified endpoint`**
+
+`forcePathStyle` が設定されていません。
+
+```bash
+# .env.localに追加
+S3_FORCE_PATH_STYLE=true
+```
+
+**エラー: `Credential should be scoped to a valid region`**
+
+リージョンが正しく設定されていません。
+
+```bash
+# .env.localで確認
+AWS_REGION=ap-northeast-1
+```
+
+**エラー: `The AWS Access Key Id you provided does not exist in our records`**
+
+実AWS使用時にアクセスキーが無効です。
+
+```bash
+# 認証情報を再設定
+aws configure --profile testcasedb-dev
+```
 
 ### D.11 本番環境への移行
 
