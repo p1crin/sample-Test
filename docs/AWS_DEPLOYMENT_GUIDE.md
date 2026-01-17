@@ -1386,6 +1386,359 @@ aws ecs update-service \
 echo "Deployment completed!"
 ```
 
+### 17.4 開発環境でのS3アクセステスト
+
+本番デプロイ前に、開発元からS3のファイルアップロード/ダウンロード機能をテストします。
+
+#### 17.4.1 開発元IPの追加
+
+**1. 開発元のグローバルIPを確認:**
+
+```bash
+# 現在のグローバルIPを確認
+curl ifconfig.me
+# または
+curl https://checkip.amazonaws.com
+
+# 例: 198.51.100.50
+```
+
+**2. WAF IPセットに開発元IPを追加:**
+
+1. **WAF & Shield** → **IP sets** → `testcasedb-proxy-ip`
+2. **Edit** をクリック
+3. IPアドレスを追加:
+
+```
+203.0.113.50/32   # 客先プロキシ（既存）
+198.51.100.50/32  # 開発元IP（追加）← あなたのIPに置き換え
+```
+
+**3. ALB セキュリティグループに開発元IPを追加:**
+
+1. **EC2** → **セキュリティグループ** → `testcasedb-alb-sg`
+2. **インバウンドルール** → **インバウンドルールを編集**
+3. **ルールを追加**:
+
+| タイプ | ポート | ソース | 説明 |
+|--------|--------|--------|------|
+| HTTPS | 443 | 198.51.100.50/32 | 開発元テスト用 |
+
+#### 17.4.2 S3バケットの作成とテスト
+
+**1. S3バケットを作成:**
+
+```bash
+# AWSアカウントIDを確認
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+# S3バケット作成
+aws s3 mb s3://testcasedb-files-${AWS_ACCOUNT_ID} --region ap-northeast-1
+
+# バケットのバージョニングを有効化
+aws s3api put-bucket-versioning \
+  --bucket testcasedb-files-${AWS_ACCOUNT_ID} \
+  --versioning-configuration Status=Enabled
+
+# パブリックアクセスをブロック（セキュリティ必須）
+aws s3api put-public-access-block \
+  --bucket testcasedb-files-${AWS_ACCOUNT_ID} \
+  --public-access-block-configuration \
+    "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+
+# 暗号化を有効化
+aws s3api put-bucket-encryption \
+  --bucket testcasedb-files-${AWS_ACCOUNT_ID} \
+  --server-side-encryption-configuration '{
+    "Rules": [{
+      "ApplyServerSideEncryptionByDefault": {
+        "SSEAlgorithm": "AES256"
+      }
+    }]
+  }'
+```
+
+**2. フォルダ構造を作成:**
+
+```bash
+BUCKET_NAME="testcasedb-files-${AWS_ACCOUNT_ID}"
+
+# 各フォルダを作成
+aws s3api put-object --bucket ${BUCKET_NAME} --key control-specs/
+aws s3api put-object --bucket ${BUCKET_NAME} --key dataflows/
+aws s3api put-object --bucket ${BUCKET_NAME} --key evidences/
+aws s3api put-object --bucket ${BUCKET_NAME} --key imports/
+aws s3api put-object --bucket ${BUCKET_NAME} --key capl-files/
+
+# 確認
+aws s3 ls s3://${BUCKET_NAME}/
+```
+
+**3. AWS CLIでアップロード/ダウンロードテスト:**
+
+```bash
+# テストファイルをアップロード
+echo "Test file content" > test.txt
+aws s3 cp test.txt s3://${BUCKET_NAME}/test/test.txt
+
+# ダウンロード
+aws s3 cp s3://${BUCKET_NAME}/test/test.txt downloaded.txt
+
+# 確認
+cat downloaded.txt
+
+# クリーンアップ
+rm test.txt downloaded.txt
+```
+
+#### 17.4.3 ローカル環境でのテスト
+
+**1. 環境変数を設定:**
+
+`.env.local` を作成:
+
+```bash
+# AWS設定
+AWS_REGION=ap-northeast-1
+AWS_S3_BUCKET=testcasedb-files-123456789012  # ← あなたのアカウントIDに置き換え
+AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE       # ← IAMユーザーのアクセスキー
+AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+
+# データベース接続
+DATABASE_URL=postgresql://user:password@localhost:5432/testcase_db
+
+# NextAuth
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=your-secret-here
+```
+
+**2. APIエンドポイントを実装:**
+
+`app/api/upload/route.ts`:
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { requireAuth } from '@/app/lib/auth';
+
+const s3Client = new S3Client({
+  region: process.env.AWS_REGION || 'ap-northeast-1',
+});
+
+export async function POST(req: NextRequest) {
+  try {
+    const user = await requireAuth(req);
+    const formData = await req.formData();
+    const file = formData.get('file') as File;
+    const fileType = formData.get('fileType') as string;
+    const testGroupId = formData.get('testGroupId') as string;
+    const tid = formData.get('tid') as string;
+
+    if (!file || !fileType || !testGroupId || !tid) {
+      return NextResponse.json(
+        { success: false, error: 'Missing required fields' },
+        { status: 400 }
+      );
+    }
+
+    const arrayBuffer = await file.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    const timestamp = Date.now();
+    const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const s3Key = `${fileType}/${testGroupId}/${tid}/${timestamp}_${sanitizedFileName}`;
+
+    const command = new PutObjectCommand({
+      Bucket: process.env.AWS_S3_BUCKET!,
+      Key: s3Key,
+      Body: buffer,
+      ContentType: file.type,
+      Metadata: {
+        'uploaded-by': user.email,
+        'original-filename': file.name,
+      },
+    });
+
+    await s3Client.send(command);
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        key: s3Key,
+        fileName: file.name,
+        fileSize: file.size,
+      },
+    });
+  } catch (error) {
+    console.error('Upload failed:', error);
+    return NextResponse.json(
+      { success: false, error: 'Upload failed' },
+      { status: 500 }
+    );
+  }
+}
+```
+
+`app/api/download/route.ts`:
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { requireAuth } from '@/app/lib/auth';
+
+const s3Client = new S3Client({
+  region: process.env.AWS_REGION || 'ap-northeast-1',
+});
+
+export async function GET(req: NextRequest) {
+  try {
+    await requireAuth(req);
+
+    const { searchParams } = new URL(req.url);
+    const s3Key = searchParams.get('key');
+
+    if (!s3Key) {
+      return NextResponse.json(
+        { success: false, error: 'Missing key parameter' },
+        { status: 400 }
+      );
+    }
+
+    const command = new GetObjectCommand({
+      Bucket: process.env.AWS_S3_BUCKET!,
+      Key: s3Key,
+    });
+
+    const signedUrl = await getSignedUrl(s3Client, command, {
+      expiresIn: 900, // 15分
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        url: signedUrl,
+        expiresIn: 900,
+      },
+    });
+  } catch (error) {
+    console.error('Download URL generation failed:', error);
+    return NextResponse.json(
+      { success: false, error: 'Failed to generate download URL' },
+      { status: 500 }
+    );
+  }
+}
+```
+
+**3. S3アクセステストスクリプト:**
+
+`scripts/test-s3.ts`:
+
+```typescript
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+
+const s3Client = new S3Client({
+  region: process.env.AWS_REGION || 'ap-northeast-1'
+});
+
+async function testS3() {
+  const bucketName = process.env.AWS_S3_BUCKET!;
+  const testKey = 'test/test-file.txt';
+  const testContent = 'Hello from S3 test!';
+
+  try {
+    console.log('🧪 Testing S3 upload...');
+    await s3Client.send(new PutObjectCommand({
+      Bucket: bucketName,
+      Key: testKey,
+      Body: testContent,
+      ContentType: 'text/plain',
+    }));
+    console.log('✅ Upload successful!');
+
+    console.log('🧪 Testing S3 download...');
+    const response = await s3Client.send(new GetObjectCommand({
+      Bucket: bucketName,
+      Key: testKey,
+    }));
+    const data = await response.Body?.transformToString();
+    console.log('✅ Download successful!');
+    console.log('📄 Content:', data);
+
+  } catch (error) {
+    console.error('❌ S3 test failed:', error);
+    process.exit(1);
+  }
+}
+
+testS3();
+```
+
+実行:
+
+```bash
+npx tsx scripts/test-s3.ts
+```
+
+**4. 開発サーバーで動作確認:**
+
+```bash
+# 開発サーバー起動
+npm run dev
+
+# ブラウザで http://localhost:3000 にアクセス
+# テストケース編集画面でファイルをアップロード
+# アップロードしたファイルをダウンロード
+```
+
+#### 17.4.4 動作確認チェックリスト
+
+| 項目 | 確認 |
+|------|------|
+| ☐ 開発元IPをWAF IPセットに追加した | |
+| ☐ 開発元IPをALB SGに追加した | |
+| ☐ S3バケットが作成されている | |
+| ☐ S3バケットのパブリックアクセスがブロックされている | |
+| ☐ S3バケットの暗号化が有効 | |
+| ☐ AWS CLIでアップロード/ダウンロードが成功する | |
+| ☐ ローカル環境からS3アクセスが成功する | |
+| ☐ アプリケーション経由でアップロードが成功する | |
+| ☐ アプリケーション経由でダウンロードが成功する | |
+| ☐ CloudWatch Logsでログが確認できる | |
+
+#### 17.4.5 トラブルシューティング
+
+**エラー: Access Denied (S3)**
+
+```bash
+# IAMユーザー/ロールの権限を確認
+aws iam get-user-policy --user-name your-user --policy-name S3Access
+
+# S3バケットポリシーを確認
+aws s3api get-bucket-policy --bucket testcasedb-files-${AWS_ACCOUNT_ID}
+```
+
+**エラー: Bucket does not exist**
+
+```bash
+# バケットの存在確認
+aws s3 ls | grep testcasedb
+
+# リージョン確認
+aws s3api get-bucket-location --bucket testcasedb-files-${AWS_ACCOUNT_ID}
+```
+
+**エラー: 403 Forbidden (ALB/WAF)**
+
+- WAF IPセットに開発元IPが追加されているか確認
+- ALB セキュリティグループに開発元IPが追加されているか確認
+- IPアドレスが `/32` で終わっているか確認
+
+**テスト完了後:**
+
+本番環境に移行する際は、開発用IPを削除するか、本番用のプロキシIPのみを残すようにしてください。
+
 ---
 
 ## 18. 動作確認
