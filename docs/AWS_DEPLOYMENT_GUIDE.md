@@ -432,6 +432,157 @@ S3 へのアクセスをプライベートネットワーク内に留めるた�
 | VPC | testcasedb-vpc |
 | ルートテーブル | プライベートサブネットのルートテーブル |
 
+### 6.4 S3バケットポリシーの設定（セキュリティ強化）
+
+本番環境のS3バケットへのアクセスをVPC内に制限することで、セキュリティを強化します。
+
+**重要な注意事項:**
+- このバケットポリシーを設定すると、**VPC外（ローカル開発環境など）からはアクセスできなくなります**
+- 開発環境からS3を使用する場合は、**別の開発用バケット**を作成してください（付録D参照）
+- 本番バケットと開発バケットを明確に分離することがベストプラクティスです
+
+#### 6.4.1 VPC制限付きバケットポリシー（推奨）
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowVPCEndpointAccess",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::testcasedb-files-{アカウントID}",
+        "arn:aws:s3:::testcasedb-files-{アカウントID}/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:SourceVpce": "vpce-xxxxxxxx"
+        }
+      }
+    },
+    {
+      "Sid": "AllowECSTaskRole",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": [
+          "arn:aws:iam::{アカウントID}:role/testcasedb-ecs-task-role",
+          "arn:aws:iam::{アカウントID}:role/testcasedb-batch-task-role"
+        ]
+      },
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::testcasedb-files-{アカウントID}",
+        "arn:aws:s3:::testcasedb-files-{アカウントID}/*"
+      ]
+    }
+  ]
+}
+```
+
+**設定手順:**
+
+```bash
+# VPCエンドポイントIDを取得
+VPC_ENDPOINT_ID=$(aws ec2 describe-vpc-endpoints \
+  --filters "Name=tag:Name,Values=testcasedb-s3-endpoint" \
+  --query 'VpcEndpoints[0].VpcEndpointId' \
+  --output text)
+
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+BUCKET_NAME="testcasedb-files-${AWS_ACCOUNT_ID}"
+
+# バケットポリシーJSONを作成
+cat > s3-bucket-policy.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowVPCEndpointAccess",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${BUCKET_NAME}",
+        "arn:aws:s3:::${BUCKET_NAME}/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:SourceVpce": "${VPC_ENDPOINT_ID}"
+        }
+      }
+    },
+    {
+      "Sid": "AllowECSTaskRole",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": [
+          "arn:aws:iam::${AWS_ACCOUNT_ID}:role/testcasedb-ecs-task-role",
+          "arn:aws:iam::${AWS_ACCOUNT_ID}:role/testcasedb-batch-task-role"
+        ]
+      },
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${BUCKET_NAME}",
+        "arn:aws:s3:::${BUCKET_NAME}/*"
+      ]
+    }
+  ]
+}
+EOF
+
+# バケットポリシーを適用
+aws s3api put-bucket-policy \
+  --bucket ${BUCKET_NAME} \
+  --policy file://s3-bucket-policy.json
+```
+
+#### 6.4.2 バケットポリシーを設定しない場合の注意事項
+
+セキュリティ上の理由でバケットポリシーを設定しない場合（開発初期段階など）：
+
+- IAMロールの権限のみでアクセス制御が行われます
+- 開発環境からもアクセス可能になりますが、適切なIAM認証情報が必要です
+- 本番環境移行前には必ずVPC制限付きポリシーを設定してください
+
+**セキュリティリスク:**
+- バケットポリシーなしの場合、IAM認証情報が漏洩すると任意の場所からアクセス可能
+- 本番環境では必ずVPC制限またはIP制限を設定することを強く推奨
+
+### 6.5 開発環境と本番環境のバケット分離
+
+| 環境 | バケット名 | バケットポリシー | アクセス元 |
+|------|-----------|----------------|-----------|
+| **本番環境** | `testcasedb-files-{アカウントID}` | VPC制限あり | VPC内（ECS、Batch）のみ |
+| **開発環境** | `testcasedb-dev-bucket-{アカウントID}` | 制限なし | ローカル開発環境、VPC内 |
+
+**ベストプラクティス:**
+1. 本番バケットにはVPC制限を必ず設定
+2. 開発用バケットは別途作成し、制限を緩和
+3. 開発環境から本番バケットへのアクセスは禁止
+4. 環境変数で使用するバケットを明確に分離
+
 ---
 
 ## 7. Secrets Manager の設定
@@ -1447,6 +1598,8 @@ curl https://testcasedb.example.com/api/health
 | RDS | パブリックアクセスが無効になっているか | ☐ |
 | S3 | パブリックアクセスがブロックされているか | ☐ |
 | S3 | 暗号化が有効になっているか | ☐ |
+| **S3** | **本番バケットにVPC制限付きバケットポリシーが設定されているか** | ☐ |
+| S3 | 開発用バケットと本番用バケットが分離されているか | ☐ |
 | Secrets | シークレットが Secrets Manager に保存されているか | ☐ |
 
 ### 19.3 アクセス制御
@@ -1564,6 +1717,19 @@ curl https://testcasedb.example.com/api/health
 
 ### B. プロキシIP制限のベストプラクティス
 
+#### IP制限の適用範囲
+
+| サービス | IP制限の種類 | 適用範囲 | 目的 |
+|---------|------------|---------|------|
+| **WAF** | プロキシIP許可ルール | ALBへのHTTPS通信 | Webアプリケーションへのアクセス制限 |
+| **ALB SG** | プロキシIPのみ許可 | ALBのインバウンド | ネットワークレベルでのアクセス制限 |
+| **S3** | VPC制限（バケットポリシー） | S3バケットへの全アクセス | VPC外からのアクセス防止 |
+| **RDS** | VPC内のSGのみ許可 | PostgreSQLへの接続 | データベースへの直接アクセス防止 |
+
+**重要:** プロキシIP制限はALB/WAFに適用され、**Webアプリケーションへのアクセス**を制御します。S3やRDSは別の制限（VPC制限、SG制限）で保護します。
+
+#### ベストプラクティス
+
 1. **プロキシIPの管理**
    - プロキシサーバーの固定IPのみを登録
    - IP変更時の更新フローを確立（WAF IPセット + ALB SG）
@@ -1583,6 +1749,11 @@ curl https://testcasedb.example.com/api/health
    - WAFログでプロキシIP以外からのアクセス試行を監視
    - 異常なアクセスパターンを検出
    - プロキシIPからの大量アクセスを監視
+
+5. **S3の独立したアクセス制御**
+   - S3にはプロキシIP制限ではなく**VPC制限**を使用
+   - 本番S3バケットはVPC内からのみアクセス可能に設定（6.4節参照）
+   - 開発環境では別の開発用バケットを使用
 
 ### C. 参考リンク
 
@@ -1793,9 +1964,29 @@ docker run --rm \
 
 ### D.7 AWS開発環境との連携
 
+**重要: なぜ開発環境では別のS3バケットが必要か**
+
+本番環境のS3バケットには、セキュリティ強化のため**VPC制限付きバケットポリシー**が設定されています（6.4節参照）。このポリシーが設定されると：
+
+- ✅ VPC内（ECS、Batch）からのアクセス：許可
+- ❌ ローカル開発環境からのアクセス：**拒否**
+- ❌ VPC外の任意の場所からのアクセス：**拒否**
+
+そのため、開発環境では以下のいずれかの方法を使用します：
+
+#### 開発環境でS3を使用する方法
+
+| 方法 | メリット | デメリット | 推奨度 |
+|------|---------|-----------|--------|
+| **LocalStack** | ・完全ローカル<br>・インターネット不要<br>・無料<br>・本番データと完全分離 | ・実AWSと完全互換ではない | ⭐⭐⭐ |
+| **開発用S3バケット** | ・実AWSと同じ挙動<br>・本番に近い環境 | ・AWS費用発生<br>・インターネット接続必要 | ⭐⭐ |
+| ~~本番S3バケット~~ | なし | ・VPC制限で使用不可<br>・データ破損リスク | ❌ 非推奨 |
+
+**注意:** 本番環境のバケットポリシーを設定する前（開発初期段階）であれば、開発環境から本番バケットにアクセス可能ですが、**絶対に推奨しません**。環境の分離はセキュリティとデータ保護の基本です。
+
 開発環境でS3を使用する方法は2つあります：
 1. **LocalStackを使用したローカルS3エミュレーション**（推奨）
-2. **実際のAWS S3を使用**
+2. **実際のAWS S3を使用**（開発用バケット）
 
 #### D.7.1 LocalStackを使用したローカルS3エミュレーション（推奨）
 
