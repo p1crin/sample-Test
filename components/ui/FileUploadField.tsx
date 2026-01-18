@@ -64,13 +64,16 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
     const newFiles = await processClipboardItems(items);
 
     // アップロード処理が設定されている場合は各ファイルをアップロード
+    // 注: 順次アップロードすることで、file_noの競合（race condition）を防ぐ
     let processedFiles = newFiles;
     if (onFileUpload) {
       setUploading(true);
       try {
-        processedFiles = await Promise.all(
-          newFiles.map(file => onFileUpload(file))
-        );
+        processedFiles = [];
+        for (const file of newFiles) {
+          const uploadedFile = await onFileUpload(file);
+          processedFiles.push(uploadedFile);
+        }
       } catch (error) {
         console.error('File upload failed:', error);
         setUploading(false);
@@ -95,13 +98,16 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
     const newFiles = await processFileList(fileList);
 
     // アップロード処理が設定されている場合は各ファイルをアップロード
+    // 注: 順次アップロードすることで、file_noの競合（race condition）を防ぐ
     let processedFiles = newFiles;
     if (onFileUpload) {
       setUploading(true);
       try {
-        processedFiles = await Promise.all(
-          newFiles.map(file => onFileUpload(file))
-        );
+        processedFiles = [];
+        for (const file of newFiles) {
+          const uploadedFile = await onFileUpload(file);
+          processedFiles.push(uploadedFile);
+        }
       } catch (error) {
         console.error('File upload failed:', error);
         setUploading(false);
