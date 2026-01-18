@@ -5,6 +5,7 @@ import { QueryTimer, logAPIEndpoint, logDatabaseQuery } from '@/utils/database-l
 import { handleError } from '@/utils/errorHandler';
 import { ERROR_MESSAGES } from '@/constants/errorMessages';
 import { STATUS_CODES } from '@/constants/statusCodes';
+import { UserRole, TestRole } from '@/types/database';
 
 // GET /api/test-groups/[groupId]/permitted-users - テストグループに許可されたユーザー一覧を取得
 export async function GET(
@@ -15,6 +16,7 @@ export async function GET(
   const user = await requireAuth(req);
   const { groupId: groupIdParam } = await params;
   const groupId = parseInt(groupIdParam, 10);
+  console.log('permitted-users', groupId);
 
   try {
     // 形式チェック
@@ -40,11 +42,11 @@ export async function GET(
       );
     }
 
-    // テストグループに関連付けられたタグを取得
-    const queryTimer = new QueryTimer();
-    const testGroupTags = await prisma.tt_test_group_tags.findMany({
+    // ユーザーのテストグループにおけるテストロールを取得
+    const userRoleTimer = new QueryTimer();
+    const userTags = await prisma.mt_user_tags.findMany({
       where: {
-        test_group_id: groupId,
+        user_id: user.id,
         is_deleted: false,
       },
       select: {
@@ -53,84 +55,171 @@ export async function GET(
     });
     logDatabaseQuery({
       operation: 'SELECT',
-      table: 'tt_test_group_tags',
-      executionTime: queryTimer.elapsed(),
-      rowsReturned: testGroupTags.length,
+      table: 'mt_user_tags',
+      executionTime: userRoleTimer.elapsed(),
+      rowsReturned: userTags.length,
       query: 'findMany',
-      params: [{ test_group_id: groupId, is_deleted: false }],
+      params: [{ user_id: user.id, is_deleted: false }],
     });
 
-    const tagIds = testGroupTags.map(tgt => tgt.tag_id);
+    const userTagIds = userTags.map(ut => ut.tag_id);
+    let userTestRole: TestRole | null = null;
 
-    // タグに関連付けられたユーザーを取得
-    let taggedUsers: Array<{ id: number; name: string; email: string; is_deleted: boolean }> = [];
-
-    if (tagIds.length > 0) {
-      const usersTimer = new QueryTimer();
-      const userTags = await prisma.mt_user_tags.findMany({
+    if (userTagIds.length > 0) {
+      const testRoleTimer = new QueryTimer();
+      const testGroupTag = await prisma.tt_test_group_tags.findFirst({
         where: {
-          tag_id: { in: tagIds },
+          test_group_id: groupId,
+          tag_id: { in: userTagIds },
           is_deleted: false,
         },
-        include: {
-          mt_users: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              is_deleted: true,
-            },
-          },
+        select: {
+          test_role: true,
+        },
+        orderBy: {
+          test_role: 'asc', // 最も権限の高いロール（DESIGNER=0が最小）を取得
         },
       });
       logDatabaseQuery({
         operation: 'SELECT',
-        table: 'mt_user_tags',
-        executionTime: usersTimer.elapsed(),
-        rowsReturned: userTags.length,
-        query: 'findMany',
-        params: [{ tag_id: { in: tagIds }, is_deleted: false }],
+        table: 'tt_test_group_tags',
+        executionTime: testRoleTimer.elapsed(),
+        rowsReturned: testGroupTag ? 1 : 0,
+        query: 'findFirst',
+        params: [{ test_group_id: groupId, tag_id: { in: userTagIds }, is_deleted: false }],
       });
 
-      taggedUsers = userTags
-        .filter(ut => !ut.mt_users.is_deleted)
-        .map(ut => ut.mt_users);
+      if (testGroupTag) {
+        userTestRole = testGroupTag.test_role;
+      }
     }
 
-    // 現在のユーザー自身を取得
-    const currentUserTimer = new QueryTimer();
-    const currentUser = await prisma.mt_users.findUnique({
-      where: {
-        id: user.id,
-        is_deleted: false,
-      },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        is_deleted: true,
-      },
-    });
-    logDatabaseQuery({
-      operation: 'SELECT',
-      table: 'mt_users',
-      executionTime: currentUserTimer.elapsed(),
-      rowsReturned: currentUser ? 1 : 0,
-      query: 'findUnique',
-      params: [{ id: user.id, is_deleted: false }],
-    });
+    // ADMINまたはテスト設計者の場合のみ全ユーザーを返す
+    const shouldReturnAllUsers = user.user_role === UserRole.ADMIN || userTestRole === TestRole.DESIGNER;
 
-    // タグに紐づいたユーザー＋自分自身をマージして重複を排除
-    const allUsers = [...taggedUsers];
-    if (currentUser && !currentUser.is_deleted) {
-      allUsers.push(currentUser);
+    let uniqueUsers: Array<{ id: number; name: string; email: string }> = [];
+
+    if (shouldReturnAllUsers) {
+      // テストグループに関連付けられたタグを取得（テスト設計者とテスト実施者のみ）
+      const queryTimer = new QueryTimer();
+      const testGroupTags = await prisma.tt_test_group_tags.findMany({
+        where: {
+          test_group_id: groupId,
+          test_role: { in: [TestRole.DESIGNER, TestRole.EXECUTOR] },
+          is_deleted: false,
+        },
+        select: {
+          tag_id: true,
+        },
+      });
+      logDatabaseQuery({
+        operation: 'SELECT',
+        table: 'tt_test_group_tags',
+        executionTime: queryTimer.elapsed(),
+        rowsReturned: testGroupTags.length,
+        query: 'findMany',
+        params: [{ test_group_id: groupId, test_role: { in: [TestRole.DESIGNER, TestRole.EXECUTOR] }, is_deleted: false }],
+      });
+
+      const tagIds = testGroupTags.map(tgt => tgt.tag_id);
+
+      // タグに関連付けられたユーザーを取得
+      let taggedUsers: Array<{ id: number; name: string; email: string; is_deleted: boolean }> = [];
+
+      if (tagIds.length > 0) {
+        const usersTimer = new QueryTimer();
+        const userTagsQuery = await prisma.mt_user_tags.findMany({
+          where: {
+            tag_id: { in: tagIds },
+            is_deleted: false,
+          },
+          include: {
+            mt_users: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                is_deleted: true,
+              },
+            },
+          },
+        });
+        logDatabaseQuery({
+          operation: 'SELECT',
+          table: 'mt_user_tags',
+          executionTime: usersTimer.elapsed(),
+          rowsReturned: userTagsQuery.length,
+          query: 'findMany',
+          params: [{ tag_id: { in: tagIds }, is_deleted: false }],
+        });
+
+        taggedUsers = userTagsQuery
+          .filter(ut => !ut.mt_users.is_deleted)
+          .map(ut => ut.mt_users);
+      }
+
+      // 現在のユーザー自身を取得
+      const currentUserTimer = new QueryTimer();
+      const currentUser = await prisma.mt_users.findUnique({
+        where: {
+          id: user.id,
+          is_deleted: false,
+        },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          is_deleted: true,
+        },
+      });
+      logDatabaseQuery({
+        operation: 'SELECT',
+        table: 'mt_users',
+        executionTime: currentUserTimer.elapsed(),
+        rowsReturned: currentUser ? 1 : 0,
+        query: 'findUnique',
+        params: [{ id: user.id, is_deleted: false }],
+      });
+
+      // タグに紐づいたユーザー＋自分自身をマージして重複を排除
+      const allUsers = [...taggedUsers];
+      if (currentUser && !currentUser.is_deleted) {
+        allUsers.push(currentUser);
+      }
+
+      uniqueUsers = Array.from(
+        new Map(
+          allUsers.map(u => [u.id, { id: u.id, name: u.name, email: u.email }])
+        ).values()
+      );
+    } else {
+      // テスト実施者・閲覧者の場合は自分自身のみを返す
+      const currentUserTimer = new QueryTimer();
+      const currentUser = await prisma.mt_users.findUnique({
+        where: {
+          id: user.id,
+          is_deleted: false,
+        },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          is_deleted: true,
+        },
+      });
+      logDatabaseQuery({
+        operation: 'SELECT',
+        table: 'mt_users',
+        executionTime: currentUserTimer.elapsed(),
+        rowsReturned: currentUser ? 1 : 0,
+        query: 'findUnique',
+        params: [{ id: user.id, is_deleted: false }],
+      });
+
+      if (currentUser && !currentUser.is_deleted) {
+        uniqueUsers = [{ id: currentUser.id, name: currentUser.name, email: currentUser.email }];
+      }
     }
-
-    const uniqueUsers = Array.from(
-      new Map(
-        allUsers.map(u => [u.id, { id: u.id, name: u.name, email: u.email }])
-      ).values()
-    );
 
     logAPIEndpoint({
       method: 'GET',
