@@ -1,0 +1,256 @@
+# ==========================================
+# GitLab CI/CD パイプライン設定
+# 客先AWS環境への自動デプロイ
+# ==========================================
+
+# Dockerイメージを使用したビルド・デプロイ
+image: docker:24-cli
+
+# ステージ定義
+stages:
+  - build          # Dockerイメージのビルド
+  - deploy         # AWS ECSへのデプロイ
+  - deploy-batch   # AWS Batchワーカーのデプロイ
+
+# 共通設定
+variables:
+  AWS_REGION: ap-northeast-1
+  ECR_REPOSITORY: prooflink-app
+  ECR_BATCH_REPOSITORY: prooflink-batch
+  ECS_CLUSTER: prooflink-cluster
+  ECS_SERVICE: prooflink-service
+  ECS_TASK_DEFINITION: prooflink-task
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+
+# Docker-in-Dockerサービス
+services:
+  - docker:24-dind
+
+# 実行前の準備
+before_script:
+  # AWS CLIのインストール
+  - apk add --no-cache python3 py3-pip aws-cli jq curl
+  # AWS認証情報の設定
+  - aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+  - aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+  - aws configure set region $AWS_REGION
+  # ECRログイン
+  - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+
+# ==========================================
+# メインアプリケーションのビルド
+# ==========================================
+build:app:
+  stage: build
+  only:
+    - main
+    - develop
+    - tags
+  except:
+    changes:
+      - docs/**/*
+      - "*.md"
+  script:
+    - echo "Building Docker image for main application..."
+    - export IMAGE_TAG=${CI_COMMIT_SHORT_SHA}
+    - export ECR_REGISTRY=$(aws ecr describe-repositories --repository-names $ECR_REPOSITORY --query 'repositories[0].repositoryUri' --output text | cut -d'/' -f1)
+
+    # Dockerイメージをビルド
+    - docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+    - docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+    # ECRにプッシュ
+    - docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+    - docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+    # 次のステージで使用するため、イメージURIを保存
+    - echo "IMAGE_URI=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" > build.env
+  artifacts:
+    reports:
+      dotenv: build.env
+    expire_in: 1 hour
+
+# ==========================================
+# AWS Batchワーカーのビルド
+# ==========================================
+build:batch:
+  stage: build
+  only:
+    - main
+    - develop
+  rules:
+    - changes:
+      - batch/**/*
+      - prisma/**/*
+  script:
+    - echo "Building Docker image for Batch worker..."
+    - export IMAGE_TAG=${CI_COMMIT_SHORT_SHA}
+    - export ECR_REGISTRY=$(aws ecr describe-repositories --repository-names $ECR_BATCH_REPOSITORY --query 'repositories[0].repositoryUri' --output text | cut -d'/' -f1)
+
+    # Batchワーカーイメージをビルド
+    - cd batch
+    - docker build -t $ECR_REGISTRY/$ECR_BATCH_REPOSITORY:$IMAGE_TAG .
+    - docker tag $ECR_REGISTRY/$ECR_BATCH_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_BATCH_REPOSITORY:latest
+
+    # ECRにプッシュ
+    - docker push $ECR_REGISTRY/$ECR_BATCH_REPOSITORY:$IMAGE_TAG
+    - docker push $ECR_REGISTRY/$ECR_BATCH_REPOSITORY:latest
+
+    # 次のステージで使用するため、イメージURIを保存
+    - echo "BATCH_IMAGE_URI=$ECR_REGISTRY/$ECR_BATCH_REPOSITORY:$IMAGE_TAG" > batch-build.env
+  artifacts:
+    reports:
+      dotenv: batch-build.env
+    expire_in: 1 hour
+
+# ==========================================
+# ECS Fargateへのデプロイ(本番環境)
+# ==========================================
+deploy:production:
+  stage: deploy
+  only:
+    - main
+  dependencies:
+    - build:app
+  environment:
+    name: production
+    url: https://prooflink.example.com
+  script:
+    - echo "Deploying to AWS ECS Fargate (Production)..."
+
+    # 現在のタスク定義を取得
+    - aws ecs describe-task-definition --task-definition $ECS_TASK_DEFINITION --query 'taskDefinition' > task-definition.json
+
+    # 新しいイメージURIでタスク定義を更新
+    - |
+      cat task-definition.json | \
+        jq --arg IMAGE "$IMAGE_URI" '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
+        > new-task-definition.json
+
+    # 新しいタスク定義を登録
+    - aws ecs register-task-definition --cli-input-json file://new-task-definition.json
+
+    # ECSサービスを更新
+    - |
+      aws ecs update-service \
+        --cluster $ECS_CLUSTER \
+        --service $ECS_SERVICE \
+        --task-definition $ECS_TASK_DEFINITION \
+        --force-new-deployment
+
+    # デプロイの完了を待機(最大10分)
+    - |
+      echo "Waiting for service to become stable..."
+      aws ecs wait services-stable \
+        --cluster $ECS_CLUSTER \
+        --services $ECS_SERVICE \
+        --no-paginate \
+        --cli-read-timeout 600 \
+        --cli-connect-timeout 60 || echo "Warning: Service stability check timed out or failed"
+
+    # デプロイ結果を表示
+    - |
+      echo "===== Deployment Summary ====="
+      echo "Environment: Production"
+      echo "Image: $IMAGE_URI"
+      echo "Cluster: $ECS_CLUSTER"
+      echo "Service: $ECS_SERVICE"
+      echo "Commit: $CI_COMMIT_SHORT_SHA"
+      echo "=============================="
+
+# ==========================================
+# ECS Fargateへのデプロイ(開発環境)
+# ==========================================
+deploy:develop:
+  stage: deploy
+  only:
+    - develop
+  dependencies:
+    - build:app
+  environment:
+    name: development
+    url: https://dev-prooflink.example.com
+  script:
+    - echo "Deploying to AWS ECS Fargate (Development)..."
+    - export DEV_ECS_CLUSTER="${ECS_CLUSTER}-dev"
+    - export DEV_ECS_SERVICE="${ECS_SERVICE}-dev"
+    - export DEV_ECS_TASK_DEFINITION="${ECS_TASK_DEFINITION}-dev"
+
+    # 開発環境へのデプロイ(本番と同じ手順)
+    - aws ecs describe-task-definition --task-definition $DEV_ECS_TASK_DEFINITION --query 'taskDefinition' > task-definition.json
+    - |
+      cat task-definition.json | \
+        jq --arg IMAGE "$IMAGE_URI" '.containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
+        > new-task-definition.json
+    - aws ecs register-task-definition --cli-input-json file://new-task-definition.json
+    - |
+      aws ecs update-service \
+        --cluster $DEV_ECS_CLUSTER \
+        --service $DEV_ECS_SERVICE \
+        --task-definition $DEV_ECS_TASK_DEFINITION \
+        --force-new-deployment
+
+# ==========================================
+# AWS Batch Job Definitionの更新
+# ==========================================
+deploy:batch:
+  stage: deploy-batch
+  only:
+    - main
+  dependencies:
+    - build:batch
+  when: manual  # 手動実行
+  script:
+    - echo "Updating AWS Batch Job Definition..."
+    - export JOB_DEFINITION_NAME="prooflink-user-import"
+
+    # 既存のJob Definitionを取得
+    - |
+      aws batch describe-job-definitions \
+        --job-definition-name $JOB_DEFINITION_NAME \
+        --status ACTIVE \
+        --query 'jobDefinitions[0]' \
+        > job-definition.json
+
+    # 新しいイメージURIで更新
+    - |
+      cat job-definition.json | \
+        jq --arg IMAGE "$BATCH_IMAGE_URI" '.containerProperties.image = $IMAGE | del(.jobDefinitionArn, .revision, .status)' \
+        > new-job-definition.json
+
+    # 新しいリビジョンを登録
+    - aws batch register-job-definition --cli-input-json file://new-job-definition.json
+
+    - echo "Batch Job Definition updated successfully"
+
+# ==========================================
+# ロールバック(手動実行のみ)
+# ==========================================
+rollback:production:
+  stage: deploy
+  only:
+    - main
+  when: manual
+  script:
+    - echo "Rolling back to previous task definition..."
+
+    # 前のタスク定義リビジョンを取得
+    - |
+      PREVIOUS_REVISION=$(aws ecs list-task-definitions \
+        --family-prefix $ECS_TASK_DEFINITION \
+        --status ACTIVE \
+        --sort DESC \
+        --query 'taskDefinitionArns[1]' \
+        --output text)
+
+    - echo "Rolling back to: $PREVIOUS_REVISION"
+
+    # 前のリビジョンでサービスを更新
+    - |
+      aws ecs update-service \
+        --cluster $ECS_CLUSTER \
+        --service $ECS_SERVICE \
+        --task-definition $PREVIOUS_REVISION
+
+    - echo "Rollback completed"
