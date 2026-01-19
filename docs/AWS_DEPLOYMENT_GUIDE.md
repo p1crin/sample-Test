@@ -357,6 +357,263 @@ jobs:
 2. **開発環境**: LocalStack（付録D参照）
 3. **外部API使用**: 頻度に応じてLambda代替を検討
 
+#### 3.4.6 既存のNAT Gatewayを削除する手順
+
+**「既にNAT Gatewayを設定してしまいました。後から外すことは可能ですか？」**
+
+→ **はい、可能です！** ただし、**段階的に移行**することを強く推奨します。
+
+##### 移行ステップ（安全な手順）
+
+**ステップ1: 事前準備（NAT Gatewayは維持したまま）**
+
+まず、CI/CDパイプラインとVPC Endpointを構築します。
+
+```bash
+# 1. VPC Endpointを作成（S3は既にあるはず）
+# ECR Interface Endpointを作成
+aws ec2 create-vpc-endpoint \
+  --vpc-id vpc-xxxxxxxx \
+  --vpc-endpoint-type Interface \
+  --service-name com.amazonaws.ap-northeast-1.ecr.dkr \
+  --subnet-ids subnet-xxxxxxxx subnet-yyyyyyyy \
+  --security-group-ids sg-xxxxxxxx
+
+aws ec2 create-vpc-endpoint \
+  --vpc-id vpc-xxxxxxxx \
+  --vpc-endpoint-type Interface \
+  --service-name com.amazonaws.ap-northeast-1.ecr.api \
+  --subnet-ids subnet-xxxxxxxx subnet-yyyyyyyy \
+  --security-group-ids sg-xxxxxxxx
+
+# 2. Secrets Manager Endpoint（オプション）
+aws ec2 create-vpc-endpoint \
+  --vpc-id vpc-xxxxxxxx \
+  --vpc-endpoint-type Interface \
+  --service-name com.amazonaws.ap-northeast-1.secretsmanager \
+  --subnet-ids subnet-xxxxxxxx subnet-yyyyyyyy \
+  --security-group-ids sg-xxxxxxxx
+```
+
+**ステップ2: CI/CDパイプラインの構築**
+
+GitHub Actionsまたは他のCI/CDサービスでビルドパイプラインを構築します。
+
+```yaml
+# .github/workflows/deploy.yml
+name: Deploy to ECS
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-northeast-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Build, tag, and push image to Amazon ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: testcasedb/app
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+      - name: Update ECS service
+        run: |
+          aws ecs update-service \
+            --cluster testcasedb-cluster \
+            --service testcasedb-service \
+            --force-new-deployment \
+            --region ap-northeast-1
+```
+
+**ステップ3: 動作確認（NAT Gatewayは維持したまま）**
+
+CI/CDパイプラインが正常に動作することを確認します。
+
+```bash
+# 1. GitHub Actionsでビルド・デプロイ実行
+git add .github/workflows/deploy.yml
+git commit -m "Add CI/CD pipeline"
+git push origin main
+
+# 2. GitHub Actionsのログで成功を確認
+# https://github.com/your-org/testcasedb/actions
+
+# 3. ECSタスクが正常に起動することを確認
+aws ecs describe-services \
+  --cluster testcasedb-cluster \
+  --services testcasedb-service \
+  --query 'services[0].{running:runningCount,desired:desiredCount}'
+```
+
+**ステップ4: 外部API使用の確認**
+
+アプリケーションが実行時に外部APIを使用していないか確認します。
+
+```bash
+# アプリケーションログで外部APIへのアクセスを確認
+aws logs tail /ecs/testcasedb --follow | grep -E "http://|https://" | grep -v "amazonaws.com"
+
+# 外部APIへのアクセスが見つかった場合：
+# → NAT Gatewayは削除できません（または Lambda経由に変更）
+# 外部APIへのアクセスがない場合：
+# → NAT Gateway削除可能！
+```
+
+**ステップ5: NAT Gatewayの削除**
+
+すべての確認が完了したら、NAT Gatewayを削除します。
+
+```bash
+# 1. 現在のNAT Gateway IDを取得
+NAT_ID=$(aws ec2 describe-nat-gateways \
+  --filter "Name=vpc-id,Values=vpc-xxxxxxxx" \
+  --filter "Name=state,Values=available" \
+  --query 'NatGateways[0].NatGatewayId' \
+  --output text)
+
+echo "NAT Gateway ID: $NAT_ID"
+
+# 2. プライベートサブネットのルートテーブルIDを取得
+ROUTE_TABLE_ID=$(aws ec2 describe-route-tables \
+  --filters "Name=vpc-id,Values=vpc-xxxxxxxx" \
+  --filters "Name=tag:Name,Values=*private*" \
+  --query 'RouteTables[0].RouteTableId' \
+  --output text)
+
+echo "Route Table ID: $ROUTE_TABLE_ID"
+
+# 3. NAT Gatewayへのルートを削除
+aws ec2 delete-route \
+  --route-table-id $ROUTE_TABLE_ID \
+  --destination-cidr-block 0.0.0.0/0
+
+echo "Route deleted"
+
+# 4. 動作確認（既存のECSタスクが正常に動作するか）
+# 数分待ってから確認
+sleep 300
+
+aws ecs describe-services \
+  --cluster testcasedb-cluster \
+  --services testcasedb-service \
+  --query 'services[0].{running:runningCount,desired:desiredCount}'
+
+# 5. 問題なければNAT Gatewayを削除
+aws ec2 delete-nat-gateway --nat-gateway-id $NAT_ID
+
+echo "NAT Gateway deleted: $NAT_ID"
+
+# 6. Elastic IPの取得と解放
+EIP_ALLOCATION_ID=$(aws ec2 describe-addresses \
+  --filters "Name=tag:Name,Values=*nat*" \
+  --query 'Addresses[0].AllocationId' \
+  --output text)
+
+# NAT Gateway削除完了を待つ（約5分）
+echo "Waiting for NAT Gateway deletion..."
+aws ec2 wait nat-gateway-deleted --nat-gateway-ids $NAT_ID
+
+# Elastic IPを解放
+aws ec2 release-address --allocation-id $EIP_ALLOCATION_ID
+
+echo "Elastic IP released: $EIP_ALLOCATION_ID"
+```
+
+##### 削除時のチェックリスト
+
+| 項目 | 確認内容 | 状態 |
+|------|---------|------|
+| ✅ VPC Endpoint | S3 Gateway Endpoint作成済み | ☐ |
+| ✅ VPC Endpoint | ECR Interface Endpoint作成済み | ☐ |
+| ✅ CI/CD | GitHub Actions等でビルドパイプライン構築済み | ☐ |
+| ✅ 動作確認 | CI/CDでビルド・デプロイが成功 | ☐ |
+| ✅ 外部API | アプリケーションが外部APIを使用していない | ☐ |
+| ✅ ログ確認 | ECSタスクが正常に起動している | ☐ |
+
+##### ロールバック手順（問題が発生した場合）
+
+NAT Gateway削除後に問題が発生した場合、すぐに復旧できます。
+
+```bash
+# 1. Elastic IPを割り当て
+EIP_ALLOC=$(aws ec2 allocate-address --domain vpc --query 'AllocationId' --output text)
+
+# 2. NAT Gatewayを再作成
+PUBLIC_SUBNET_ID="subnet-xxxxxxxx"  # パブリックサブネットID
+NAT_ID=$(aws ec2 create-nat-gateway \
+  --subnet-id $PUBLIC_SUBNET_ID \
+  --allocation-id $EIP_ALLOC \
+  --query 'NatGateway.NatGatewayId' \
+  --output text)
+
+# 3. NAT Gatewayが利用可能になるまで待つ（約5分）
+aws ec2 wait nat-gateway-available --nat-gateway-ids $NAT_ID
+
+# 4. ルートテーブルにルートを追加
+aws ec2 create-route \
+  --route-table-id $ROUTE_TABLE_ID \
+  --destination-cidr-block 0.0.0.0/0 \
+  --nat-gateway-id $NAT_ID
+
+echo "NAT Gateway restored: $NAT_ID"
+```
+
+##### よくある問題と対処法
+
+| 問題 | 原因 | 対処法 |
+|------|------|--------|
+| ECSタスクが起動しない | ECR Endpointがない | ECR Interface Endpointを作成 |
+| Secrets取得エラー | Secrets Manager Endpointがない | Secrets Manager Endpointを作成 |
+| 外部API接続エラー | 外部APIを使用している | NAT Gatewayを復旧、またはLambda経由に変更 |
+| ビルドが失敗する | CI/CDが未構築 | GitHub Actionsを設定 |
+
+##### コスト削減効果の確認
+
+NAT Gateway削除後、コストが削減されていることを確認します。
+
+```bash
+# AWS Cost Explorerで確認（マネジメントコンソール）
+# サービス: Cost Explorer
+# フィルター: NAT Gateway
+# 期間: 前月 vs 今月
+
+# 削除前: ~$45/月
+# 削除後: ~$0/月
+# 実質削減額: 約 $30-45/月（VPC Endpoint追加分を差し引き）
+```
+
+##### 推奨タイムライン
+
+| タイミング | 作業内容 | 所要時間 |
+|-----------|---------|---------|
+| **Week 1** | VPC Endpoint作成 | 30分 |
+| **Week 2** | CI/CDパイプライン構築 | 2-3時間 |
+| **Week 3** | 動作確認・外部API確認 | 1週間（観察期間） |
+| **Week 4** | NAT Gateway削除 | 30分 |
+
+**重要:** 本番環境では、必ず**ステージング環境で先に試す**ことを強く推奨します。
+
 ---
 
 ## 4. セキュリティグループの作成
