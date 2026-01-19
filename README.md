@@ -181,21 +181,21 @@ npm run dev
 
 ### 自動デプロイ(CI/CD)
 
-mainブランチへのプッシュで自動的にAWS ECSにデプロイされます。
+mainブランチへのプッシュで自動的に客先AWS ECSにデプロイされます。
 
 #### セットアップ手順
 
-1. GitHub Secretsの設定
-   - `AWS_ACCESS_KEY_ID`
-   - `AWS_SECRET_ACCESS_KEY`
-   - `DATABASE_URL`
+1. GitLab CI/CD変数の設定
+   - `AWS_ACCESS_KEY_ID` (客先AWS)
+   - `AWS_SECRET_ACCESS_KEY` (客先AWS)
+   - `ECR_REGISTRY` (客先ECRレジストリURL)
 
 2. mainブランチにプッシュ
    ```bash
    git push origin main
    ```
 
-3. GitHub Actionsが自動的にビルド・デプロイを実行
+3. GitLab CI/CDが自動的にビルド・デプロイを実行
 
 詳細は [CI/CDセットアップガイド](./docs/CI_CD_SETUP.md) を参照してください。
 

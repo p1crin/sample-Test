@@ -146,38 +146,36 @@ aws ecs update-service \
   --force-new-deployment
 ```
 
-#### 方法B: GitHub Actionsでデプロイ
+#### 方法B: GitLab CI/CDでデプロイ
 
 CI/CDセットアップ後は、`main`ブランチにプッシュするだけで自動デプロイされます。
 
 ---
 
-## 自動デプロイの設定
+## 自動デプロイの設定(GitLab CI/CD)
 
-### 1. GitHub Secretsの設定
+### 1. GitLab CI/CD変数の設定
 
-リポジトリの `Settings` → `Secrets and variables` → `Actions` で以下を追加:
+プロジェクトの `Settings` → `CI/CD` → `Variables` で以下を追加:
 
-| Secret名 | 値 |
-|---------|-----|
-| `AWS_ACCESS_KEY_ID` | AWSアクセスキーID |
-| `AWS_SECRET_ACCESS_KEY` | AWSシークレットキー |
-| `DATABASE_URL` | RDS接続文字列 |
+| 変数名 | 値 | Protected | Masked |
+|--------|-----|-----------|--------|
+| `AWS_ACCESS_KEY_ID` | 客先AWSアクセスキーID | ✅ | ✅ |
+| `AWS_SECRET_ACCESS_KEY` | 客先AWSシークレットキー | ✅ | ✅ |
+| `ECR_REGISTRY` | ECRレジストリURL | - | - |
 
-### 2. GitHub Environmentの設定
+### 2. GitLab Environmentの設定(オプション)
 
-`Settings` → `Environments` → `New environment`
+`Deployments` → `Environments` で環境を確認:
 
 - Environment名: `production`
-- Protection rules: 必要に応じて承認者を設定
-- Environment URL: `https://prooflink.example.com`
+- URL: `https://prooflink.example.com`
 
-### 3. ワークフローファイルの確認
+### 3. パイプライン設定ファイルの確認
 
 以下のファイルが存在することを確認:
 
-- `.github/workflows/deploy-production.yml`
-- `.github/workflows/deploy-batch.yml`
+- `.gitlab-ci.yml`
 
 ### 4. 初回デプロイ
 
@@ -189,13 +187,13 @@ git merge your-branch
 git push origin main
 ```
 
-GitHub Actionsが自動的にデプロイを開始します。
+GitLab CI/CDが自動的にデプロイを開始します。
 
 ### 5. デプロイ状況の確認
 
-1. GitHubリポジトリの **Actions** タブを開く
-2. 実行中のワークフローをクリック
-3. 各ステップの進行状況を確認
+1. GitLabプロジェクトの **CI/CD** → **Pipelines** を開く
+2. 実行中のパイプラインをクリック
+3. 各ジョブの進行状況を確認
 
 ---
 
