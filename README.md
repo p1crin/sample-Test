@@ -146,3 +146,76 @@ settings
 ## ブラウザサポート
 
 - Chrome/Edge 最新版
+
+## AWSデプロイメント
+
+### クイックスタート
+
+```bash
+# ローカル開発環境のセットアップ
+npm install
+cp .env.example .env
+# .envファイルを編集してデータベース接続情報などを設定
+npx prisma migrate dev
+npm run dev
+```
+
+詳細は [クイックスタートガイド](./docs/QUICKSTART.md) を参照してください。
+
+### 本番環境へのデプロイ
+
+このプロジェクトはAWS ECS Fargateへのデプロイに対応しています。
+
+#### 必要なAWSリソース
+
+- VPC、サブネット、セキュリティグループ
+- RDS PostgreSQL
+- S3バケット
+- ECR(コンテナレジストリ)
+- ECS Fargate
+- ALB(ロードバランサー)
+- Route 53、ACM証明書
+- AWS Batch(ユーザーインポート用)
+
+詳細な構築手順は [AWSデプロイメントガイド](./docs/AWS_DEPLOYMENT_GUIDE.md) を参照してください。
+
+### 自動デプロイ(CI/CD)
+
+mainブランチへのプッシュで自動的にAWS ECSにデプロイされます。
+
+#### セットアップ手順
+
+1. GitHub Secretsの設定
+   - `AWS_ACCESS_KEY_ID`
+   - `AWS_SECRET_ACCESS_KEY`
+   - `DATABASE_URL`
+
+2. mainブランチにプッシュ
+   ```bash
+   git push origin main
+   ```
+
+3. GitHub Actionsが自動的にビルド・デプロイを実行
+
+詳細は [CI/CDセットアップガイド](./docs/CI_CD_SETUP.md) を参照してください。
+
+## ドキュメント
+
+- [クイックスタートガイド](./docs/QUICKSTART.md) - 最速セットアップ手順
+- [AWSデプロイメントガイド](./docs/AWS_DEPLOYMENT_GUIDE.md) - AWS環境構築の詳細手順
+- [CI/CDセットアップ](./docs/CI_CD_SETUP.md) - 自動デプロイの設定方法
+- [ローカルS3セットアップ](./docs/LOCAL_DEVELOPMENT_S3_SETUP.md) - ローカル開発でS3を使う方法
+
+## 環境変数
+
+アプリケーションで使用する環境変数は `.env.example` を参照してください。
+
+主要な環境変数:
+
+- `DATABASE_URL` - PostgreSQL接続文字列
+- `NEXTAUTH_URL` - アプリケーションのベースURL
+- `NEXTAUTH_SECRET` - JWT署名用シークレット
+- `AWS_REGION` - AWSリージョン
+- `AWS_S3_BUCKET_NAME` - S3バケット名(本番環境)
+- `AWS_BATCH_JOB_QUEUE` - AWS Batchジョブキュー
+- `AWS_BATCH_USER_IMPORT_JOB_DEFINITION` - ユーザーインポートジョブ定義
