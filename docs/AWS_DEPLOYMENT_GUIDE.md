@@ -272,13 +272,90 @@ aws configure
 
 #### 3.4.5 コスト最適化の選択肢
 
-| 構成 | 月額コスト概算 | メリット | デメリット |
-|------|--------------|---------|-----------|
-| **NAT Gateway のみ** | ~$45 | シンプル | 高コスト |
-| **NAT + VPC Endpoint** | ~$50-60 | セキュア、AWSサービスは高速 | 複雑 |
-| **NAT なし + VPC Endpoint のみ** | ~$15 | 最安 | ❌ 外部リソースにアクセス不可 |
+**重要な発見:** npmやDocker Hubへのアクセスは**ビルド時のみ**必要で、**実行時には不要**です！
 
-**重要:** 本システムでは、npm パッケージのインストールやDocker イメージの取得が必要なため、**NAT ゲートウェイは必須**です。ただし、S3 は VPC エンドポイント（Gateway型、無料）経由でアクセスすることで、一部のデータ転送料金を削減できます。
+##### 各フェーズで必要なリソース
+
+| フェーズ | 必要なリソース | NAT Gateway | VPC Endpoint |
+|---------|--------------|-------------|--------------|
+| **ビルド時** | npm、Docker Hub、GitHub | ✅ 必要 | ECR、S3 |
+| **実行時** | S3、RDS、Secrets Manager、外部API | 外部API使用時のみ | S3、ECR、Secrets Mgr |
+
+##### オプション比較
+
+| オプション | NAT使用 | 月額コスト | 実装難易度 | 推奨度 |
+|-----------|---------|-----------|-----------|--------|
+| **A: CI/CDでビルド** | ❌ 不要 | **~$15** | 中 | ⭐⭐⭐ |
+| **B: 必要時のみNAT作成** | 一時的 | **~$15-20** | 高 | ⭐⭐ |
+| **C: 常時NAT稼働** | ✅ 常時 | **~$45-60** | 低 | ⭐ |
+
+**オプションA（推奨）: CI/CDパイプラインでビルド**
+
+GitHub Actions等の外部CI/CDサービスでビルドを実行し、ECRにプッシュします。
+
+```yaml
+# .github/workflows/deploy.yml の例
+name: Deploy to ECS
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest  # GitHub提供（AWS NAT不要）
+    steps:
+      - uses: actions/checkout@v3
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v1
+      - name: Build and push
+        run: |
+          docker build -t $ECR_REGISTRY/testcasedb:${{ github.sha }} .
+          docker push $ECR_REGISTRY/testcasedb:${{ github.sha }}
+```
+
+**メリット:**
+- ✅ NAT Gateway 不要 → 月額 ~$45 削減
+- ✅ ビルド速度が速い
+- ✅ ビルド履歴がGitHubで管理できる
+
+**オプションB: 必要時のみNAT作成**
+
+デプロイ時のみNAT Gatewayを一時的に作成・削除します。
+
+**メリット:**
+- NAT使用時間が最小（月額 ~$0.50-2）
+
+**デメリット:**
+- ❌ 運用スクリプトが複雑
+- ❌ NAT作成に5-10分かかる
+- ❌ 緊急デプロイに不向き
+
+**オプションC: 常時NAT稼働（最もシンプル）**
+
+従来通り、NAT Gatewayを常時稼働させます。
+
+**メリット:**
+- ✅ シンプル
+- ✅ すぐ利用可能
+
+**デメリット:**
+- ❌ 高コスト（月額 ~$45）
+
+**外部APIへのアクセスについて:**
+
+アプリケーション実行時に外部API（決済、通知等）が必要な場合：
+
+| 外部API使用頻度 | 推奨構成 |
+|---------------|---------|
+| なし | オプションA（NAT不要） |
+| 低頻度（数回/日） | オプションA + Lambda経由 |
+| 高頻度 | オプションC（NAT必須） |
+
+**推奨事項:**
+
+1. **本番環境**: オプションA（CI/CDでビルド）
+2. **開発環境**: LocalStack（付録D参照）
+3. **外部API使用**: 頻度に応じてLambda代替を検討
 
 ---
 
@@ -1779,20 +1856,50 @@ curl https://testcasedb.example.com/api/health
 
 ### A. コスト見積もり（月額概算）
 
-#### A.1 基本構成のコスト
+#### A.1 基本構成のコスト（3パターン）
+
+##### パターン1: 従来型（NAT Gateway常時稼働）
 
 | サービス | 構成 | 概算月額 (USD) | 備考 |
 |---------|------|---------------|------|
 | ECS Fargate | 1 vCPU, 2GB × 2 タスク | ~$60 | 24時間稼働 |
 | RDS PostgreSQL | db.t3.medium, Multi-AZ | ~$150 | 高可用性構成 |
 | Application ALB | 1 ALB | ~$25 | インターネット向け |
-| **NAT Gateway** | **1 NAT + データ転送 100GB** | **~$45** | **外部API、npm等に必須** |
+| **NAT Gateway** | **1 NAT + データ転送 100GB** | **~$45** | **ビルド+実行時** |
 | S3 | 100GB ストレージ | ~$5 | ファイル保存 |
 | WAF | 1 Web ACL + ルール | ~$10 | セキュリティ |
 | CloudWatch | ログ + メトリクス | ~$10 | 監視 |
 | Route 53 | ホストゾーン + クエリ | ~$1 | DNS |
 | ACM | パブリック証明書 | **無料** | SSL/TLS |
-| **基本構成 合計** | | **~$306** | |
+| **合計** | | **~$306** | シンプルだが高コスト |
+
+##### パターン2: 最適化型（CI/CDでビルド）⭐推奨
+
+| サービス | 構成 | 概算月額 (USD) | 備考 |
+|---------|------|---------------|------|
+| ECS Fargate | 1 vCPU, 2GB × 2 タスク | ~$60 | 24時間稼働 |
+| RDS PostgreSQL | db.t3.medium, Multi-AZ | ~$150 | 高可用性構成 |
+| Application ALB | 1 ALB | ~$25 | インターネット向け |
+| ~~NAT Gateway~~ | ~~削除~~ | **$0** | **CI/CDでビルド** ✅ |
+| VPC Endpoint (S3) | Gateway | **無料** | S3アクセス |
+| VPC Endpoint (ECR) | Interface | ~$15 | Dockerイメージ取得 |
+| S3 | 100GB ストレージ | ~$5 | ファイル保存 |
+| WAF | 1 Web ACL + ルール | ~$10 | セキュリティ |
+| CloudWatch | ログ + メトリクス | ~$10 | 監視 |
+| Route 53 | ホストゾーン + クエリ | ~$1 | DNS |
+| ACM | パブリック証明書 | **無料** | SSL/TLS |
+| GitHub Actions | ビルド時間 | ~$0-10 | 無料枠あり |
+| **合計** | | **~$276** | **月額$30削減** ⭐ |
+
+##### パターン3: 外部API使用時（NAT + VPC Endpoint）
+
+| サービス | 構成 | 概算月額 (USD) | 備考 |
+|---------|------|---------------|------|
+| 基本構成 | パターン1と同じ | ~$261 | |
+| **NAT Gateway** | **1 NAT + データ転送** | **~$45** | **外部API用** |
+| VPC Endpoint (S3) | Gateway | **無料** | S3アクセス |
+| VPC Endpoint (ECR) | Interface | ~$15 | Dockerイメージ |
+| **合計** | | **~$321** | 外部API必須の場合 |
 
 #### A.2 VPC エンドポイント追加時のコスト（オプション）
 
@@ -1820,28 +1927,79 @@ NAT Gateway の代替として VPC エンドポイントを追加する場合（
 | ECR Interface Endpoint | 追加（オプション） | ~$15 | Docker取得を高速化 |
 | **最適化構成 合計** | | **~$306-321** | S3はVPC経由、npmはNAT経由 |
 
-#### A.3 コスト削減のポイント
+#### A.3 最大のコスト削減策（NAT Gateway削除）
 
-| 項目 | 削減方法 | 削減額/月 | 影響 |
-|------|---------|----------|------|
-| **S3 VPC Endpoint** | Gateway型を追加（無料） | ~$5-10 | ✅ なし（推奨） |
-| NAT Gateway の配置 | 1AZ → 2AZ（高可用性） | +$45 | 可用性向上（コスト増） |
-| ECS タスク数 | 2 → 1（開発環境） | -$30 | ❌ 可用性低下 |
-| RDS インスタンス | Multi-AZ → Single-AZ | -$75 | ❌ 可用性大幅低下 |
+**重要:** npmは**ビルド時のみ**必要なため、CI/CDでビルドすることで**NAT Gateway を完全に削除**できます！
 
-**重要な注意事項:**
+| 項目 | 削減方法 | 削減額/月 | 実装難易度 | 推奨度 |
+|------|---------|----------|-----------|--------|
+| **NAT Gateway削除** | **CI/CDでビルド** | **-$45** | 中 | ⭐⭐⭐ |
+| S3 VPC Endpoint | Gateway型を追加（無料） | -$5-10 | 低 | ⭐⭐⭐ |
+| ECR VPC Endpoint | Interface型を追加 | -$5（NAT削減分） | 低 | ⭐⭐ |
+| ECS タスク数 | 2 → 1（開発環境） | -$30 | 低 | ⭐（開発のみ） |
+| RDS インスタンス | Multi-AZ → Single-AZ | -$75 | 低 | ❌ 非推奨 |
 
-1. **NAT Gateway は削除不可**: npm、Docker Hub、外部APIへのアクセスに必須（3.4.3節参照）
-2. **S3 Gateway Endpoint は必ず追加**: 無料でS3のデータ転送コストを削減可能
-3. **Interface型 Endpoint は任意**: ECR使用頻度が高い場合のみ検討
+**NAT Gateway 削除の条件:**
 
-#### A.4 環境別コスト比較
+| 条件 | 必要性 | 対処法 |
+|------|--------|--------|
+| Dockerビルド | ビルド時のみ | ✅ GitHub Actions等でビルド |
+| 外部API（実行時） | アプリケーション次第 | ❌ 外部API使用時はNAT必須 |
+| npm/パッケージ取得 | ビルド時のみ | ✅ CI/CDでビルド |
 
-| 環境 | 月額概算 | 構成の違い |
-|------|---------|-----------|
-| **本番環境** | ~$306 | Multi-AZ、2タスク |
-| **ステージング環境** | ~$200 | Multi-AZ、1タスク、小さいRDS |
-| **開発環境** | ~$100 | Single-AZ、1タスク、db.t3.micro |
+**実装例: GitHub Actionsでビルド**
+
+```yaml
+# .github/workflows/deploy.yml
+name: Deploy
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-northeast-1
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Build and Push
+        run: |
+          docker build -t $ECR_REGISTRY/testcasedb:latest .
+          docker push $ECR_REGISTRY/testcasedb:latest
+
+      - name: Deploy to ECS
+        run: |
+          aws ecs update-service \
+            --cluster testcasedb-cluster \
+            --service testcasedb-service \
+            --force-new-deployment
+```
+
+**コスト削減の優先順位:**
+
+1. 🥇 **NAT Gateway削除（-$45/月）**: CI/CDでビルド（外部API不使用の場合）
+2. 🥈 **S3 Gateway Endpoint（-$5-10/月）**: 無料で追加可能
+3. 🥉 **ECR Interface Endpoint（-$5/月）**: NAT削除時に必要
+
+#### A.4 環境別コスト比較（最適化後）
+
+| 環境 | 構成 | NAT | 月額概算 | 従来比 |
+|------|------|-----|---------|--------|
+| **本番環境（最適化）** | Multi-AZ、2タスク、CI/CD | ❌ | **~$276** | **-$30** ⭐ |
+| **本番環境（従来）** | Multi-AZ、2タスク、VPC内ビルド | ✅ | ~$306 | - |
+| **本番（外部API使用）** | Multi-AZ、2タスク、CI/CD | ✅ | ~$321 | +$15 |
+| **ステージング環境** | Multi-AZ、1タスク、CI/CD | ❌ | ~$216 | -$30 |
+| **開発環境** | Single-AZ、1タスク、LocalStack | ❌ | ~$100 | - |
 
 ### B. プロキシIP制限のベストプラクティス
 
