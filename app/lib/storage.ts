@@ -1,4 +1,5 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { mkdir, rm, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
@@ -129,4 +130,33 @@ export async function deleteFile(filePath: string): Promise<void> {
  */
 export function getStorageType(): 'S3' | 'Local' {
   return useS3 ? 'S3' : 'Local';
+}
+
+/**
+ * ファイルの署名付きURLを生成
+ * S3の場合は署名付きURL、ローカルの場合はそのままのパスを返す
+ */
+export async function getFileUrl(filePath: string, expiresIn: number = 3600): Promise<string> {
+  if (!filePath) return '';
+
+  if (useS3 && s3Client) {
+    // 本番環境: S3署名付きURLを生成
+    const s3Key = filePath.startsWith('/') ? filePath.substring(1) : filePath;
+
+    const command = new GetObjectCommand({
+      Bucket: process.env.AWS_S3_BUCKET_NAME!,
+      Key: s3Key,
+    });
+
+    try {
+      const signedUrl = await getSignedUrl(s3Client, command, { expiresIn });
+      return signedUrl;
+    } catch (error) {
+      console.error('Failed to generate signed URL:', error);
+      return '';
+    }
+  } else {
+    // 開発環境: ローカルパスをそのまま返す
+    return filePath;
+  }
 }
