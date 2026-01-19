@@ -42,6 +42,7 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
 }) => {
   const [files, setFiles] = useState<FileInfo[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [fileUrls, setFileUrls] = useState<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 初期値の設定: 文字列の場合はファイル名の配列として扱う
@@ -53,6 +54,48 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
       setFiles(value);
     }
   }, [value]);
+
+  // S3パスの場合に署名付きURLを取得
+  useEffect(() => {
+    const fetchFileUrls = async () => {
+      const newFileUrls: Record<string, string> = {};
+
+      for (const file of files) {
+        // file.pathが存在し、まだURLを取得していない場合
+        if (file.path && !fileUrls[file.path]) {
+          // ローカルパス（/で始まる）の場合はそのまま使用
+          if (file.path.startsWith('/')) {
+            newFileUrls[file.path] = file.path;
+          } else {
+            // S3パスの場合は署名付きURLを取得
+            try {
+              const response = await fetch('/api/files/url', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ filePath: file.path }),
+              });
+
+              if (response.ok) {
+                const data = await response.json();
+                newFileUrls[file.path] = data.data.url;
+              }
+            } catch (error) {
+              console.error('Failed to fetch file URL:', error);
+            }
+          }
+        }
+      }
+
+      if (Object.keys(newFileUrls).length > 0) {
+        setFileUrls(prev => ({ ...prev, ...newFileUrls }));
+      }
+    };
+
+    fetchFileUrls();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files]);
 
   /**
    * ペーストイベントのハンドラー
@@ -186,9 +229,9 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
               className="relative m-2 flex items-center justify-between border border-gray-300 p-2 rounded-sm"
               style={{ minHeight: '48px', maxHeight: '96px', width: '200px' }}
             >
-              {file.path ? (
+              {file.path && fileUrls[file.path] ? (
                 <img
-                  src={file.path}
+                  src={fileUrls[file.path]}
                   alt={file.name}
                   className="object-contain h-full"
                   style={{ maxWidth: '100px' }}
