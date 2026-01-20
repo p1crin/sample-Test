@@ -1,9 +1,7 @@
 import { isAdmin, requireAdmin, requireAuth } from "@/app/lib/auth";
-import { getAllRows, query } from "@/app/lib/db";
 import { prisma } from '@/app/lib/prisma';
 import { ERROR_MESSAGES } from "@/constants/errorMessages";
 import { STATUS_CODES } from "@/constants/statusCodes";
-import { User } from "@/types";
 import { hashPassword } from "@/utils/cryptroUtils";
 import { logAPIEndpoint, logDatabaseQuery, QueryTimer } from "@/utils/database-logger";
 import { handleError } from "@/utils/errorHandler";
@@ -57,64 +55,47 @@ export async function GET(req: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '10', 10);
     const offset = (page - 1) * limit;
 
-    // WHERE句を動的に構築
-    const whereConditions = [];
-    const whereParams: unknown[] = [];
-    let paramsIndex = 1;
+    // Prisma where条件を構築
+    const whereCondition: any = {};
 
     if (email) {
-      whereConditions.push(`u.email ILIKE $${paramsIndex}`);
-      whereParams.push(`%${email}%`);
-      paramsIndex++;
+      whereCondition.email = { contains: email, mode: 'insensitive' };
     }
 
     if (name) {
-      whereConditions.push(`u.name ILIKE $${paramsIndex}`);
-      whereParams.push(`%${name}%`);
-      paramsIndex++;
+      whereCondition.name = { contains: name, mode: 'insensitive' };
     }
 
     if (department) {
-      whereConditions.push(`u.department ILIKE $${paramsIndex}`);
-      whereParams.push(`%${department}%`);
-      paramsIndex++;
+      whereCondition.department = { contains: department, mode: 'insensitive' };
     }
 
     if (company) {
-      whereConditions.push(`u.company ILIKE $${paramsIndex}`);
-      whereParams.push(`%${company}%`);
-      paramsIndex++;
+      whereCondition.company = { contains: company, mode: 'insensitive' };
     }
 
     if (role) {
-      whereConditions.push(`u.user_role = $${paramsIndex}`);
-      whereParams.push(`${role}`);
-      paramsIndex++;
+      whereCondition.user_role = parseInt(role, 10);
     }
+
     if (status !== "") {
-      whereConditions.push(`u.is_deleted = $${paramsIndex}`);
-      whereParams.push(`${status}`);
-      paramsIndex++;
+      whereCondition.is_deleted = status;
     }
 
+    // タグ検索：指定されたすべてのタグを持つユーザーを検索
     if (tags.length > 0) {
-      const tagPlaceholders = tags.map((_, index) => `$${paramsIndex + index}`).join(',');
-      whereConditions.push(`u.id IN (
-                            SELECT ut2.user_id
-                            FROM mt_user_tags ut2
-                            JOIN mt_tags t2
-                            ON ut2.tag_id = t2.id
-                            WHERE t2.name IN(${tagPlaceholders})
-                            AND ut2.is_deleted = FALSE
-                            GROUP BY ut2.user_id
-                            HAVING COUNT(DISTINCT t2.name) =${tags.length}
-                            )`);
-      whereParams.push(...tags);
-      paramsIndex += tags.length;
+      whereCondition.AND = tags.map(tag => ({
+        mt_user_tags: {
+          some: {
+            mt_tags: {
+              name: tag,
+              is_deleted: false
+            },
+            is_deleted: false
+          }
+        }
+      }));
     }
-
-
-    const whereClause = whereConditions.join(' AND ');
 
     logAPIEndpoint({
       method: 'GET',
@@ -125,10 +106,10 @@ export async function GET(req: NextRequest) {
     });
 
     // ページネーション用に合計件数を取得
-    const countQuery = `SELECT COUNT(*) FROM mt_users u ${whereClause ? `WHERE ${whereClause}` : ''}`;
     const countTimer = new QueryTimer();
-    const countResult = await query<{ count: string | number }>(countQuery, whereParams);
-    const totalCount = parseInt(String(countResult.rows[0]?.count || '0'), 10);
+    const totalCount = await prisma.mt_users.count({
+      where: whereCondition
+    });
 
     logDatabaseQuery({
       operation: 'SELECT',
@@ -136,31 +117,50 @@ export async function GET(req: NextRequest) {
       executionTime: countTimer.elapsed(),
       rowsReturned: 1,
       query: 'COUNT(*)',
-      params: Object.entries(whereClause),
+      params: [whereCondition],
     });
 
     // ページネーション付きでユーザ情報を取得
-    const dataParams = [...whereParams, limit, offset];
-    const limitParamIndex = whereParams.length + 1;
-    const offsetParamIndex = whereParams.length + 2;
-    const dataQuery = `SELECT u.id, u.email, u.name, u.user_role, u.department, u.company, u.created_at, u.updated_at,
-                      u.is_deleted, COALESCE(tags.tags,'') AS tags
-                      FROM mt_users u
-                      LEFT JOIN (
-                        SELECT ut.user_id, string_agg(t.name, ',') AS tags
-                        FROM mt_user_tags ut
-                        JOIN mt_tags t 
-                        ON ut.tag_id = t.id
-                        WHERE ut.is_deleted = FALSE
-                        GROUP BY ut.user_id
-                      ) tags ON u.id = tags.user_id
-                       ${whereClause ? `WHERE ${whereClause}` : ''}
-                       ORDER BY u.updated_at
-                      LIMIT $${limitParamIndex} OFFSET $${offsetParamIndex}`;
-
     const dataTimer = new QueryTimer();
-    const result = await query<User>(dataQuery, dataParams);
-    const users = getAllRows(result);
+    const usersData = await prisma.mt_users.findMany({
+      where: whereCondition,
+      include: {
+        mt_user_tags: {
+          where: {
+            is_deleted: false
+          },
+          include: {
+            mt_tags: true
+          }
+        }
+      },
+      orderBy: {
+        updated_at: 'asc'
+      },
+      skip: offset,
+      take: limit
+    });
+
+    // タグを文字列に変換してレスポンスを整形
+    const users = usersData.map(userData => {
+      const tagNames = userData.mt_user_tags
+        .filter(ut => !ut.mt_tags.is_deleted)
+        .map(ut => ut.mt_tags.name)
+        .join(',');
+
+      return {
+        id: userData.id,
+        email: userData.email,
+        name: userData.name,
+        user_role: userData.user_role,
+        department: userData.department,
+        company: userData.company,
+        created_at: userData.created_at,
+        updated_at: userData.updated_at,
+        is_deleted: userData.is_deleted,
+        tags: tagNames
+      };
+    });
 
     logDatabaseQuery({
       operation: 'SELECT',

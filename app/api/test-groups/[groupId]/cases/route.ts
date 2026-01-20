@@ -1,6 +1,5 @@
 'use server';
 import { canEditTestCases, canViewTestGroup, requireAuth } from "@/app/lib/auth";
-import { getAllRows, query } from "@/app/lib/db";
 import { prisma } from '@/app/lib/prisma';
 import { STATUS_CODES } from "@/constants/statusCodes";
 import { TestCase } from "@/types";
@@ -39,7 +38,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     const limit = parseInt(searchParams.get('limit') || '10', 10);
     const offset = (page - 1) * limit;
 
-    // WHERE句を動的に構築
+    // WHERE句を動的に構築（Prismaの$queryRaw用）
     const whereConditions = [`ttc.test_group_id = ${testGroupId}`, 'ttc.is_deleted = FALSE'];
     const whereParams: unknown[] = [];
     let paramsIndex = 1;
@@ -84,11 +83,11 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
       queryParams: searchParams,
     })
 
-    // ページネーション用に合計件数を取得
+    // ページネーション用に合計件数を取得（Prisma $queryRawUnsafe使用）
     const countQuery = `SELECT COUNT(*) FROM tt_test_cases ttc WHERE ${whereClause}`;
     const countTimer = new QueryTimer();
-    const countResult = await query<{ count: string | number }>(countQuery, whereParams);
-    const totalCount = parseInt(String(countResult.rows[0]?.count || '0'), 10);
+    const countResult = await prisma.$queryRawUnsafe<{ count: bigint }[]>(countQuery, ...whereParams);
+    const totalCount = Number(countResult[0]?.count || 0);
 
     logDatabaseQuery({
       operation: 'SELECT',
@@ -99,10 +98,8 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
       params: Object.entries(whereClause),
     });
 
-    // ページネーション付きでテストケースを取得
+    // ページネーション付きでテストケースを取得（Prisma $queryRawUnsafe使用）
     const dataParams = [...whereParams, limit, offset];
-    const limitParamIndex = whereParams.length + 1;
-    const offsetParamIndex = whereParams.length + 2;
     const dataQuery = `SELECT ttc.test_group_id, ttc.tid, ttc.first_layer, ttc.second_layer, ttc.third_layer, ttc.fourth_layer,
       ttc.purpose, ttc.request_id, ttc.check_items, ttc.test_procedure, ttc.created_at, ttc.updated_at,
       SUM(CASE WHEN (tc.test_group_id IS NOT NULL AND tr.judgment IS NULL) OR tr.judgment = '未着手' THEN 1 ELSE 0 END):: INTEGER AS not_started_items,
@@ -122,10 +119,9 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
                         ttc.test_group_id, ttc.tid, ttc.first_layer, ttc.second_layer, ttc.third_layer, ttc.fourth_layer,
       ttc.purpose, ttc.request_id, ttc.check_items, ttc.test_procedure, ttc.created_at, ttc.updated_at
                       ORDER BY ttc.created_at DESC
-                      LIMIT $${limitParamIndex} OFFSET $${offsetParamIndex}`;
+                      LIMIT $${paramsIndex} OFFSET $${paramsIndex + 1}`;
     const dataTimer = new QueryTimer();
-    const result = await query<TestCase>(dataQuery, dataParams);
-    const testCases = getAllRows(result);
+    const testCases = await prisma.$queryRawUnsafe<TestCase[]>(dataQuery, ...dataParams);
 
     logDatabaseQuery({
       operation: 'SELECT',
