@@ -101,8 +101,8 @@ export async function GET(req: NextRequest) {
         table: 'mt_tags',
         executionTime: queryTimer.elapsed(),
         rowsReturned: tagRecords.length,
-        query: 'findMany',
-        params: [{ where: { name: { in: tags } } }],
+        query: `SELECT id FROM mt_tags WHERE name IN (${tags.length} values) AND is_deleted = FALSE`,
+        params: [{ tags }],
       });
 
       if (tagRecords.length === tags.length) {
@@ -128,8 +128,8 @@ export async function GET(req: NextRequest) {
           table: 'mt_user_tags',
           executionTime: userTagsTimer.elapsed(),
           rowsReturned: userTagsGrouped.length,
-          query: 'groupBy',
-          params: [{ by: ['user_id'], having: { _count: tags.length } }],
+          query: `SELECT user_id FROM mt_user_tags WHERE tag_id IN (${tagRecords.length} values) AND is_deleted = FALSE GROUP BY user_id HAVING COUNT(user_id) = ${tags.length}`,
+          params: [{ tagIds: tagRecords.map(t => t.id), requiredCount: tags.length }],
         });
 
         const userIds = userTagsGrouped.map(ut => ut.user_id);
@@ -178,13 +178,21 @@ export async function GET(req: NextRequest) {
       where: whereConditions
     });
 
+    // WHERE条件を文字列化
+    const whereConditionsStr = Object.keys(whereConditions).map(key => {
+      if (key === 'id' && whereConditions[key]?.in) {
+        return `id IN (${whereConditions[key].in.length} values)`;
+      }
+      return key;
+    }).join(' AND ');
+
     logDatabaseQuery({
       operation: 'SELECT',
       table: 'mt_users',
       executionTime: countTimer.elapsed(),
       rowsReturned: 1,
-      query: 'count',
-      params: [{ where: whereConditions }],
+      query: `SELECT COUNT(*) FROM mt_users WHERE ${whereConditionsStr || 'TRUE'}`,
+      params: [{ email, name, department, company, role, status, tagFilter: tags.length > 0 }],
     });
 
     // ページネーション付きでユーザ情報を取得
@@ -230,8 +238,8 @@ export async function GET(req: NextRequest) {
       userId: user.id,
       executionTime: dataTimer.elapsed(),
       rowsReturned: users.length,
-      query: 'findMany',
-      params: [{ skip: offset, take: limit }],
+      query: `SELECT u.*, (SELECT string_agg(t.name, ',') FROM mt_user_tags ut JOIN mt_tags t ON ut.tag_id = t.id WHERE ut.user_id = u.id AND ut.is_deleted = FALSE) AS tags FROM mt_users u WHERE ${whereConditionsStr || 'TRUE'} ORDER BY updated_at ASC LIMIT ${limit} OFFSET ${offset}`,
+      params: [{ email, name, department, company, role, status, tagFilter: tags.length > 0, limit, offset }],
     })
 
     logAPIEndpoint({

@@ -78,9 +78,10 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
 
     // ページネーション用に合計件数を取得
     const countTimer = new QueryTimer();
-    const countResult = await prisma.$queryRaw<Array<{ count: bigint }>>`
+    const countQuery = Prisma.sql`
       SELECT COUNT(*) FROM tt_test_cases ttc WHERE ${whereClause}
     `;
+    const countResult = await prisma.$queryRaw<Array<{ count: bigint }>>(countQuery);
     const totalCount = Number(countResult[0]?.count || 0);
 
     logDatabaseQuery({
@@ -88,13 +89,13 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
       table: 'tt_test_cases',
       executionTime: countTimer.elapsed(),
       rowsReturned: 1,
-      query: 'COUNT(*)',
+      query: `SELECT COUNT(*) FROM tt_test_cases ttc WHERE [${whereConditions.length} conditions]`,
       params: [{ testGroupId, tid, firstLayer, secondLayer, thirdLayer, fourthLayer }],
     });
 
     // ページネーション付きでテストケースを取得（集計含む）
     const dataTimer = new QueryTimer();
-    const testCases = await prisma.$queryRaw<TestCase[]>`
+    const dataQuery = Prisma.sql`
       SELECT ttc.test_group_id, ttc.tid, ttc.first_layer, ttc.second_layer, ttc.third_layer, ttc.fourth_layer,
         ttc.purpose, ttc.request_id, ttc.check_items, ttc.test_procedure, ttc.created_at, ttc.updated_at,
         SUM(CASE WHEN (tc.test_group_id IS NOT NULL AND tr.judgment IS NULL) OR tr.judgment = '未着手' THEN 1 ELSE 0 END):: INTEGER AS not_started_items,
@@ -116,6 +117,7 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
       ORDER BY ttc.created_at DESC
       LIMIT ${limit} OFFSET ${offset}
     `;
+    const testCases = await prisma.$queryRaw<TestCase[]>(dataQuery);
 
     logDatabaseQuery({
       operation: 'SELECT',
@@ -123,8 +125,8 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
       userId: user.id,
       executionTime: dataTimer.elapsed(),
       rowsReturned: testCases.length,
-      query: 'findMany',
-      params: [{ skip: offset, take: limit }],
+      query: `SELECT ttc.*, SUM(CASE...) FROM tt_test_cases ttc LEFT JOIN tt_test_contents tc LEFT JOIN tt_test_results tr WHERE [${whereConditions.length} conditions] GROUP BY ttc.* ORDER BY ttc.created_at DESC LIMIT ${limit} OFFSET ${offset}`,
+      params: [{ testGroupId, tid, firstLayer, secondLayer, thirdLayer, fourthLayer, limit, offset }],
     })
 
     // 日付をフォーマット(日本時間)し、レスポンスデータを整形
