@@ -1,6 +1,5 @@
 'use server';
 import { canEditTestCases, canViewTestGroup, requireAuth } from "@/app/lib/auth";
-import { getAllRows, query } from "@/app/lib/db";
 import { prisma } from '@/app/lib/prisma';
 import { STATUS_CODES } from "@/constants/statusCodes";
 import { TestCase } from "@/types";
@@ -39,42 +38,32 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     const limit = parseInt(searchParams.get('limit') || '10', 10);
     const offset = (page - 1) * limit;
 
-    // WHERE句を動的に構築
-    const whereConditions = [`ttc.test_group_id = ${testGroupId}`, 'ttc.is_deleted = FALSE'];
-    const whereParams: unknown[] = [];
-    let paramsIndex = 1;
+    // Prisma where条件を構築
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const whereConditions: any = {
+      test_group_id: testGroupId,
+      is_deleted: false
+    };
 
     if (tid) {
-      whereConditions.push(`ttc.tid ILIKE $${paramsIndex}`);
-      whereParams.push(`%${tid}%`);
-      paramsIndex++;
+      whereConditions.tid = { contains: tid, mode: 'insensitive' };
     }
 
     if (firstLayer) {
-      whereConditions.push(`ttc.first_layer ILIKE $${paramsIndex}`);
-      whereParams.push(`%${firstLayer}%`);
-      paramsIndex++;
+      whereConditions.first_layer = { contains: firstLayer, mode: 'insensitive' };
     }
 
     if (secondLayer) {
-      whereConditions.push(`ttc.second_layer ILIKE $${paramsIndex}`);
-      whereParams.push(`%${secondLayer}%`);
-      paramsIndex++;
+      whereConditions.second_layer = { contains: secondLayer, mode: 'insensitive' };
     }
 
     if (thirdLayer) {
-      whereConditions.push(`ttc.third_layer ILIKE $${paramsIndex}`);
-      whereParams.push(`%${thirdLayer}%`);
-      paramsIndex++;
+      whereConditions.third_layer = { contains: thirdLayer, mode: 'insensitive' };
     }
 
     if (fourthLayer) {
-      whereConditions.push(`ttc.fourth_layer ILIKE $${paramsIndex}`);
-      whereParams.push(`%${fourthLayer}%`);
-      paramsIndex++;
+      whereConditions.fourth_layer = { contains: fourthLayer, mode: 'insensitive' };
     }
-
-    const whereClause = whereConditions.join(' AND ');
 
     logAPIEndpoint({
       method: 'GET',
@@ -85,47 +74,78 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     })
 
     // ページネーション用に合計件数を取得
-    const countQuery = `SELECT COUNT(*) FROM tt_test_cases ttc WHERE ${whereClause}`;
     const countTimer = new QueryTimer();
-    const countResult = await query<{ count: string | number }>(countQuery, whereParams);
-    const totalCount = parseInt(String(countResult.rows[0]?.count || '0'), 10);
+    const totalCount = await prisma.tt_test_cases.count({
+      where: whereConditions
+    });
 
     logDatabaseQuery({
       operation: 'SELECT',
       table: 'tt_test_cases',
       executionTime: countTimer.elapsed(),
       rowsReturned: 1,
-      query: 'COUNT(*)',
-      params: Object.entries(whereClause),
+      query: 'count',
+      params: [{ where: whereConditions }],
     });
 
-    // ページネーション付きでテストケースを取得
-    const dataParams = [...whereParams, limit, offset];
-    const limitParamIndex = whereParams.length + 1;
-    const offsetParamIndex = whereParams.length + 2;
-    const dataQuery = `SELECT ttc.test_group_id, ttc.tid, ttc.first_layer, ttc.second_layer, ttc.third_layer, ttc.fourth_layer,
-      ttc.purpose, ttc.request_id, ttc.check_items, ttc.test_procedure, ttc.created_at, ttc.updated_at,
-      SUM(CASE WHEN (tc.test_group_id IS NOT NULL AND tr.judgment IS NULL) OR tr.judgment = '未着手' THEN 1 ELSE 0 END):: INTEGER AS not_started_items,
-      SUM(CASE WHEN tr.judgment IN('OK', '参照OK') THEN 1 ELSE 0 END):: INTEGER AS ok_items,
-      SUM(CASE WHEN tr.judgment = 'NG' THEN 1 ELSE 0 END):: INTEGER AS ng_items,
-      SUM(CASE WHEN tr.judgment = '対象外' THEN 1 ELSE 0 END):: INTEGER AS excluded_items
-                      FROM tt_test_cases ttc
-                      LEFT JOIN tt_test_contents tc
-                      ON ttc.test_group_id = tc.test_group_id
-                      AND ttc.tid = tc.tid
-                      LEFT JOIN tt_test_results tr
-                      ON tc.test_group_id = tr.test_group_id
-                      AND tc.tid = tr.tid
-                      AND tc.test_case_no = tr.test_case_no
-                      WHERE ${whereClause}
-                      GROUP BY
-                        ttc.test_group_id, ttc.tid, ttc.first_layer, ttc.second_layer, ttc.third_layer, ttc.fourth_layer,
-      ttc.purpose, ttc.request_id, ttc.check_items, ttc.test_procedure, ttc.created_at, ttc.updated_at
-                      ORDER BY ttc.created_at DESC
-                      LIMIT $${limitParamIndex} OFFSET $${offsetParamIndex}`;
+    // ページネーション付きでテストケースを取得（集計含む）
     const dataTimer = new QueryTimer();
-    const result = await query<TestCase>(dataQuery, dataParams);
-    const testCases = getAllRows(result);
+    const testCasesData = await prisma.tt_test_cases.findMany({
+      where: whereConditions,
+      include: {
+        tt_test_contents: {
+          include: {
+            tt_test_results: true
+          }
+        }
+      },
+      orderBy: {
+        created_at: 'desc'
+      },
+      skip: offset,
+      take: limit
+    });
+
+    // 各テストケースの集計を計算
+    const testCases = testCasesData.map((testCase) => {
+      let notStartedItems = 0;
+      let okItems = 0;
+      let ngItems = 0;
+      let excludedItems = 0;
+
+      testCase.tt_test_contents.forEach((content) => {
+        const judgment = content.tt_test_results?.judgment;
+
+        if (!judgment || judgment === '未着手') {
+          notStartedItems++;
+        } else if (judgment === 'OK' || judgment === '参照OK') {
+          okItems++;
+        } else if (judgment === 'NG') {
+          ngItems++;
+        } else if (judgment === '対象外') {
+          excludedItems++;
+        }
+      });
+
+      return {
+        test_group_id: testCase.test_group_id,
+        tid: testCase.tid,
+        first_layer: testCase.first_layer,
+        second_layer: testCase.second_layer,
+        third_layer: testCase.third_layer,
+        fourth_layer: testCase.fourth_layer,
+        purpose: testCase.purpose,
+        request_id: testCase.request_id,
+        check_items: testCase.check_items,
+        test_procedure: testCase.test_procedure,
+        created_at: testCase.created_at,
+        updated_at: testCase.updated_at,
+        not_started_items: notStartedItems,
+        ok_items: okItems,
+        ng_items: ngItems,
+        excluded_items: excludedItems,
+      };
+    });
 
     logDatabaseQuery({
       operation: 'SELECT',
