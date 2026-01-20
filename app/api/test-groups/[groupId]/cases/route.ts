@@ -9,6 +9,7 @@ import { existsSync } from 'fs';
 import { mkdir, writeFile } from 'fs/promises';
 import { NextRequest, NextResponse } from "next/server";
 import { join } from 'path';
+import { Prisma } from '@/generated/prisma';
 
 interface RouteParams {
   params: Promise<{ groupId: string }>;
@@ -38,32 +39,34 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     const limit = parseInt(searchParams.get('limit') || '10', 10);
     const offset = (page - 1) * limit;
 
-    // Prisma where条件を構築
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const whereConditions: any = {
-      test_group_id: testGroupId,
-      is_deleted: false
-    };
+    // WHERE句の動的構築
+    const whereConditions: Prisma.Sql[] = [
+      Prisma.sql`ttc.test_group_id = ${testGroupId}`,
+      Prisma.sql`ttc.is_deleted = FALSE`
+    ];
 
     if (tid) {
-      whereConditions.tid = { contains: tid, mode: 'insensitive' };
+      whereConditions.push(Prisma.sql`ttc.tid ILIKE ${`%${tid}%`}`);
     }
 
     if (firstLayer) {
-      whereConditions.first_layer = { contains: firstLayer, mode: 'insensitive' };
+      whereConditions.push(Prisma.sql`ttc.first_layer ILIKE ${`%${firstLayer}%`}`);
     }
 
     if (secondLayer) {
-      whereConditions.second_layer = { contains: secondLayer, mode: 'insensitive' };
+      whereConditions.push(Prisma.sql`ttc.second_layer ILIKE ${`%${secondLayer}%`}`);
     }
 
     if (thirdLayer) {
-      whereConditions.third_layer = { contains: thirdLayer, mode: 'insensitive' };
+      whereConditions.push(Prisma.sql`ttc.third_layer ILIKE ${`%${thirdLayer}%`}`);
     }
 
     if (fourthLayer) {
-      whereConditions.fourth_layer = { contains: fourthLayer, mode: 'insensitive' };
+      whereConditions.push(Prisma.sql`ttc.fourth_layer ILIKE ${`%${fourthLayer}%`}`);
     }
+
+    // WHERE句を結合
+    const whereClause = Prisma.join(whereConditions, ' AND ');
 
     logAPIEndpoint({
       method: 'GET',
@@ -75,77 +78,44 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
 
     // ページネーション用に合計件数を取得
     const countTimer = new QueryTimer();
-    const totalCount = await prisma.tt_test_cases.count({
-      where: whereConditions
-    });
+    const countResult = await prisma.$queryRaw<Array<{ count: bigint }>>`
+      SELECT COUNT(*) FROM tt_test_cases ttc WHERE ${whereClause}
+    `;
+    const totalCount = Number(countResult[0]?.count || 0);
 
     logDatabaseQuery({
       operation: 'SELECT',
       table: 'tt_test_cases',
       executionTime: countTimer.elapsed(),
       rowsReturned: 1,
-      query: 'count',
-      params: [{ where: whereConditions }],
+      query: 'COUNT(*)',
+      params: [{ testGroupId, tid, firstLayer, secondLayer, thirdLayer, fourthLayer }],
     });
 
     // ページネーション付きでテストケースを取得（集計含む）
     const dataTimer = new QueryTimer();
-    const testCasesData = await prisma.tt_test_cases.findMany({
-      where: whereConditions,
-      include: {
-        tt_test_contents: {
-          include: {
-            tt_test_results: true
-          }
-        }
-      },
-      orderBy: {
-        created_at: 'desc'
-      },
-      skip: offset,
-      take: limit
-    });
-
-    // 各テストケースの集計を計算
-    const testCases = testCasesData.map((testCase) => {
-      let notStartedItems = 0;
-      let okItems = 0;
-      let ngItems = 0;
-      let excludedItems = 0;
-
-      testCase.tt_test_contents.forEach((content) => {
-        const judgment = content.tt_test_results?.judgment;
-
-        if (!judgment || judgment === '未着手') {
-          notStartedItems++;
-        } else if (judgment === 'OK' || judgment === '参照OK') {
-          okItems++;
-        } else if (judgment === 'NG') {
-          ngItems++;
-        } else if (judgment === '対象外') {
-          excludedItems++;
-        }
-      });
-
-      return {
-        test_group_id: testCase.test_group_id,
-        tid: testCase.tid,
-        first_layer: testCase.first_layer,
-        second_layer: testCase.second_layer,
-        third_layer: testCase.third_layer,
-        fourth_layer: testCase.fourth_layer,
-        purpose: testCase.purpose,
-        request_id: testCase.request_id,
-        check_items: testCase.check_items,
-        test_procedure: testCase.test_procedure,
-        created_at: testCase.created_at,
-        updated_at: testCase.updated_at,
-        not_started_items: notStartedItems,
-        ok_items: okItems,
-        ng_items: ngItems,
-        excluded_items: excludedItems,
-      };
-    });
+    const testCases = await prisma.$queryRaw<TestCase[]>`
+      SELECT ttc.test_group_id, ttc.tid, ttc.first_layer, ttc.second_layer, ttc.third_layer, ttc.fourth_layer,
+        ttc.purpose, ttc.request_id, ttc.check_items, ttc.test_procedure, ttc.created_at, ttc.updated_at,
+        SUM(CASE WHEN (tc.test_group_id IS NOT NULL AND tr.judgment IS NULL) OR tr.judgment = '未着手' THEN 1 ELSE 0 END):: INTEGER AS not_started_items,
+        SUM(CASE WHEN tr.judgment IN('OK', '参照OK') THEN 1 ELSE 0 END):: INTEGER AS ok_items,
+        SUM(CASE WHEN tr.judgment = 'NG' THEN 1 ELSE 0 END):: INTEGER AS ng_items,
+        SUM(CASE WHEN tr.judgment = '対象外' THEN 1 ELSE 0 END):: INTEGER AS excluded_items
+      FROM tt_test_cases ttc
+      LEFT JOIN tt_test_contents tc
+        ON ttc.test_group_id = tc.test_group_id
+        AND ttc.tid = tc.tid
+      LEFT JOIN tt_test_results tr
+        ON tc.test_group_id = tr.test_group_id
+        AND tc.tid = tr.tid
+        AND tc.test_case_no = tr.test_case_no
+      WHERE ${whereClause}
+      GROUP BY
+        ttc.test_group_id, ttc.tid, ttc.first_layer, ttc.second_layer, ttc.third_layer, ttc.fourth_layer,
+        ttc.purpose, ttc.request_id, ttc.check_items, ttc.test_procedure, ttc.created_at, ttc.updated_at
+      ORDER BY ttc.created_at DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `;
 
     logDatabaseQuery({
       operation: 'SELECT',
