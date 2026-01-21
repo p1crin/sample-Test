@@ -1,7 +1,7 @@
+import { prisma } from '@/app/lib/prisma';
+import { TestRole, UserRole } from '@/types';
 import { getToken } from 'next-auth/jwt';
 import { NextRequest } from 'next/server';
-import { TestRole, UserRole } from '@/types';
-import { prisma } from '@/app/lib/prisma';
 
 // セッションユーザーのインターフェース
 export interface SessionUser {
@@ -70,12 +70,12 @@ export async function requireAdmin(req: NextRequest): Promise<SessionUser> {
   return user;
 }
 
-// テスト管理者ロールが必要
-export async function requireTestManager(req: NextRequest): Promise<SessionUser> {
+// 管理者ロールまたはテスト管理者ロールが必要
+export async function requireAdminOrTestManager(req: NextRequest): Promise<SessionUser> {
   const user = await requireAuth(req);
 
-  if (!isTestManager(user)) {
-    throw new Error('Forbidden: Test Manager access required');
+  if (!isAdmin(user) && !isTestManager(user)) {
+    throw new Error('Forbidden: Test Manager or higher access required');
   }
 
   return user;

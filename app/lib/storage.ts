@@ -3,6 +3,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { mkdir, rm, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
+import clientLogger from '@/utils/client-logger';
 
 /**
  * ストレージタイプの判定
@@ -16,14 +17,14 @@ const useS3 = isProduction && process.env.AWS_S3_BUCKET_NAME;
  */
 const s3Client = useS3
   ? new S3Client({
-      region: process.env.AWS_REGION || 'ap-northeast-1',
-      credentials: process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
-        ? {
-            accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-          }
-        : undefined,
-    })
+    region: process.env.AWS_REGION || 'ap-northeast-1',
+    credentials: process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY
+      ? {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      }
+      : undefined,
+  })
   : null;
 
 /**
@@ -42,7 +43,7 @@ export interface UploadResult {
  */
 export async function uploadFile(
   file: File,
-  directory: string, // 例: 'test-cases/1/TID-001', 'evidences/1/TID-001'
+  directory: string,
   fileName: string,
   metadata?: Record<string, string>
 ): Promise<UploadResult> {
@@ -58,6 +59,7 @@ export async function uploadFile(
       Key: s3Key,
       Body: buffer,
       ContentType: file.type,
+      ContentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
       Metadata: metadata,
     });
 
@@ -70,7 +72,7 @@ export async function uploadFile(
         fileName: fileName,
       };
     } catch (error) {
-      console.error('S3 upload failed:', error);
+      clientLogger.error('uploadFile', 'S3ファイルアップロード失敗', { error });
       throw new Error('File upload to S3 failed');
     }
   } else {
@@ -111,7 +113,7 @@ export async function deleteFile(filePath: string): Promise<void> {
     try {
       await s3Client.send(deleteCommand);
     } catch (error) {
-      console.warn(`Failed to delete file from S3: ${s3Key}`, error);
+      clientLogger.error('deleteFile', `S3ファイル削除失敗 S3: ${s3Key}`, { error });
     }
   } else {
     // 開発環境: ローカルディスクから削除
@@ -120,7 +122,7 @@ export async function deleteFile(filePath: string): Promise<void> {
     try {
       await rm(localPath, { force: true });
     } catch (error) {
-      console.warn(`Failed to delete local file: ${localPath}`, error);
+      clientLogger.error('deleteFile', `ローカルファイル削除失敗 local file: ${localPath}`, { error });
     }
   }
 }
@@ -152,7 +154,7 @@ export async function getFileUrl(filePath: string, expiresIn: number = 3600): Pr
       const signedUrl = await getSignedUrl(s3Client, command, { expiresIn });
       return signedUrl;
     } catch (error) {
-      console.error('Failed to generate signed URL:', error);
+      clientLogger.error('getFileUrl', `署名付きURL生成失敗`, { error });
       return '';
     }
   } else {

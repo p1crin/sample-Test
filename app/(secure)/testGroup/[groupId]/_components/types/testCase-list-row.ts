@@ -3,16 +3,16 @@ import { FileInfo } from "@/utils/fileUtils";
 // 項目のエンティティ型
 export type TestCaseListRow = {
   tid: string;
-  firstLayer: string;
-  secondLayer: string;
-  thirdLayer: string;
-  fourthLayer: string;
+  first_layer: string;
+  second_layer: string;
+  third_layer: string;
+  fourth_layer: string;
   purpose: string;
-  requestId: string;
+  request_id: string;
   checkItems: string;
   testProcedure: string;
-  createdAt: string;
-  updatedAt: string;
+  created_at: string;
+  updated_at: string;
   chartData: {
     ok_items: number;
     ng_items: number;
@@ -20,12 +20,12 @@ export type TestCaseListRow = {
     excluded_items: number;
   };
   isCanModify: boolean;
-  controlSpecFile: [] | FileInfo[];
-  dataFlowFile: [] | FileInfo[];
+  controlSpecFile: FileInfo[];
+  dataFlowFile: FileInfo[];
 };
 
 // 項目作成時の入力型
-export type CreateTestCaseListRow = Omit<TestCaseListRow, 'createdAt' | 'updatedAt' | 'chartData' | 'isCanModify'>;
+export type CreateTestCaseListRow = Omit<TestCaseListRow, 'created_at' | 'updated_at' | 'chartData' | 'isCanModify'>;
 
 // 項目更新時の入力型
 export type UpdateTestCaseListRow = CreateTestCaseListRow;

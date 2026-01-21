@@ -78,7 +78,7 @@ function normalizeSQLQuery(query: string): string {
  * 開発環境のみSQLの詳細をログに出力
  */
 export interface DatabaseQueryLog {
-  operation: 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'TRANSACTION';
+  operation: 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'TRANSACTION' | 'UPSERT';
   table?: string;
   userId?: number | string;
   executionTime: number; // ミリ秒

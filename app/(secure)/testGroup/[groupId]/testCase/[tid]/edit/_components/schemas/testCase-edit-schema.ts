@@ -30,23 +30,24 @@ export const testCaseEditSchema = z.object({
   request_id: z.string()
     .min(1, { message: '要求IDは必須項目です' })
     .max(255, { message: '要求IDは255文字以内で入力してください' }),
-  check_items: z.string()
+  checkItems: z.string()
     .min(1, { message: '確認観点は必須項目です' }),
-  test_procedure: z.string()
+  testProcedure: z.string()
     .min(1, { message: 'テスト手順は必須項目です' }),
   controlSpecFile: z.array(FileInfoSchema)
     .min(1, { message: '制御仕様書は必須項目です' }),
   dataFlowFile: z.array(FileInfoSchema)
     .min(1, { message: 'データフローは必須項目です' }),
-  // testContents: z.array(z.object({
-  //   id: z.number(),
-  //   testCase: z.string()
-  //     .refine(tc => tc.trim() !== '', { message: 'テストケースは必須です' }),
-  //   expectedValue: z.string()
-  //     .refine(ev => ev.trim() !== '', { message: '期待値は必須です' }),
-  //   excluded: z.boolean(),
-  //   selected: z.boolean(),
-  // })),
+  testCase: z.array(z.object({
+    id: z.number(),
+    testCase: z.string()
+      .refine(tc => tc.trim() !== '', { message: `テストケースは必須です` }),
+  })),
+  expectedValue: z.array(z.object({
+    id: z.number(),
+    expectedValue: z.string()
+      .refine(ev => ev.trim() !== '', { message: '期待値は必須です' }),
+  })),
 });
 
 export type TestCaseRegistFormData = z.infer<typeof testCaseEditSchema>;

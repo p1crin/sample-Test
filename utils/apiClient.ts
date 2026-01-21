@@ -86,12 +86,16 @@ export async function apiPut<T = unknown>(
 /**
  * DELETE リクエスト
  */
-export async function apiDelete<T = unknown>(url: string): Promise<T> {
+export async function apiDelete<T = unknown>(
+  url: string,
+  data?: unknown
+): Promise<T> {
   const response = await apiFetch(url, {
     method: 'DELETE',
     headers: {
       'Content-Type': 'application/json',
     },
+    body: data ? JSON.stringify(data) : undefined,
   });
 
   if (!response.ok) {

@@ -36,7 +36,7 @@ export function DataGridAccordionBody<T extends ItemType>({
               className="px-4 py-2 cursor-pointer"
               onClick={() => groupedItems[groupKey].length > 1 && toggleItem(groupKey)}
             >
-              {groupedItems[groupKey].length > 1 ? (expandedItems.includes(groupKey) ? '-' : '+') : ''} {groupKey}
+              {groupedItems[groupKey].length > 1 ? (expandedItems.includes(groupKey) ? '▼' : '▶') : ''} {groupKey}
             </TableCell>
             {columns.slice(1).map((column) => (
               <TableCell key={String(column.key)} className="px-4 py-2 " style={{ width: column.width }}>

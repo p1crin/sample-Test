@@ -10,7 +10,6 @@ import { apiDelete, apiGet } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { formatDateJST } from '@/utils/date-formatter';
 import { buildQueryString, updateUrlParams } from '@/utils/queryUtils';
-import { useSession } from 'next-auth/react';
 import Link from 'next/link';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -190,7 +189,14 @@ export function TestCaseListContainer() {
         const count = newList.totalCount || (newList.data ? newList.data.length : 0);
         setTotalCount(count);
         setPageCount(Math.ceil(count / pageSize));
-        setMenuItems(newList.data);
+
+        // 日付をフォーマット（日本時間）
+        const formattedNewList = newList.data.map((testcase: typeof newList.data[0]) => ({
+          ...testcase,
+          created_at: formatDateJST(testcase.created_at),
+          updated_at: formatDateJST(testcase.updated_at),
+        }));
+        setMenuItems(formattedNewList);
 
         setModalMessage('テストケースを削除しました');
         setIsDelModalOpen(true);

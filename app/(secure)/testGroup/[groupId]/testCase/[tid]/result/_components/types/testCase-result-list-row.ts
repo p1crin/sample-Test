@@ -1,23 +1,11 @@
 import { JudgmentOption } from "@/constants/constants";
 
-// エビデンスファイルの型
-export type EvidenceFile = {
-  id: string;              // クライアント側の一時ID、またはサーバー側のevidenceId
-  name: string;            // ファイル名
-  type?: string;           // MIMEタイプ
-  file?: File;             // アップロード前の実ファイル
-  evidenceId?: number;     // アップロード済みの場合、サーバー側のID
-  evidencePath?: string;   // アップロード済みの場合、ファイルパス
-  testCaseNo?: number;     // テストケース番号
-  historyCount?: number;   // 履歴カウント
-  evidenceNo?: number;     // エビデンス番号
-};
-
 // 項目のエンティティ型
 export type TestCaseResultRow = {
-  testCaseNo: number;
-  testCase: string;
-  expectedValue: string;
+  checked?: boolean;
+  test_case_no: number;
+  test_case: string;
+  expected_value: string;
   result: string;
   judgment: JudgmentOption;
   softwareVersion: string;
@@ -25,11 +13,21 @@ export type TestCaseResultRow = {
   comparatorVersion: string;
   executionDate: string;
   executor: string;
-  evidence: EvidenceFile[] | null;
+  evidence: string[] | null;
   note: string;
+  is_target: boolean;
   historyCount?: number; // 追跡用（オプション）
-  isTarget?: boolean; // 対象フラグ（trueの場合は対象、falseの場合は対象外）
 };
+
+export type ResultWithHistory = {
+  latestValidResult: Record<string, unknown>;
+  allHistory: Record<string, unknown>[];
+  historyCounts: number[];
+}
+
+export type TestResultsData = {
+  [testCaseNo: string]: ResultWithHistory;
+}
 
 // 項目作成時の入力型
 export type CreateTestCaseListRow = Omit<TestCaseResultRow, 'id' | 'createdAt' | 'updatedAt'>;

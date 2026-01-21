@@ -20,4 +20,4 @@ export type TestGroupFormData = {
 export type CreateTestGroupListRow = Omit<TestGroupFormData, 'created_at' | 'updated_at'>;
 
 // 項目更新時の入力型
-export type UpdateTestGroupListRow = Partial<CreateTestGroupListRow>;
+export type UpdateTestGroupListRow = CreateTestGroupListRow;

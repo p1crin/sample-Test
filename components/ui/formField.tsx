@@ -171,7 +171,7 @@ export default function FormField({
             onChange={(e) => onChange(e as React.ChangeEvent<HTMLInputElement>)}
             onBlur={onBlur}
             placeholder={placeholder}
-            className={INPUT_FORM_STYLE}
+            className={`${INPUT_FORM_STYLE} ${disabled ? 'bg-gray-200' : ''}`}
             autoComplete='new-password'
             disabled={disabled}
             {...(type === 'number' && min !== undefined && { min })}

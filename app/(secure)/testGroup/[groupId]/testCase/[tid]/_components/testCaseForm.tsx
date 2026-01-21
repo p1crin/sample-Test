@@ -82,7 +82,7 @@ const TestCaseForm: React.FC<TestCaseFormProps> = ({ value, onChange, onDelete, 
     const deletedTestCase = testCases.find((testCase) => testCase.id === id);
 
     // DBのIDがある場合（既存データの場合）は親に通知
-    if (deletedTestCase?.dbId && onDelete) {
+    if (deletedTestCase?.dbId != null && onDelete) {
       onDelete(deletedTestCase.dbId);
     }
 
@@ -116,7 +116,7 @@ const TestCaseForm: React.FC<TestCaseFormProps> = ({ value, onChange, onDelete, 
     let newTestCases: TestCase[];
     if (bulkField === 'is_target') {
       const isTarget = bulkValue === '対象外';
-      newTestCases = testCases.map(testCase => testCase.selected ? { ...testCase, is_target: isTarget } : testCase);
+      newTestCases = testCases.map(testCase => testCase.selected ? { ...testCase, is_target: !isTarget } : testCase);
     } else {
       newTestCases = testCases.map(testCase => testCase.selected ? { ...testCase, [bulkField]: bulkValue } : testCase);
     }
@@ -201,7 +201,7 @@ const TestCaseForm: React.FC<TestCaseFormProps> = ({ value, onChange, onDelete, 
               </div>
               <select
                 value={testCase.is_target ? '対象' : '対象外'}
-                onChange={(e) => handleChange(testCase.id, 'is_target', e.target.value === '対象外')}
+                onChange={(e) => handleChange(testCase.id, 'is_target', e.target.value === '対象')}
                 className="accent-[#FF5611] w-1/12 h-10 select-none rounded-lg border border-zinc-100 bg-white shadow-[0_-1px_0_0px_#d4d4d8_inset,0_0_0_1px_#f4f4f5_inset,0_0.5px_0_1.5px_#fff_inset] hover:bg-zinc-50 hover:via-zinc-900 hover:to-zinc-800 active:shadow-[-1px_0px_1px_0px_#e4e4e7_inset,1px_0px_1px_0px_#e4e4e7_inset,0px_0.125rem_1px_0px_#d4d4d8_inset] flex-shrink-0"
               >
                 <option value="対象">対象</option>

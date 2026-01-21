@@ -36,10 +36,6 @@ export async function GET(req: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '10', 10);
     const offset = (page - 1) * limit;
 
-    // インポート種別パラメータを取得
-    const importTypeParam = searchParams.get('import_type');
-    const importType = importTypeParam ? parseInt(importTypeParam, 10) : undefined;
-
     // Prismaのwhere条件を構築
     const whereConditions: Prisma.tt_import_resultsWhereInput = {
       is_deleted: false,
@@ -48,11 +44,6 @@ export async function GET(req: NextRequest) {
     if (isTestManager(user)) {
       whereConditions.import_type = {
         equals: 1,
-      };
-    } else if (importType !== undefined && [1, 2].includes(importType)) {
-      // システム管理者の場合は、クエリパラメータで指定されたimport_typeでフィルタリング
-      whereConditions.import_type = {
-        equals: importType,
       };
     }
 
@@ -110,6 +101,12 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ success: true, data: importResult, totalCount });
   } catch (error) {
-    return handleError(error as Error, apiTimer, 'GET', '/api/import-results');
+    return handleError(
+      error as Error,
+      STATUS_CODES.INTERNAL_SERVER_ERROR,
+      apiTimer,
+      'GET',
+      '/api/import-results'
+    );
   }
 }

@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
 import Tag from '@/components/ui/tag';
-import { Column } from './DataGrid';
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { Modal } from '../ui/modal';
+import { Column } from './DataGrid';
+import clientLogger from '@/utils/client-logger';
 
 type TableCellContentProps<T> = {
   column: Column<T>;
@@ -15,25 +16,68 @@ type ItemType = {
 const RenderFileLink = ({ file, index }: { file: string | null, index: number }) => {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalImage, setModalImage] = useState<string | null>(null);
+  const [fileUrl, setFileUrl] = useState<string>('');
 
   if (!file) return null;
+
+  // S3パスの場合に署名付きURLを取得
+  useEffect(() => {
+    const fetchFileUrl = async () => {
+      if (!file) return;
+
+      // ローカルパス（/で始まる）の場合はそのまま使用
+      if (file.startsWith('/')) {
+        setFileUrl(file);
+      } else {
+        // S3パスの場合は署名付きURLを取得
+        try {
+          const response = await fetch('/api/files/url', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ filePath: file }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            setFileUrl(data.data.url);
+          } else {
+            // 失敗した場合は元のパスを使用
+            setFileUrl(file);
+          }
+        } catch (error) {
+          clientLogger.error('TableCellContent', 'ファイルURLの取得失敗', { error });
+          // エラーの場合は元のパスを使用
+          setFileUrl(file);
+        }
+      }
+    };
+
+    fetchFileUrl();
+  }, [file]);
 
   const isImage = /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(file);
 
   const handleClick = (e: { preventDefault: () => void; }) => {
     e.preventDefault();
     if (isImage) {
-      setModalImage(file);
+      setModalImage(fileUrl || file);
       setModalOpen(true);
     } else {
-      window.open(file, '_blank');
+      window.open(fileUrl || file, '_blank');
     }
   };
+
+  // URLが取得できていない場合は読み込み中を表示
+  if (!fileUrl) {
+    return <span style={{ color: 'gray' }}>読み込み中...</span>;
+  }
 
   return (
     <>
       <a
-        href={file}
+        href={fileUrl}
         key={index}
         onClick={handleClick}
         style={{ color: 'blue', textDecoration: 'underline', cursor: 'pointer', display: 'block' }}

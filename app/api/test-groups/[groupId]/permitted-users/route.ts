@@ -16,7 +16,6 @@ export async function GET(
   const user = await requireAuth(req);
   const { groupId: groupIdParam } = await params;
   const groupId = parseInt(groupIdParam, 10);
-  console.log('permitted-users', groupId);
 
   try {
     // 形式チェック
@@ -77,7 +76,7 @@ export async function GET(
           test_role: true,
         },
         orderBy: {
-          test_role: 'asc', // 最も権限の高いロール（DESIGNER=0が最小）を取得
+          test_role: 'asc',
         },
       });
       logDatabaseQuery({
@@ -94,7 +93,7 @@ export async function GET(
       }
     }
 
-    // ADMINまたはテスト設計者の場合のみ全ユーザーを返す
+    // 権限が管理者またはテストグループのテスト設計者
     const shouldReturnAllUsers = user.user_role === UserRole.ADMIN || userTestRole === TestRole.DESIGNER;
 
     let uniqueUsers: Array<{ id: number; name: string; email: string }> = [];

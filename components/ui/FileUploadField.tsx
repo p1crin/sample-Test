@@ -1,3 +1,5 @@
+import { apiPost } from '@/utils/apiClient';
+import clientLogger from "@/utils/client-logger";
 import { FileInfo, getUniqueFileNames, processClipboardItems, processFileList } from '@/utils/fileUtils';
 import React, { useEffect, useRef, useState } from 'react';
 import { Button } from './button';
@@ -69,20 +71,11 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
           } else {
             // S3パスの場合は署名付きURLを取得
             try {
-              const response = await fetch('/api/files/url', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ filePath: file.path }),
-              });
-
-              if (response.ok) {
-                const data = await response.json();
-                newFileUrls[file.path] = data.data.url;
-              }
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const data = await apiPost<any>('/api/files/url', { filePath: file.path });
+              newFileUrls[file.path] = data.data.url;
             } catch (error) {
-              console.error('Failed to fetch file URL:', error);
+              clientLogger.error('FileUploadField', 'ファイルの取得に失敗しました。', { error })
             }
           }
         }
@@ -118,13 +111,11 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
           processedFiles.push(uploadedFile);
         }
       } catch (error) {
-        console.error('File upload failed:', error);
         setUploading(false);
-        return;
+        clientLogger.error('FileUploadField', 'ファイルのアップロードに失敗しました', { error });
       }
       setUploading(false);
     }
-
     const uniqueFiles = getUniqueFileNames([...files, ...processedFiles]);
 
     setFiles(uniqueFiles);
@@ -152,9 +143,8 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
           processedFiles.push(uploadedFile);
         }
       } catch (error) {
-        console.error('File upload failed:', error);
         setUploading(false);
-        return;
+        clientLogger.error('FileUploadField', 'ファイルのアップロードに失敗しました', { error });
       }
       setUploading(false);
     }

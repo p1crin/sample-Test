@@ -8,7 +8,9 @@ import clientLogger from '@/utils/client-logger';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { TestCaseResult } from './TestCaseResult';
-import { TestCaseResultRow } from './types/testCase-result-list-row';
+import { ResultWithHistory, TestCaseResultRow, TestResultsData } from './types/testCase-result-list-row';
+import { TestCaseDetailRow } from './types/testCase-detail-list-row';
+import { formatDateJST } from '@/utils/date-formatter';
 
 // 判定のバリデーションを行うための型ガード
 const isValidJudgment = (value: unknown): value is JudgmentOption => {
@@ -29,35 +31,10 @@ const labels = {
   testProcedure: { name: "テスト手順", type: "text" as 'text' }
 };
 
-interface TestCaseDetail {
-  test_group_id: number;
-  tid: string;
-  first_layer: string;
-  second_layer: string;
-  third_layer: string;
-  fourth_layer: string;
-  purpose: string;
-  request_id: string;
-  check_items: string;
-  test_procedure: string;
-  created_at: string;
-  updated_at: string;
-  control_spec: { file_name: string; file_path: string }[];
-  data_flow: { file_name: string; file_path: string }[];
-}
 
-interface ResultWithHistory {
-  latestValidResult: Record<string, unknown>;
-  allHistory: Record<string, unknown>[];
-  historyCounts: number[];
-}
-
-interface TestResultsData {
-  [testCaseNo: string]: ResultWithHistory;
-}
 
 export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid: string }) {
-  const [data, setData] = useState<TestCaseDetail | null>(null);
+  const [data, setData] = useState<TestCaseDetailRow | null>(null);
   const [resultsWithHistory, setResultsWithHistory] = useState<TestResultsData>({});
   const [expandedSections, setExpandedSections] = useState<Set<number>>(new Set([0]));
   const [labelData, setLabelData] = useState(labels);
@@ -70,9 +47,9 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
   const router = useRouter();
 
   const columns: Column<TestCaseResultRow>[] = [
-    { key: 'testCaseNo', header: 'No' },
-    { key: 'testCase', header: 'テストケース' },
-    { key: 'expectedValue', header: '期待値' },
+    { key: 'test_case_no', header: 'No' },
+    { key: 'test_case', header: 'テストケース' },
+    { key: 'expected_value', header: '期待値' },
     { key: 'result', header: '結果' },
     { key: 'judgment', header: '判定' },
     { key: 'softwareVersion', header: 'ソフトVer.' },
@@ -88,14 +65,14 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
     const fetchTestCaseDetail = async () => {
       try {
         clientLogger.info('テストケース結果確認画面', 'テストケース詳細取得開始', { groupId, tid });
-
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const result = await apiGet<any>(`/api/test-groups/${groupId}/cases/${tid}`);
 
         if (!result || !result.success || !result.data) {
           throw new Error('テストケース詳細の取得に失敗しました');
         }
 
-        const testCase = result.data[0] as TestCaseDetail;
+        const testCase = result.data[0] as TestCaseDetailRow;
 
         setData(testCase);
         setLabelData(labels);
@@ -114,7 +91,7 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
     const fetchTestResults = async () => {
       try {
         clientLogger.info('テストケース結果確認画面', 'テスト結果取得開始', { groupId, tid });
-
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const data = await apiGet<any>(`/api/test-groups/${groupId}/cases/${tid}/results`);
 
         if (!data.success || !data.results) {
@@ -233,7 +210,7 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
             </div>
           </div>
           <div className="w-full flex items-end justify-end">
-            <Button type="submit" onClick={handleShowTestTable} className="w-24">
+            <Button type="submit" onClick={handleShowTestTable} className="w-24" disabled={Object.entries(resultsWithHistory).length <= 0} >
               結果登録
             </Button>
           </div>
@@ -265,22 +242,26 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
                 const sectionItems: TestCaseResultRow[] = sortedTestCaseNos.map((testCaseNo) => {
                   const result = testCasesData.get(testCaseNo) as Record<string, unknown>;
                   const judgmentValue = getResultValue(result, 'judgment');
-                  const judgment = isValidJudgment(judgmentValue) ? judgmentValue : JUDGMENT_OPTIONS.EMPTY;
-
+                  const isTargetValue = getResultValue(result, 'is_target');
+                  const judgment = !isTargetValue
+                    ? JUDGMENT_OPTIONS.EXCLUDED
+                    : isValidJudgment(judgmentValue)
+                      ? judgmentValue
+                      : JUDGMENT_OPTIONS.UNTOUCHED;
                   const evidenceValue = getResultValue(result, 'evidence') as string;
                   const evidence = evidenceValue ? [evidenceValue] : null;
 
                   return {
                     historyCount: historyCount,
-                    testCaseNo: parseInt(testCaseNo, 10),
-                    testCase: (getResultValue(result, 'testCase') as string) || '',
-                    expectedValue: (getResultValue(result, 'expectedValue') as string) || '',
+                    test_case_no: parseInt(testCaseNo, 10),
+                    test_case: (getResultValue(result, 'testCase') as string) || '',
+                    expected_value: (getResultValue(result, 'expectedValue') as string) || '',
                     result: (getResultValue(result, 'result') as string) || '',
                     judgment: judgment,
                     softwareVersion: (getResultValue(result, 'softwareVersion') as string) || '',
                     hardwareVersion: (getResultValue(result, 'hardwareVersion') as string) || '',
                     comparatorVersion: (getResultValue(result, 'comparatorVersion') as string) || '',
-                    executionDate: (getResultValue(result, 'executionDate') as string) || '',
+                    executionDate: formatDateJST((getResultValue(result, 'executionDate')) as string) || '',
                     executor: (getResultValue(result, 'executor') as string) || '',
                     evidence: evidence,
                     note: (getResultValue(result, 'note') as string) || '',
@@ -312,7 +293,7 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
               });
             })()
           ) : (
-            <div className="text-gray-500 text-center py-8">テスト結果がありません</div>
+            <div className="text-gray-500 text-center py-8">テスト内容を登録してください</div>
           )}
         </div>
       </div>

@@ -1,121 +1,107 @@
 'use client';
-import { useState, useEffect } from 'react';
+import Loading from '@/components/ui/loading';
+import { TestRole } from '@/types/database';
+import { apiGet } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
-import { testGroupCopySchema } from './schemas/testGroup-copy-schema';
+import { formatDateWithHyphen } from '@/utils/date-formatter';
+import { useParams } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import type { TestGroupCopyFormState } from './TestGroupCopyForm';
 import { TestGroupCopyForm } from './TestGroupCopyForm';
-import type { TestGroupCopyChangeData, TestGroupCopyFormState } from './TestGroupCopyForm';
-import { getData, saveData } from '../action';
 
-type TestGroupCopyFormContainerProps = {
-  testGroupId: number;
-};
-
-export function TestGroupCopyFormContainer({ testGroupId }: TestGroupCopyFormContainerProps) {
-  const [toastOpen, setToastOpen] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string[]>>({});
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  // 初期データ
-  const initialForm: TestGroupCopyFormState = {
-    testGroupId: 1,
+export function TestGroupCopyFormContainer() {
+  const [copyLoading, setCopyLoading] = useState(true);
+  const [apiError, setApiError] = useState<Error | null>(null);
+  const [form, setForm] = useState<TestGroupCopyFormState>({
     oem: '',
     model: '',
-    destination: '',
     event: '',
     variation: '',
+    destination: '',
     specs: '',
-    testDatespan: '',
-    ngPlanCount: ''
-  };
-
-  const [form, setForm] = useState<TestGroupCopyFormState>(initialForm);
-
-  const handleClear = () => {
-    setForm(initialForm);
-  };
-
-  const handleChange = (e: TestGroupCopyChangeData) => {
-    const target = e.target as unknown as HTMLInputElement;
-    const { name, value, type } = target;
-    setForm((prev) => ({
-      ...prev,
-      [name]: type === 'checkbox' ? target.checked : value,
-    }));
-  };
-
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    setErrors({});
-    try {
-      const result = testGroupCopySchema.safeParse(form);
-      if (!result.success) {
-        // Zodのエラーを各フィールドごとにまとめる
-        const fieldErrors: Record<string, string[]> = {};
-        result.error.errors.forEach((err) => {
-          const key = err.path[0] as string;
-          if (!fieldErrors[key]) fieldErrors[key] = [];
-          fieldErrors[key].push(err.message);
-        });
-        setErrors(fieldErrors);
-        setToastOpen(false);
-        return;
-      }
-
-      const saveDataFunc = async () => {
-        try {
-          const testGroupData = await saveData(form);
-          if (!testGroupData.success || !testGroupData.data) {
-            throw new Error('データの取得に失敗しました' + ` (error: ${testGroupData.error})`);
-          }
-          clientLogger.info('TestGroupCopyFormContainer', 'データ保存成功');
-        } catch (err) {
-          clientLogger.error('TestGroupCopyFormContainer', 'データ保存失敗', {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      };
-      saveDataFunc();
-
-      setToastOpen(true);
-    } catch {
-      setLoadError('送信時に予期せぬエラーが発生しました');
-    }
-  };
+    test_startdate: '',
+    test_enddate: '',
+    ngPlanCount: '',
+    designerTag: [] as string[],
+    executerTag: [] as string[],
+    viewerTag: [] as string[],
+  });
+  const params = useParams();
+  const groupId = params.groupId;
+  if (apiError) throw apiError;
 
   useEffect(() => {
-    const getDataFunc = async () => {
+    const getTestGroupCopyDataFunc = async () => {
+      setCopyLoading(true);
       try {
-        const testGroupData = await getData({ testGroupId: testGroupId });
-        if (!testGroupData.success || !testGroupData.data) {
-          throw new Error('データの取得に失敗しました' + ` (error: ${testGroupData.error})`);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const testGroupCopyData = await apiGet<any>(`/api/test-groups/${groupId}`);
+        const getCopyData = testGroupCopyData.data;
+        const tags = getCopyData.tags; //タグの配列
+
+        if (!testGroupCopyData.success || !testGroupCopyData.data) {
+          throw new Error('データの取得に失敗しました' + ` (error: ${testGroupCopyData.error})`);
         }
-        setForm(testGroupData.data);
-        clientLogger.info('TestGroupCopyFormContainer', 'データ取得成功', { data: testGroupData.data.testGroupId });
+
+        const designers: string[] = [];
+        const executers: string[] = [];
+        const viewers: string[] = [];
+        // タグの振り分け
+        if (tags && tags.length > 0) {
+          for (const tag of tags) {
+            switch (tag.test_role) {
+              case TestRole.DESIGNER:
+                designers.push(tag.tag_name);
+                break;
+              case TestRole.EXECUTOR:
+                executers.push(tag.tag_name);
+                break;
+              case TestRole.VIEWER:
+                viewers.push(tag.tag_name);
+                break;
+              default:
+                break;
+            }
+          }
+        }
+
+        const formatCopy: TestGroupCopyFormState = {
+          ...getCopyData,
+          test_startdate: formatDateWithHyphen(getCopyData.test_startdate),
+          test_enddate: formatDateWithHyphen(getCopyData.test_enddate),
+          ngPlanCount: getCopyData.ng_plan_count.toString(),
+          designerTag: designers,
+          executerTag: executers,
+          viewerTag: viewers
+        }
+        setForm(formatCopy);
+
+        clientLogger.info('テストグループ複製画面', 'データ取得成功', { data: testGroupCopyData.data.testGroupId });
       } catch (err) {
-        clientLogger.error('TestGroupCopyFormContainer', 'データ取得失敗', {
+        clientLogger.error('テストグループ複製画面', 'データ取得失敗', {
           error: err instanceof Error ? err.message : String(err),
         });
+        setApiError(err instanceof Error ? err : new Error(String(err)));
+      } finally {
+        setCopyLoading(false);
       }
     };
-    getDataFunc();
+    getTestGroupCopyDataFunc();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // 空の依存配列で、マウント時に一度だけ実行
 
   return (
     <>
-      <TestGroupCopyForm
-        form={form}
-        errors={errors}
-        toastOpen={toastOpen}
-        onChange={handleChange}
-        onClear={handleClear}
-        onSubmit={handleSubmit}
-        onToastClose={() => setToastOpen(false)}
+      {/* テストグループデータ読み込み中の表示 */}
+      <Loading
+        isLoading={copyLoading}
+        message="データ読み込み中..."
+        size="md"
       />
-      {loadError && (
-        <div className="text-red-500 mt-4" role="alert">
-          {loadError}
-        </div>
+      {!copyLoading && (
+        <TestGroupCopyForm
+          form={form}
+        />
       )}
     </>
   );

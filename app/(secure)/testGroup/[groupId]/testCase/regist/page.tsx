@@ -1,12 +1,11 @@
 import TestGroupInfoTableModal from '@/app/(secure)/_components/testGroupInfoTableModal';
-import TestCaseRegistrantion from './_components/TestCaseRegistrantion';
-import { canEditTestCases, isTestManager } from '@/app/lib/auth';
+import { canEditTestCases } from '@/app/lib/auth';
 import { authOptions } from '@/app/lib/authOption';
 import ForbiddenUI from '@/components/ui/forbiddenUI';
 import InternalServerErrorUI from '@/components/ui/internalServerErrorUI';
 import UnauthorizedUI from '@/components/ui/unauthorizedUI';
 import { getServerSession } from 'next-auth';
-import { useParams } from 'next/navigation';
+import TestCaseRegistrantion from './_components/TestCaseRegistrantion';
 
 type Props = {
   params: Promise<{ groupId: string }>;
@@ -51,7 +50,7 @@ export default async function TestCaseRegistrantionPage({ params }: Props) {
         <h1 className="text-2xl font-bold">テストケース新規登録</h1>
         <TestGroupInfoTableModal />
       </div>
-      <TestCaseRegistrantion/>
+      <TestCaseRegistrantion />
     </>
   );
 }

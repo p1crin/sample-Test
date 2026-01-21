@@ -1,9 +1,7 @@
 import DetailView from '@/components/ui/detailView';
 import React from 'react';
-import { TestCaseResultRow } from '../../_components/types/testCase-result-list-row';
-import { TestCaseDetailRow } from './types/testCase-detail-list-row';
+import { TestCaseDetailRow } from '../../_components/types/testCase-detail-list-row';
 
-export type TestCaseConductState = TestCaseResultRow;
 export type TestCaseDetailState = TestCaseDetailRow;
 
 type TestCaseConductProps = {
@@ -29,17 +27,22 @@ type TestCaseConductProps = {
     purpose: string;
     checkItems: string;
     requestId: string;
-    controlSpec: string;
-    dataFlow: string;
+    controlSpec: { file_name: string; file_path: string }[];
+    dataFlow: { file_name: string; file_path: string }[];
     testProcedure: string;
   };
 };
 
 export function TestCaseConduct({ labels, values }: TestCaseConductProps) {
+  const formattedValues = {
+    ...values,
+    controlSpec: values.controlSpec.map(spec => spec.file_path),
+    dataFlow: values.dataFlow.map(flow => flow.file_path),
+  }
   return (
     <section>
       <div className="text-left">
-        <DetailView labels={labels} values={values} isFull />
+        <DetailView labels={labels} values={formattedValues} isFull={true} />
       </div>
     </section>
   );

@@ -12,22 +12,22 @@ export const testCaseRegistSchema = z.object({
     .min(1, { message: 'TIDは必須項目です' })
     .max(15, { message: 'TIDは15文字以内で入力してください' })
     .regex(/^([1-9][0-9]{0,2}-){3}[1-9][0-9]{0,2}$/, { message: 'TIDは「1～3桁の数字」を4つ、ハイフンで区切って入力してください（例: 123-45-6-789）' }),
-  firstLayer: z.string()
+  first_layer: z.string()
     .min(1, { message: '第1層は必須項目です' })
     .max(255, { message: '第1層は255文字以内で入力してください' }),
-  secondLayer: z.string()
+  second_layer: z.string()
     .min(1, { message: '第2層は必須項目です' })
     .max(255, { message: '第2層は255文字以内で入力してください' }),
-  thirdLayer: z.string()
+  third_layer: z.string()
     .min(1, { message: '第3層は必須項目です' })
     .max(255, { message: '第3層は255文字以内で入力してください' }),
-  fourthLayer: z.string()
+  fourth_layer: z.string()
     .min(1, { message: '第4層は必須項目です' })
     .max(255, { message: '第4層は255文字以内で入力してください' }),
   purpose: z.string()
     .min(1, { message: '目的は必須項目です' })
     .max(255, { message: '目的は255文字以内で入力してください' }),
-  requestId: z.string()
+  request_id: z.string()
     .min(1, { message: '要求IDは必須項目です' })
     .max(255, { message: '要求IDは255文字以内で入力してください' }),
   checkItems: z.string()
@@ -38,15 +38,17 @@ export const testCaseRegistSchema = z.object({
     .min(1, { message: '制御仕様書は必須項目です' }),
   dataFlowFile: z.array(FileInfoSchema)
     .min(1, { message: 'データフローは必須項目です' }),
-  testContents: z.array(z.object({
+  testCase: z.array(z.object({
     id: z.number(),
     testCase: z.string()
-      .refine(tc => tc.trim() !== '', { message: 'テストケースは必須です' }),
+      .refine(tc => tc.trim() !== '', { message: `テストケースは必須です` }),
+  })),
+  expectedValue: z.array(z.object({
+    id: z.number(),
     expectedValue: z.string()
       .refine(ev => ev.trim() !== '', { message: '期待値は必須です' }),
-    excluded: z.boolean(),
-    selected: z.boolean(),
   })),
+
 });
 
 export type TestCaseRegistFormData = z.infer<typeof testCaseRegistSchema>;

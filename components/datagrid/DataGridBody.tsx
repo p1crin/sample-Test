@@ -19,7 +19,7 @@ export function DataGridBody<T extends ItemType>({ items, columns, renderActions
   return (
     <TableBody>
       {items.map((item, index) => {
-        const isExcluded = item.judgment === JUDGMENT_OPTIONS.EXCLUDED;
+        const isExcluded = item.judgment === JUDGMENT_OPTIONS.EXCLUDED || item.is_target === false;
         return (
           <TableRow key={index} className={`border-b ${isExcluded ? 'bg-gray-200 opacity-60 pointer-events-none' : ''}`}>
             {columns.map((column) => (

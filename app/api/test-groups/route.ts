@@ -1,4 +1,4 @@
-import { canModifyTestGroup, getAccessibleTestGroups, isAdmin, isTestManager, requireAdmin, requireAuth } from '@/app/lib/auth';
+import { canModifyTestGroup, getAccessibleTestGroups, isAdmin, isTestManager, requireAuth } from '@/app/lib/auth';
 import { prisma } from '@/app/lib/prisma';
 import { ERROR_MESSAGES } from '@/constants/errorMessages';
 import { STATUS_CODES } from '@/constants/statusCodes';

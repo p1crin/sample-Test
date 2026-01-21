@@ -43,8 +43,8 @@ export function TestGroupListContainer() {
   const [modalContent, setModalContent] = useState<'initial' | 'confirm'>('initial');
   const [testGroupLoading, setTestGroupLoading] = useState(false);
 
-  // 権限チェック: テスト管理者(1)または管理者(0)のみが編集・削除・複製可能
-  const canEdit = session?.user?.user_role !== undefined && session.user.user_role <= 1;
+  // 権限チェック: テスト管理者(1)または管理者(0)のみが新規作成・複製可能
+  const canCreate = session?.user?.user_role !== undefined && session.user.user_role <= 1;
 
   // フォーム入力値（リアルタイムで変更）
   const [formValues, setFormValues] = useState<Record<string, string | string[]>>({
@@ -216,7 +216,7 @@ export function TestGroupListContainer() {
       </Button>
       <Button
         onClick={() => toTestGroupCopyPage(item.id)}
-        disabled={!item.isCanModify}
+        disabled={!canCreate}
       >
         複製
       </Button>
@@ -337,7 +337,14 @@ export function TestGroupListContainer() {
         const count = newList.totalCount || (newList.data ? newList.data.length : 0);
         setTotalCount(count);
         setPageCount(Math.ceil(count / pageSize));
-        setMenuItems(newList.data);
+
+        // 日付をフォーマット（日本時間）
+        const formattedNewList = newList.data.map((group: typeof newList.data[0]) => ({
+          ...group,
+          created_at: formatDateJST(group.created_at),
+          updated_at: formatDateJST(group.updated_at),
+        }));
+        setMenuItems(formattedNewList);
 
         setModalMessage('テストグループを削除しました');
         setIsDelModalOpen(true);
@@ -367,7 +374,7 @@ export function TestGroupListContainer() {
         <>
           <SeachForm fields={fields} values={formValues} onClick={handleSearch} onFormDataChange={handleFormDataChange} />
           <div className="text-right pb-2">
-            <Button onClick={handleAddTestGroup} disabled={!canEdit}>
+            <Button onClick={handleAddTestGroup} disabled={!canCreate}>
               テストグループ新規登録
             </Button>
           </div>

@@ -78,7 +78,7 @@ export function TestCaseList({
 
               const datasets: Dataset[] = [
                 {
-                  label: '未実施',
+                  label: '未着手',
                   data: [roundedPercentages[0]],
                   originalData: [row.chartData.not_started_items],
                   backgroundColor: 'orange',

@@ -29,16 +29,16 @@ const TestCaseRegistrantion: React.FC = () => {
 
   const [formData, setFormData] = useState<CreateTestCaseListRow>({
     tid: '',
-    firstLayer: '',
-    secondLayer: '',
-    thirdLayer: '',
-    fourthLayer: '',
+    first_layer: '',
+    second_layer: '',
+    third_layer: '',
+    fourth_layer: '',
     purpose: '',
-    requestId: '',
+    request_id: '',
     checkItems: '',
     testProcedure: '',
-    controlSpecFile: [] as FileInfo[],
-    dataFlowFile: [] as FileInfo[],
+    controlSpecFile: [],
+    dataFlowFile: [],
   });
 
   const [testContents, setTestContents] = useState<TestCase[]>([]);
@@ -126,42 +126,42 @@ const TestCaseRegistrantion: React.FC = () => {
     {
       label: '第1層',
       type: 'text',
-      name: 'firstLayer',
-      value: formData.firstLayer,
+      name: 'first_layer',
+      value: formData.first_layer,
       onChange: handleChange,
       placeholder: '第1層',
       required: true,
-      error: errors.firstLayer
+      error: errors.first_layer
     },
     {
       label: '第2層',
       type: 'text',
-      name: 'secondLayer',
-      value: formData.secondLayer,
+      name: 'second_layer',
+      value: formData.second_layer,
       onChange: handleChange,
       placeholder: '第2層',
       required: true,
-      error: errors.secondLayer
+      error: errors.second_layer
     },
     {
       label: '第3層',
       type: 'text',
-      name: 'thirdLayer',
-      value: formData.thirdLayer,
+      name: 'third_layer',
+      value: formData.third_layer,
       onChange: handleChange,
       placeholder: '第3層',
       required: true,
-      error: errors.thirdLayer
+      error: errors.third_layer
     },
     {
       label: '第4層',
       type: 'text',
-      name: 'fourthLayer',
-      value: formData.fourthLayer,
+      name: 'fourth_layer',
+      value: formData.fourth_layer,
       onChange: handleChange,
       placeholder: '第4層',
       required: true,
-      error: errors.fourthLayer
+      error: errors.fourth_layer
     },
     {
       label: '目的',
@@ -176,12 +176,12 @@ const TestCaseRegistrantion: React.FC = () => {
     {
       label: '要求ID',
       type: 'text',
-      name: 'requestId',
-      value: formData.requestId,
+      name: 'request_id',
+      value: formData.request_id,
       onChange: handleChange,
       placeholder: '要求ID',
       required: true,
-      error: errors.requestId
+      error: errors.request_id
     },
     {
       label: '確認観点',
@@ -205,18 +205,27 @@ const TestCaseRegistrantion: React.FC = () => {
     },
   ];
 
+  // 登録ボタン押下時
   const handleRegister = async () => {
     // バリデーション
     const validationData = {
       ...formData,
-      testContents,
-    };
+      testCase: testContents.map((testCase) => ({
+        id: testCase.id,
+        testCase: testCase.testCase
+      })),
+      expectedValue: testContents.map((expected) => ({
+        id: expected.id,
+        expectedValue: expected.expectedValue
+      })),
+    }
 
     const validationResult = testCaseRegistSchema.safeParse(validationData);
+
     if (!validationResult.success) {
       const newErrors: Record<string, string> = {};
       validationResult.error.errors.forEach(err => {
-        if (err.path[0] === 'testContents' && typeof err.path[1] === 'number') {
+        if (err.path[0] === 'testCase' || err.path[0] === 'expectedValue') {
           const rowIndex = err.path[1];
           const fieldName = err.path[2] as string;
           newErrors[`testContents[${rowIndex}].${fieldName}`] = err.message;
@@ -236,6 +245,7 @@ const TestCaseRegistrantion: React.FC = () => {
       return;
     }
 
+    // バリデーション成功時にエラークリア
     setErrors({});
     setIsLoading(true);
     clientLogger.info('テストケース新規登録画面', 'テストケース登録開始', { formData, testContents });
@@ -244,12 +254,12 @@ const TestCaseRegistrantion: React.FC = () => {
       const formDataObj = new FormData();
       formDataObj.append('groupId', String(groupId));
       formDataObj.append('tid', formData.tid);
-      formDataObj.append('firstLayer', formData.firstLayer);
-      formDataObj.append('secondLayer', formData.secondLayer);
-      formDataObj.append('thirdLayer', formData.thirdLayer);
-      formDataObj.append('fourthLayer', formData.fourthLayer);
+      formDataObj.append('first_layer', formData.first_layer);
+      formDataObj.append('second_layer', formData.second_layer);
+      formDataObj.append('third_layer', formData.third_layer);
+      formDataObj.append('fourth_layer', formData.fourth_layer);
       formDataObj.append('purpose', formData.purpose);
-      formDataObj.append('requestId', formData.requestId);
+      formDataObj.append('request_id', formData.request_id);
       formDataObj.append('checkItems', formData.checkItems);
       formDataObj.append('testProcedure', formData.testProcedure);
 
