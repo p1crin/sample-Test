@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import Loading from '@/components/ui/loading';
 import { JUDGMENT_OPTIONS, JudgmentOption } from '@/constants/constants';
 import { STATUS_CODES } from '@/constants/statusCodes';
-import { apiGet, apiPost } from '@/utils/apiClient';
+import { apiGet, apiPost, apiDelete } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
@@ -13,10 +13,43 @@ import { TestCaseResultRow, TestResultsData } from '../../_components/types/test
 import { TestCaseConduct } from './TestCaseConduct';
 import TestTable from './testTable';
 import { Modal } from '@/components/ui/modal';
+import { FileInfo, generateUniqueId } from '@/utils/fileUtils';
 
 // 判定のバリデーションを行うための型ガード
 const isValidJudgment = (value: unknown): value is JudgmentOption => {
   return typeof value === 'string' && Object.values(JUDGMENT_OPTIONS).includes(value as JudgmentOption);
+};
+
+// エビデンスデータをFileInfo配列に変換するヘルパー関数
+const convertEvidenceToFileInfo = (evidence: unknown): FileInfo[] | null => {
+  if (!evidence) return null;
+
+  // 文字列の場合（カンマ区切りまたは単一パス）
+  if (typeof evidence === 'string') {
+    const paths = evidence.split(',').map(p => p.trim()).filter(Boolean);
+    return paths.map(path => ({
+      name: path.split('/').pop() || path,
+      id: generateUniqueId(),
+      path: path,
+    }));
+  }
+
+  // 配列の場合
+  if (Array.isArray(evidence)) {
+    return evidence.map(item => {
+      if (typeof item === 'string') {
+        return {
+          name: item.split('/').pop() || item,
+          id: generateUniqueId(),
+          path: item,
+        };
+      }
+      // すでにFileInfo形式の場合
+      return item;
+    });
+  }
+
+  return null;
 };
 
 const labels = {
@@ -152,7 +185,7 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
             comparatorVersion: histItem.comparator_version || '',
             executionDate: histItem.execution_date || '',
             executor: histItem.executor || '',
-            evidence: histItem.evidence ? [histItem.evidence] : null,
+            evidence: convertEvidenceToFileInfo(histItem.evidence),
             note: histItem.note || '',
           }))
         ) as TestCaseResultRow[];
@@ -230,6 +263,79 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
     setIsLoading(true);
     // API呼び出し
     try {
+      // Method A: 削除予定のエビデンスを収集して物理削除
+      const deletedEvidences: Array<{
+        file: FileInfo;
+        testCaseNo: number;
+        historyCount: number;
+      }> = [];
+
+      // 新規入力データから削除予定のエビデンスを収集
+      if (showNewTestCaseConduct) {
+        initialTestCaseData.forEach(item => {
+          if (item.deletedEvidences && item.deletedEvidences.length > 0) {
+            item.deletedEvidences.forEach(file => {
+              deletedEvidences.push({
+                file,
+                testCaseNo: item.test_case_no,
+                historyCount: item.historyCount ?? 0,
+              });
+            });
+          }
+        });
+      }
+
+      // 履歴データから削除予定のエビデンスを収集
+      pastTestCaseData.forEach((historyData, historyIndex) => {
+        historyData.forEach(item => {
+          if (item.deletedEvidences && item.deletedEvidences.length > 0) {
+            item.deletedEvidences.forEach(file => {
+              deletedEvidences.push({
+                file,
+                testCaseNo: item.test_case_no,
+                historyCount: historyIndex + 1,
+              });
+            });
+          }
+        });
+      });
+
+      // 削除予定のエビデンスを物理削除
+      if (deletedEvidences.length > 0) {
+        clientLogger.info('テスト結果登録画面', 'エビデンス削除開始', { count: deletedEvidences.length });
+
+        for (const { file, testCaseNo, historyCount } of deletedEvidences) {
+          try {
+            await apiDelete('/api/evidences', {
+              testGroupId: groupId,
+              tid: tid,
+              testCaseNo: testCaseNo,
+              historyCount: historyCount,
+              evidenceNo: file.fileNo,
+            });
+            clientLogger.info('テスト結果登録画面', 'エビデンス削除成功', {
+              testCaseNo,
+              historyCount,
+              evidenceNo: file.fileNo,
+            });
+          } catch (deleteError) {
+            clientLogger.error('テスト結果登録画面', 'エビデンス削除失敗', {
+              error: deleteError,
+              testCaseNo,
+              historyCount,
+              evidenceNo: file.fileNo,
+            });
+            // エビデンス削除失敗は警告のみで続行
+          }
+        }
+      }
+
+      // FileInfo[]をパス文字列の配列に変換するヘルパー
+      const convertEvidenceToPathArray = (evidence: FileInfo[] | null): string[] => {
+        if (!evidence) return [];
+        return evidence.map(file => file.path || file.name).filter(Boolean);
+      };
+
       // 再実施入力欄追加時のみ新規入力の結果を整形
       let newTestResultData;
       if (showNewTestCaseConduct) {
@@ -246,7 +352,7 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
             comparatorVersion: item.comparatorVersion || '',
             executionDate: item.executionDate || '',
             executor: item.executor || '',
-            evidence: item.evidence || [],
+            evidence: convertEvidenceToPathArray(item.evidence),
             note: item.note || '',
           }))
         };
@@ -265,7 +371,7 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
           comparatorVersion: item.comparatorVersion || '',
           executionDate: item.executionDate || '',
           executor: item.executor || '',
-          evidence: item.evidence || [],
+          evidence: convertEvidenceToPathArray(item.evidence),
           note: item.note || '',
         }))
       }));

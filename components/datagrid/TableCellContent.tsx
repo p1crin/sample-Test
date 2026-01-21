@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Modal } from '../ui/modal';
 import { Column } from './DataGrid';
 import clientLogger from '@/utils/client-logger';
+import { FileInfo } from '@/utils/fileUtils';
 
 type TableCellContentProps<T> = {
   column: Column<T>;
@@ -13,21 +14,26 @@ type ItemType = {
   [key: string]: unknown;
 };
 
-const RenderFileLink = ({ file, index }: { file: string | null, index: number }) => {
+const RenderFileLink = ({ file, index }: { file: string | FileInfo | null, index: number }) => {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalImage, setModalImage] = useState<string | null>(null);
   const [fileUrl, setFileUrl] = useState<string>('');
 
   if (!file) return null;
 
+  // FileInfo型の場合はpathプロパティを使用
+  const filePath = typeof file === 'string' ? file : (file.path || file.name);
+  const fileName = typeof file === 'string' ? file.split('/').pop() : file.name;
+  const fileType = typeof file === 'string' ? null : file.type;
+
   // S3パスの場合に署名付きURLを取得
   useEffect(() => {
     const fetchFileUrl = async () => {
-      if (!file) return;
+      if (!filePath) return;
 
       // ローカルパス（/で始まる）の場合はそのまま使用
-      if (file.startsWith('/')) {
-        setFileUrl(file);
+      if (filePath.startsWith('/')) {
+        setFileUrl(filePath);
       } else {
         // S3パスの場合は署名付きURLを取得
         try {
@@ -36,7 +42,7 @@ const RenderFileLink = ({ file, index }: { file: string | null, index: number })
             headers: {
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ filePath: file }),
+            body: JSON.stringify({ filePath: filePath }),
           });
 
           if (response.ok) {
@@ -44,28 +50,31 @@ const RenderFileLink = ({ file, index }: { file: string | null, index: number })
             setFileUrl(data.data.url);
           } else {
             // 失敗した場合は元のパスを使用
-            setFileUrl(file);
+            setFileUrl(filePath);
           }
         } catch (error) {
           clientLogger.error('TableCellContent', 'ファイルURLの取得失敗', { error });
           // エラーの場合は元のパスを使用
-          setFileUrl(file);
+          setFileUrl(filePath);
         }
       }
     };
 
     fetchFileUrl();
-  }, [file]);
+  }, [filePath]);
 
-  const isImage = /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(file);
+  // 画像判定: fileTypeがある場合はそれを使用、なければ拡張子で判定
+  const isImage = fileType
+    ? fileType.startsWith('image/')
+    : /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(filePath);
 
   const handleClick = (e: { preventDefault: () => void; }) => {
     e.preventDefault();
     if (isImage) {
-      setModalImage(fileUrl || file);
+      setModalImage(fileUrl || filePath);
       setModalOpen(true);
     } else {
-      window.open(fileUrl || file, '_blank');
+      window.open(fileUrl || filePath, '_blank');
     }
   };
 
@@ -82,7 +91,7 @@ const RenderFileLink = ({ file, index }: { file: string | null, index: number })
         onClick={handleClick}
         style={{ color: 'blue', textDecoration: 'underline', cursor: 'pointer', display: 'block' }}
       >
-        {file.split('/').pop()}
+        {fileName}
       </a>
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} showCloseButton={true}>
         {modalImage && <img src={modalImage} alt="modal image" width={800} height={600} />}
@@ -96,13 +105,13 @@ const renderContent = (value: unknown, isImg?: boolean) => {
     return (
       <>
         {value.map((item, index) => (
-          isImg ? <RenderFileLink file={item as string} index={index} key={index} /> : <span key={index}>{item as string}</span>
+          isImg ? <RenderFileLink file={item as string | FileInfo} index={index} key={index} /> : <span key={index}>{item as string}</span>
         ))}
       </>
     );
   }
 
-  return isImg ? <RenderFileLink file={value as string} index={0} key={0} /> : <span>{value as string}</span>;
+  return isImg ? <RenderFileLink file={value as string | FileInfo} index={0} key={0} /> : <span>{value as string}</span>;
 };
 
 // 正規表現に従って部分的にリンクをレンダリングする関数

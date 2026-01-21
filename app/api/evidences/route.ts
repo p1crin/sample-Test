@@ -93,24 +93,18 @@ export async function POST(req: NextRequest) {
       }
     );
 
-    // historyCount=0の場合は、まだ履歴レコードが存在しないため、ファイルのみ保存してデータベースには記録しない
-    // 結果保存時にまとめてデータベースに記録される
-    let evidenceRecord = null;
-
-    if (parsedHistoryCount > 0) {
-      // 既存の履歴に対するエビデンス追加の場合のみデータベースに記録
-      evidenceRecord = await prisma.tt_test_evidences.create({
-        data: {
-          test_group_id: parsedTestGroupId,
-          tid: tid,
-          test_case_no: parsedTestCaseNo,
-          history_count: parsedHistoryCount,
-          evidence_no: newEvidenceNo,
-          evidence_name: file.name,
-          evidence_path: uploadResult.filePath,
-        },
-      });
-    }
+    // エビデンスをデータベースに記録
+    const evidenceRecord = await prisma.tt_test_evidences.create({
+      data: {
+        test_group_id: parsedTestGroupId,
+        tid: tid,
+        test_case_no: parsedTestCaseNo,
+        history_count: parsedHistoryCount,
+        evidence_no: newEvidenceNo,
+        evidence_name: file.name,
+        evidence_path: uploadResult.filePath,
+      },
+    });
 
     logAPIEndpoint({
       method: 'POST',
@@ -125,7 +119,7 @@ export async function POST(req: NextRequest) {
       {
         success: true,
         data: {
-          evidenceId: evidenceRecord ? evidenceRecord.evidence_no : null,
+          evidenceId: evidenceRecord.evidence_no,
           evidenceNo: newEvidenceNo,
           evidenceName: file.name,
           evidencePath: uploadResult.filePath,

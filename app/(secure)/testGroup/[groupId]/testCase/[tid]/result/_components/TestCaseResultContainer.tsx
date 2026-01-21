@@ -248,8 +248,13 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
                     : isValidJudgment(judgmentValue)
                       ? judgmentValue
                       : JUDGMENT_OPTIONS.UNTOUCHED;
-                  const evidenceValue = getResultValue(result, 'evidence') as string;
-                  const evidence = evidenceValue ? [evidenceValue] : null;
+                  const evidenceValue = getResultValue(result, 'evidence');
+                  // evidenceは配列またはnullとして扱う
+                  const evidence = Array.isArray(evidenceValue)
+                    ? evidenceValue
+                    : evidenceValue
+                      ? [evidenceValue as string]
+                      : null;
 
                   return {
                     historyCount: historyCount,

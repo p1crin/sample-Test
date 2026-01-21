@@ -187,14 +187,16 @@ export async function GET(
         // このテストケースのテスト内容を取得
         const testContent = (testContentsMap[key] || {}) as Record<string, unknown>;
 
-        // 利用可能な場合、最新のエビデンスパスを取得
-        const latestEvidence = evidencesByKey[key] && evidencesByKey[key].length > 0
-          ? (evidencesByKey[key][0] as Record<string, unknown>)
-          : null;
+        // 利用可能な場合、最新のエビデンスパスを取得（全て）
+        const currentEvidences = evidencesByKey[key]
+          ? evidencesByKey[key].filter(
+              (e) => ((e as Record<string, unknown>).history_count as number) === 0
+            )
+          : [];
 
-        const evidencePath = latestEvidence
-          ? latestEvidence.evidence_path
-          : null;
+        const evidencePaths = currentEvidences.map(e =>
+          (e as Record<string, unknown>).evidence_path as string
+        );
 
         // 結果にエビデンスパスとテスト内容を追加
         const resultWithDetails = {
@@ -202,7 +204,7 @@ export async function GET(
           test_case: testContent.test_case || null,
           expected_value: testContent.expected_value || null,
           is_target: testContent.is_target,
-          evidence: evidencePath,
+          evidence: evidencePaths,
         };
 
         // このテストケースの履歴を取得（ある場合）
@@ -211,23 +213,23 @@ export async function GET(
         // 履歴レコードにテスト内容とエビデンスパスを追加
         const historyWithDetails = testCaseHistory.map((h) => {
           const historyCount = (h as Record<string, unknown>).history_count as number;
-          // 履歴アイテムに対して、このhistory_countに一致するエビデンスを探す
-          const historyEvidence = evidencesByKey[key]
-            ? evidencesByKey[key].find(
+          // 履歴アイテムに対して、このhistory_countに一致するエビデンスを全て取得
+          const historyEvidences = evidencesByKey[key]
+            ? evidencesByKey[key].filter(
               (e) => ((e as Record<string, unknown>).history_count as number) === historyCount
             )
-            : null;
+            : [];
 
-          const historyEvidencePath = historyEvidence
-            ? (historyEvidence as Record<string, unknown>).evidence_path
-            : null;
+          const historyEvidencePaths = historyEvidences.map(e =>
+            (e as Record<string, unknown>).evidence_path as string
+          );
 
           return {
             ...h,
             test_case: testContent.test_case || null,
             expected_value: testContent.expected_value || null,
             is_target: testContent.is_target,
-            evidence: historyEvidencePath,
+            evidence: historyEvidencePaths,
           };
         });
 
@@ -271,7 +273,7 @@ export async function GET(
             execution_date: latestValidResult.execution_date || null,
             executor: latestValidResult.executor || null,
             note: latestValidResult.note || null,
-            evidence: evidencePath,
+            evidence: latestValidResult.evidence || evidencePaths,
           },
           allHistory: sortedHistory,
           historyCounts,
@@ -298,7 +300,7 @@ export async function GET(
             execution_date: null,
             executor: null,
             note: null,
-            evidence: null,
+            evidence: [],
           },
           allHistory: [],
           historyCounts: [],

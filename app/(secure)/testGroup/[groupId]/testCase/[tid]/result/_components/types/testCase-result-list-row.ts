@@ -1,4 +1,5 @@
 import { JudgmentOption } from "@/constants/constants";
+import { FileInfo } from "@/utils/fileUtils";
 
 // 項目のエンティティ型
 export type TestCaseResultRow = {
@@ -13,10 +14,11 @@ export type TestCaseResultRow = {
   comparatorVersion: string;
   executionDate: string;
   executor: string;
-  evidence: string[] | null;
+  evidence: FileInfo[] | null;
   note: string;
   is_target: boolean;
   historyCount?: number; // 追跡用（オプション）
+  deletedEvidences?: FileInfo[]; // 削除予定のエビデンス（Method A用）
 };
 
 export type ResultWithHistory = {

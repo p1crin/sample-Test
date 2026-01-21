@@ -2,9 +2,10 @@ import { TestCaseResultRow } from '@/app/(secure)/testGroup/[groupId]/testCase/[
 import { Column, DataGrid, SortConfig } from '@/components/datagrid/DataGrid';
 import { Button } from '@/components/ui/button';
 import { Modal } from '@/components/ui/modal';
-import { generateUniqueId } from '@/utils/fileUtils';
+import { FileInfo, processClipboardItems, processFileList, getUniqueFileNames } from '@/utils/fileUtils';
 import { JUDGMENT_OPTIONS, JudgmentOption } from '@/constants/constants';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import clientLogger from '@/utils/client-logger';
 
 interface TestTableProps {
   groupId: number;
@@ -20,15 +21,15 @@ const isRowDisabled = (row: TestCaseResultRow): boolean => {
   return row.judgment === JUDGMENT_OPTIONS.EXCLUDED || row.is_target === false;
 };
 
-const TestTable: React.FC<TestTableProps> = ({ data, setData, userName = '', executorsList = [] }) => {
+const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, userName = '', executorsList = [] }) => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [currentColumn, setCurrentColumn] = useState<string | null>(null);
   const [sortConfig, setSortConfig] = useState<SortConfig<TestCaseResultRow>>(null);
   const [page, setPage] = useState(1);
   const [inputValue, setInputValue] = useState('');
-  const fileInputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const [allChecked, setAllChecked] = useState(true);
   const [isInitialRender, setIsInitialRender] = useState(true);
+  const fileInputRefs = useRef<(HTMLInputElement | null)[]>([]);
   useEffect(() => {
     if (isInitialRender && data) {
       const updatedData = data.map((row, index) => ({
@@ -90,81 +91,173 @@ const TestTable: React.FC<TestTableProps> = ({ data, setData, userName = '', exe
     setSortConfig({ key, direction });
   };
 
-  const handlePaste = useCallback(async (pasteEvent: React.ClipboardEvent, rowIndex: number) => {
-    const fileList = pasteEvent.clipboardData.items || [];
-    if (fileList.length > 0 && fileList[0].kind !== 'file') return; // ファイル以外をペーストした場合は対象外
+  // エビデンスファイルをS3にアップロード
+  const uploadEvidenceFile = useCallback(async (file: FileInfo, rowIndex: number): Promise<FileInfo> => {
+    try {
+      const row = data[rowIndex];
+      const historyCount = row.historyCount ?? 0;
 
-    const newFiles = await Promise.all(Array.from(fileList).map(async item => {
-      const file = item.getAsFile();
-      if (file && file.type.startsWith('image/')) {
-        return file.name;
+      const formData = new FormData();
+
+      // Base64からBlobを作成してFormDataに追加
+      if (!file.base64) {
+        throw new Error(`ファイルデータが不正です: ${file.name} (base64データがありません)`);
       }
-      return null;
-    })).then(files => files.filter(Boolean) as string[]);
+
+      // file.typeが空の場合はデフォルトのMIMEタイプを使用
+      const fileType = file.type || 'application/octet-stream';
+
+      const byteString = atob(file.base64);
+      const arrayBuffer = new ArrayBuffer(byteString.length);
+      const uint8Array = new Uint8Array(arrayBuffer);
+      for (let i = 0; i < byteString.length; i++) {
+        uint8Array[i] = byteString.charCodeAt(i);
+      }
+      const blob = new Blob([uint8Array], { type: fileType });
+      const fileObject = new File([blob], file.name, { type: fileType });
+      formData.append('file', fileObject);
+
+      formData.append('testGroupId', String(groupId));
+      formData.append('tid', tid);
+      formData.append('testCaseNo', String(row.test_case_no));
+      formData.append('historyCount', String(historyCount));
+
+      // FormDataの場合はfetchを直接使用（Content-Typeは自動設定される）
+      const fetchResponse = await fetch('/api/evidences', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!fetchResponse.ok) {
+        const responseText = await fetchResponse.text();
+        throw new Error(`エビデンスのアップロードに失敗しました (status: ${fetchResponse.status}, response: ${responseText})`);
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const response = await fetchResponse.json() as any;
+
+      if (response.success) {
+        clientLogger.info('TestTable', 'エビデンスアップロード成功', {
+          evidenceNo: response.data.evidenceNo,
+          evidencePath: response.data.evidencePath,
+          fileName: file.name,
+          fileType: file.type
+        });
+
+        // アップロード成功時、pathとevidenceNoを含むFileInfoを返す
+        return {
+          ...file,
+          path: response.data.evidencePath,
+          fileNo: response.data.evidenceNo,
+        };
+      } else {
+        throw new Error(`エビデンスのアップロードに失敗しました: ${response.error || 'unknown error'}`);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      clientLogger.error('TestTable', 'エビデンスアップロード失敗', {
+        error: errorMessage,
+        fileName: file.name,
+        fileType: file.type,
+        hasBase64: !!file.base64
+      });
+      throw error;
+    }
+  }, [groupId, tid, data]);
+
+  // ペーストイベントハンドラー
+  const handlePaste = useCallback(async (pasteEvent: React.ClipboardEvent, rowIndex: number) => {
+    const items = pasteEvent.clipboardData.items;
+    if (items.length === 0 || items[0].kind !== 'file') return;
+
+    const newFiles = await processClipboardItems(items);
+
+    // 各ファイルを順次アップロード
+    let processedFiles = newFiles;
+    if (newFiles.length > 0) {
+      try {
+        processedFiles = [];
+        for (const file of newFiles) {
+          const uploadedFile = await uploadEvidenceFile(file, rowIndex);
+          processedFiles.push(uploadedFile);
+        }
+      } catch (error) {
+        clientLogger.error('TestTable', 'ペーストしたファイルのアップロードに失敗しました', { error });
+        return;
+      }
+    }
 
     setData(prevData => {
-      const existingFiles = (prevData[rowIndex].evidence || []).map(file => file);
-      const uniqueFiles = getUniqueFileNames([...existingFiles, ...newFiles]);
       const newData = [...prevData];
+      const existingFiles = newData[rowIndex].evidence || [];
+      const uniqueFiles = getUniqueFileNames([...existingFiles, ...processedFiles]);
       newData[rowIndex] = { ...newData[rowIndex], evidence: uniqueFiles };
       return newData;
     });
-  }, [setData]);
+  }, [setData, uploadEvidenceFile]);
 
+  // ファイル選択ハンドラー
   const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>, rowIndex: number) => {
-    const fileList = e.target.files || [];
-    const newFiles = await Promise.all(Array.from(fileList).map(async file => {
-      return file.name;
-    }));
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+
+    const newFiles = await processFileList(fileList);
+
+    // 各ファイルを順次アップロード
+    let processedFiles = newFiles;
+    if (newFiles.length > 0) {
+      try {
+        processedFiles = [];
+        for (const file of newFiles) {
+          const uploadedFile = await uploadEvidenceFile(file, rowIndex);
+          processedFiles.push(uploadedFile);
+        }
+      } catch (error) {
+        clientLogger.error('TestTable', '選択したファイルのアップロードに失敗しました', { error });
+        return;
+      }
+    }
 
     setData(prevData => {
-      const existingFiles = (prevData[rowIndex].evidence || []).map(file => file);
-      const uniqueFiles = getUniqueFileNames([...existingFiles, ...newFiles]);
       const newData = [...prevData];
+      const existingFiles = newData[rowIndex].evidence || [];
+      const uniqueFiles = getUniqueFileNames([...existingFiles, ...processedFiles]);
       newData[rowIndex] = { ...newData[rowIndex], evidence: uniqueFiles };
       return newData;
     });
 
+    // inputをリセット
     if (fileInputRefs.current[rowIndex]) {
       fileInputRefs.current[rowIndex]!.value = '';
     }
-  }, [setData]);
+  }, [setData, uploadEvidenceFile]);
 
-  const getUniqueFileNames = (fileNames: string[]) => {
-    const nameCount: { [key: string]: number } = {};
-    return fileNames.map(file => {
-      const baseName = file.replace(/(\(\d+\))?(\.[^.]+)?$/, '');
-      const extension = file.match(/(\.[^.]+)$/)?.[0] || '';
-      const fullName = `${baseName}${extension}`;
-      if (nameCount[fullName] === undefined) {
-        nameCount[fullName] = 0;
-      } else {
-        nameCount[fullName]++;
-      }
-      return nameCount[fullName] === 0 ? file : `${baseName}(${nameCount[fullName]})${extension}`;
-    });
-  };
-
-  const convertStringToEvidenceObject = (evidenceString: string) => {
-    return { name: evidenceString, id: generateUniqueId() };
-  };
-
+  // ファイル削除ハンドラー（Method A: 削除リストに追加のみ）
   const handleFileDelete = useCallback((fileIndex: number, rowIndex: number) => {
     setData(prevData => {
       const newData = [...prevData];
+      const deletedFile = newData[rowIndex].evidence?.[fileIndex];
+
       if (newData[rowIndex].evidence) {
+        // エビデンス配列から削除
         newData[rowIndex] = {
           ...newData[rowIndex],
-          evidence: newData[rowIndex].evidence.filter((_, index) => index !== fileIndex)
+          evidence: newData[rowIndex].evidence!.filter((_, index) => index !== fileIndex)
         };
+
+        // Method A: pathがある場合は削除リストに追加（物理削除はsubmit時）
+        if (deletedFile && deletedFile.path) {
+          const deletedEvidences = newData[rowIndex].deletedEvidences || [];
+          newData[rowIndex] = {
+            ...newData[rowIndex],
+            deletedEvidences: [...deletedEvidences, deletedFile]
+          };
+        }
       }
+
       return newData;
     });
   }, [setData]);
-
-  const truncateFileName = (name: string) => {
-    return name.length > 30 ? name.slice(0, 30) + '...' : name;
-  };
 
   const handleAllCheckboxChange = (checked: boolean) => {
     setAllChecked(checked);
@@ -370,24 +463,28 @@ const TestTable: React.FC<TestTableProps> = ({ data, setData, userName = '', exe
     {
       key: 'evidence',
       header: 'エビデンス',
-      render: (_value: string, row: TestCaseResultRow) => {
+      render: (_value: FileInfo[] | null, row: TestCaseResultRow) => {
         const rowIndex = getRowIndex(row);
+        const isReadOnly = isRowDisabled(row);
+
         return (
           <div>
-            <div className='flex flex-cols space-x-2 h-8'>
-              <textarea
-                id='content'
-                name='content'
-                value=''
-                placeholder={'ファイルを選択またはキャプチャーを貼り付けてください。'}
-                onPaste={(e) => handlePaste(e, rowIndex)}
-                className={'flex w-89 resize-none border border-gray-300 rounded px-2 py-1'}
-                readOnly />
-              <div className='flex justify-center'>
+            {/* ファイル選択エリア */}
+            <div className='flex flex-col space-y-2'>
+              <div className='flex space-x-2 items-center'>
+                <textarea
+                  value=''
+                  placeholder={'ファイルを選択またはキャプチャーを貼り付けてください。'}
+                  onPaste={(e) => !isReadOnly && handlePaste(e, rowIndex)}
+                  className='flex-1 h-8 resize-none border border-gray-300 rounded px-2 py-1 text-sm'
+                  readOnly
+                  disabled={isReadOnly}
+                />
                 <Button
                   type="button"
                   onClick={() => fileInputRefs.current[rowIndex]?.click()}
-                  className="whitespace-nowrap"
+                  className="whitespace-nowrap h-8 text-sm px-3"
+                  disabled={isReadOnly}
                 >
                   ファイルを選択
                 </Button>
@@ -396,24 +493,53 @@ const TestTable: React.FC<TestTableProps> = ({ data, setData, userName = '', exe
                   multiple
                   ref={(el) => { fileInputRefs.current[rowIndex] = el; }}
                   onChange={(e) => handleFileChange(e, rowIndex)}
-                  style={{ display: 'none' }} />
+                  style={{ display: 'none' }}
+                  disabled={isReadOnly}
+                />
               </div>
-            </div>
-            <div className="flex flex-wrap w-90">
-              {row.evidence?.map((file, fileIndex) => {
-                const fileObject = typeof file === 'string' ? convertStringToEvidenceObject(file) : file;
-                return (
-                  <div key={fileObject.id} className="relative flex items-center justify-between border border-gray-300 p-1 m-1 rounded-sm">
-                    <span>{truncateFileName(fileObject.name.split('/').pop() || '')}</span>
-                    <button
-                      className="top-2 h-6 w-6 rounded-lg border bg-white text-red-500"
-                      onClick={() => handleFileDelete(fileIndex, rowIndex)}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                );
-              })}
+
+              {/* ファイルプレビューエリア */}
+              {row.evidence && row.evidence.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {row.evidence.map((file, fileIndex) => {
+                    // 画像ファイルかどうかを判定
+                    const isImage = file.type?.startsWith('image/');
+
+                    return (
+                      <div
+                        key={file.id}
+                        className="relative flex items-center justify-between border border-gray-300 p-2 rounded-sm bg-white"
+                        style={{ minHeight: '40px', maxWidth: '180px' }}
+                      >
+                        {file.path && isImage ? (
+                          <img
+                            src={file.path}
+                            alt={file.name}
+                            className="object-contain h-8 max-w-[80px]"
+                          />
+                        ) : file.base64 && isImage ? (
+                          <img
+                            src={`data:${file.type};base64,${file.base64}`}
+                            alt={file.name}
+                            className="object-contain h-8 max-w-[80px]"
+                          />
+                        ) : (
+                          <span className="text-xs truncate max-w-[120px]">{file.name}</span>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => !isReadOnly && handleFileDelete(fileIndex, rowIndex)}
+                          className="ml-2 h-5 w-5 rounded border bg-white text-red-500 hover:bg-red-50 text-xs"
+                          disabled={isReadOnly}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         );
