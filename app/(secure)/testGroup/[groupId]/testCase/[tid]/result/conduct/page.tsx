@@ -37,7 +37,6 @@ export default async function TestCaseConductPage({ params }: Props) {
     }
 
   } catch (error) {
-    console.log(error)
     // エラーハンドリング
     if (error instanceof Error && error.message.includes('Forbidden')) {
       return <ForbiddenUI />;

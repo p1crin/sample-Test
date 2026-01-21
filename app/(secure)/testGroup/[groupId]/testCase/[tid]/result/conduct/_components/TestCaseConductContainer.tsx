@@ -54,10 +54,11 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
   const { data: session } = useSession();
   const user = session?.user;
   if (apiError) throw apiError;
-  if (!user) {
-    return;
-  }
+
   useEffect(() => {
+    // ユーザー情報がない場合は処理をスキップ
+    if (!user) return;
+
     const fetchExecutors = async () => {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -138,7 +139,7 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
           note: '',
           judgment: "未着手"
         })) as TestCaseResultRow[];
-        const hisitoryData = Object.values(resultsData).flatMap((result) =>
+        const historyData = Object.values(resultsData).flatMap((result) =>
           result.allHistory.map((histItem) => ({
             historyCount: histItem.history_count,
             test_case_no: histItem.test_case_no,
@@ -156,7 +157,7 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
           }))
         ) as TestCaseResultRow[];
         // historyCount毎にグルーピング
-        const groupedHistoryData = hisitoryData.reduce((acc, item) => {
+        const groupedHistoryData = historyData.reduce((acc, item) => {
           const historyCount = item.historyCount ?? 0; // historyCountがundefinedの場合は0を使用
           if (!acc[historyCount]) {
             acc[historyCount] = [];
@@ -174,13 +175,13 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
         // 追加: 実行者リストに結果の実行者を含める
         const resultExecutors = Object.values(resultsData).flatMap(result =>
           result.allHistory.map(histItem => ({
-            id: histItem.executor_id ?? Math.random(), // 0以上1未満の小数を振る
+            id: histItem.executor_id ?? -Date.now() - Math.floor(Math.random() * 1000), // 負の値で一時IDを生成
             name: histItem.executor ?? ''
           }))
         ).filter((executor, index, self) =>
           executor.id && self.findIndex(e => e.id === executor.id) === index
         ).map(executor => ({
-          id: typeof executor.id === 'number' ? executor.id : Math.random(),
+          id: typeof executor.id === 'number' ? executor.id : -Date.now() - Math.floor(Math.random() * 1000),
           name: typeof executor.name === 'string' ? executor.name : ''
         }));
         // 重複を削除
@@ -199,9 +200,12 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
         setIsLoading(false);
       }
     };
-    fetchExecutors();
-    fetchTestCaseDetail();
-    fetchTestResults();
+
+    // 並列実行可能な処理をまとめる
+    Promise.all([fetchExecutors(), fetchTestCaseDetail()]).then(() => {
+      // テスト詳細取得後にテスト結果を取得
+      fetchTestResults();
+    });
   }, [groupId, tid, user]);
 
   const handleShowTestTable = () => {
@@ -342,25 +346,26 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
           ) : (
             <>
               <>
-                {showNewTestCaseConduct &&
+                {showNewTestCaseConduct && user &&
                   <TestTable
                     groupId={groupId}
                     tid={tid}
                     data={initialTestCaseData}
                     setData={setInitialTestCaseData}
-                    userName={user?.name || ''}
+                    userName={user.name || ''}
                     executorsList={[{ id: user.id, name: user.name }]}
                   />}
                 {Object.entries(pastTestCaseData).length > 0 &&
                   (() => {
 
                     // セクションをレンダリング
-                    return pastTestCaseData.slice().reverse().map((_row, index) => {
-                      const historyCount = pastTestCaseData.length - index;
+                    return pastTestCaseData.slice().reverse().map((_row, reverseIndex) => {
+                      const actualIndex = pastTestCaseData.length - 1 - reverseIndex; // 実際の配列のインデックスを保存
+                      const historyCount = pastTestCaseData.length - reverseIndex;
                       const sectionLabel = historyCount === 0 ? '最新' : `${historyCount}回目`;
                       const isExpanded = expandedSections.has(historyCount);
                       return (
-                        <div key={index}>
+                        <div key={reverseIndex}>
                           <div className="border rounded-lg p-4 bg-gray-50">
                             <button
                               onClick={() => historyCount !== 0 && toggleSection(historyCount)}
@@ -377,16 +382,16 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
                                 <TestTable
                                   groupId={groupId}
                                   tid={tid}
-                                  data={pastTestCaseData[pastTestCaseData.length - 1 - index]} // 二次元配列を一次元配列に変換して渡す
+                                  data={pastTestCaseData[actualIndex]}
                                   setData={(newData) => setPastTestCaseData(prevState => {
                                     const newState = [...prevState];
                                     if (typeof newData === 'function') {
-                                      newState[pastTestCaseData.length - 1 - index] = newData(newState[pastTestCaseData.length - 1 - index]);
+                                      newState[actualIndex] = newData(newState[actualIndex]);
                                     } else {
-                                      newState[pastTestCaseData.length - 1 - index] = newData;
+                                      newState[actualIndex] = newData;
                                     }
                                     return newState;
-                                  })} // 新しいデータを二次元配列として設定
+                                  })}
                                   userName={user?.name || ''}
                                   executorsList={executorsList} />
                               </div>

@@ -2,9 +2,9 @@ import { TestCaseResultRow } from '@/app/(secure)/testGroup/[groupId]/testCase/[
 import { Column, DataGrid, SortConfig } from '@/components/datagrid/DataGrid';
 import { Button } from '@/components/ui/button';
 import { Modal } from '@/components/ui/modal';
-import { FileInfo, generateUniqueId } from '@/utils/fileUtils';
+import { generateUniqueId } from '@/utils/fileUtils';
 import { JUDGMENT_OPTIONS, JudgmentOption } from '@/constants/constants';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 interface TestTableProps {
   groupId: number;
@@ -14,6 +14,11 @@ interface TestTableProps {
   userName?: string;
   executorsList?: Array<{ id: number; name: string; }>;
 }
+
+// 行が編集不可かどうかを判定するヘルパー関数
+const isRowDisabled = (row: TestCaseResultRow): boolean => {
+  return row.judgment === JUDGMENT_OPTIONS.EXCLUDED || row.is_target === false;
+};
 
 const TestTable: React.FC<TestTableProps> = ({ data, setData, userName = '', executorsList = [] }) => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -29,12 +34,18 @@ const TestTable: React.FC<TestTableProps> = ({ data, setData, userName = '', exe
       const updatedData = data.map((row, index) => ({
         index: index + 1,
         ...row,
-        checked: row.judgment !== JUDGMENT_OPTIONS.EXCLUDED || row.is_target ? true : false,
+        checked: !isRowDisabled(row) ? true : false,
       }));
       setData(updatedData);
       setIsInitialRender(false);
     }
   }, [data, isInitialRender, setData]);
+
+  // 行のインデックスを取得するメモ化された関数（パフォーマンス最適化）
+  const getRowIndex = useCallback((row: TestCaseResultRow): number => {
+    // test_case_noが一意であることを前提に、それを使ってインデックスを取得
+    return data.findIndex(r => r.test_case_no === row.test_case_no);
+  }, [data]);
 
   const handleBulkInput = (column: string) => {
     setCurrentColumn(column);
@@ -44,7 +55,7 @@ const TestTable: React.FC<TestTableProps> = ({ data, setData, userName = '', exe
 
   const handleBulkSubmit = () => {
     const newData = data.map((row) => {
-      if (!row.checked || row.judgment === JUDGMENT_OPTIONS.EXCLUDED || row.is_target === false) {
+      if (!row.checked || isRowDisabled(row)) {
         return row;
       }
       return {
@@ -58,11 +69,18 @@ const TestTable: React.FC<TestTableProps> = ({ data, setData, userName = '', exe
     setIsInitialRender(false);
   };
 
-  const handleInsertSelf = (rowIndex: number) => {
-    const newData = [...data];
-    newData[rowIndex].executor = userName;
-    setData(newData);
-  };
+  // 行のデータを更新する汎用ハンドラー（メモ化）
+  const updateRowData = useCallback((rowIndex: number, field: keyof TestCaseResultRow, value: any) => {
+    setData(prevData => {
+      const newData = [...prevData];
+      newData[rowIndex] = { ...newData[rowIndex], [field]: value };
+      return newData;
+    });
+  }, [setData]);
+
+  const handleInsertSelf = useCallback((rowIndex: number) => {
+    updateRowData(rowIndex, 'executor', userName);
+  }, [userName, updateRowData]);
 
   const handleSort = (key: keyof TestCaseResultRow) => {
     let direction: 'asc' | 'desc' = 'asc';
@@ -72,7 +90,7 @@ const TestTable: React.FC<TestTableProps> = ({ data, setData, userName = '', exe
     setSortConfig({ key, direction });
   };
 
-  const handlePaste = async (pasteEvent: React.ClipboardEvent, rowIndex: number) => {
+  const handlePaste = useCallback(async (pasteEvent: React.ClipboardEvent, rowIndex: number) => {
     const fileList = pasteEvent.clipboardData.items || [];
     if (fileList.length > 0 && fileList[0].kind !== 'file') return; // ファイル以外をペーストした場合は対象外
 
@@ -84,35 +102,33 @@ const TestTable: React.FC<TestTableProps> = ({ data, setData, userName = '', exe
       return null;
     })).then(files => files.filter(Boolean) as string[]);
 
-    const existingFiles = (data[rowIndex].evidence || []).map(file => {
-      return file;
+    setData(prevData => {
+      const existingFiles = (prevData[rowIndex].evidence || []).map(file => file);
+      const uniqueFiles = getUniqueFileNames([...existingFiles, ...newFiles]);
+      const newData = [...prevData];
+      newData[rowIndex] = { ...newData[rowIndex], evidence: uniqueFiles };
+      return newData;
     });
+  }, [setData]);
 
-    const uniqueFiles = getUniqueFileNames([...existingFiles, ...newFiles]);
-    const newData = [...data];
-    newData[rowIndex].evidence = uniqueFiles;
-    setData(newData);
-  };
-
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, rowIndex: number) => {
+  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>, rowIndex: number) => {
     const fileList = e.target.files || [];
     const newFiles = await Promise.all(Array.from(fileList).map(async file => {
       return file.name;
     }));
 
-    const existingFiles = (data[rowIndex].evidence || []).map(file => {
-      return file;
+    setData(prevData => {
+      const existingFiles = (prevData[rowIndex].evidence || []).map(file => file);
+      const uniqueFiles = getUniqueFileNames([...existingFiles, ...newFiles]);
+      const newData = [...prevData];
+      newData[rowIndex] = { ...newData[rowIndex], evidence: uniqueFiles };
+      return newData;
     });
-
-    const uniqueFiles = getUniqueFileNames([...existingFiles, ...newFiles]);
-    const newData = [...data];
-    newData[rowIndex].evidence = uniqueFiles;
-    setData(newData);
 
     if (fileInputRefs.current[rowIndex]) {
       fileInputRefs.current[rowIndex]!.value = '';
     }
-  };
+  }, [setData]);
 
   const getUniqueFileNames = (fileNames: string[]) => {
     const nameCount: { [key: string]: number } = {};
@@ -133,13 +149,18 @@ const TestTable: React.FC<TestTableProps> = ({ data, setData, userName = '', exe
     return { name: evidenceString, id: generateUniqueId() };
   };
 
-  const handleFileDelete = (fileIndex: number, rowIndex: number) => {
-    const newData = [...data];
-    if (newData[rowIndex].evidence) {
-      newData[rowIndex].evidence = newData[rowIndex].evidence.filter((_, index) => index !== fileIndex);
-    }
-    setData(newData);
-  };
+  const handleFileDelete = useCallback((fileIndex: number, rowIndex: number) => {
+    setData(prevData => {
+      const newData = [...prevData];
+      if (newData[rowIndex].evidence) {
+        newData[rowIndex] = {
+          ...newData[rowIndex],
+          evidence: newData[rowIndex].evidence.filter((_, index) => index !== fileIndex)
+        };
+      }
+      return newData;
+    });
+  }, [setData]);
 
   const truncateFileName = (name: string) => {
     return name.length > 30 ? name.slice(0, 30) + '...' : name;
@@ -149,7 +170,7 @@ const TestTable: React.FC<TestTableProps> = ({ data, setData, userName = '', exe
     setAllChecked(checked);
     const newData = data.map(row => ({
       ...row,
-      checked: row.judgment !== JUDGMENT_OPTIONS.EXCLUDED || row.is_target ? checked : false,
+      checked: !isRowDisabled(row) ? checked : false,
     }));
     setData(newData);
   };
@@ -170,18 +191,19 @@ const TestTable: React.FC<TestTableProps> = ({ data, setData, userName = '', exe
           </p>
         </div>
       ),
-      render: (value: boolean, row: TestCaseResultRow) => (
-        <input
-          type="checkbox"
-          className='accent-[#FF5611]'
-          checked={(row.judgment !== JUDGMENT_OPTIONS.EXCLUDED && row.is_target !== false ? value : false) || false}
-          onChange={(e) => {
-            const newData = [...data];
-            newData[data.indexOf(row)].checked = row.judgment !== JUDGMENT_OPTIONS.EXCLUDED || row.is_target === false ? e.target.checked : false;
-            setData(newData);
-          }}
-        />
-      ),
+      render: (value: boolean, row: TestCaseResultRow) => {
+        const rowIndex = getRowIndex(row);
+        return (
+          <input
+            type="checkbox"
+            className='accent-[#FF5611]'
+            checked={(!isRowDisabled(row) ? value : false) || false}
+            onChange={(e) => {
+              updateRowData(rowIndex, 'checked', !isRowDisabled(row) ? e.target.checked : false);
+            }}
+          />
+        );
+      },
     },
     { key: 'index', header: 'No' },
     { key: 'test_case', header: 'テストケース' },
@@ -189,19 +211,18 @@ const TestTable: React.FC<TestTableProps> = ({ data, setData, userName = '', exe
     {
       key: 'result',
       header: '結果',
-      render: (value: string, row: TestCaseResultRow) => (
-        <input
-          type="text"
-          value={value || ''}
-          onChange={(e) => {
-            const newData = [...data];
-            newData[data.indexOf(row)].result = e.target.value;
-            setData(newData);
-          }}
-          className="border border-gray-300 rounded p-1 w-100"
-          readOnly={row.judgment === JUDGMENT_OPTIONS.EXCLUDED || row.is_target === false}
-        />
-      ),
+      render: (value: string, row: TestCaseResultRow) => {
+        const rowIndex = getRowIndex(row);
+        return (
+          <input
+            type="text"
+            value={value || ''}
+            onChange={(e) => updateRowData(rowIndex, 'result', e.target.value)}
+            className="border border-gray-300 rounded p-1 w-100"
+            readOnly={isRowDisabled(row)}
+          />
+        );
+      },
     },
     {
       key: 'judgment',
@@ -211,8 +232,9 @@ const TestTable: React.FC<TestTableProps> = ({ data, setData, userName = '', exe
           <button onClick={() => handleBulkInput('judgment')} className="ml-2 text-blue-500 float-right">∨</button>
         </div>
       ),
-      render: (value: string, row: TestCaseResultRow) => (
-        row.judgment === JUDGMENT_OPTIONS.EXCLUDED || row.is_target === false ? (
+      render: (value: string, row: TestCaseResultRow) => {
+        const rowIndex = getRowIndex(row);
+        return isRowDisabled(row) ? (
           <input
             type="text"
             value={value || JUDGMENT_OPTIONS.EXCLUDED}
@@ -222,21 +244,17 @@ const TestTable: React.FC<TestTableProps> = ({ data, setData, userName = '', exe
         ) : (
           <select
             value={value || JUDGMENT_OPTIONS.UNTOUCHED}
-            onChange={(e) => {
-              const newData = [...data];
-              newData[data.indexOf(row)].judgment = e.target.value as JudgmentOption;
-              setData(newData);
-            }}
+            onChange={(e) => updateRowData(rowIndex, 'judgment', e.target.value as JudgmentOption)}
             className="border border-gray-300 rounded p-1 min-w-full"
           >
             {Object.entries(JUDGMENT_OPTIONS)
-              .filter(([key, value]) => value !== JUDGMENT_OPTIONS.EXCLUDED && value !== JUDGMENT_OPTIONS.EMPTY)
+              .filter(([_, value]) => value !== JUDGMENT_OPTIONS.EXCLUDED && value !== JUDGMENT_OPTIONS.EMPTY)
               .map(([key, value]) => (
                 <option key={key} value={value}>{value}</option>
               ))}
           </select>
-        )
-      ),
+        );
+      },
     },
     {
       key: 'softwareVersion',
@@ -246,19 +264,18 @@ const TestTable: React.FC<TestTableProps> = ({ data, setData, userName = '', exe
           <button onClick={() => handleBulkInput('softwareVersion')} className="ml-2 text-blue-500 float-right">∨</button>
         </div>
       ),
-      render: (value: string, row: TestCaseResultRow) => (
-        <input
-          type="text"
-          value={value || ''}
-          onChange={(e) => {
-            const newData = [...data];
-            newData[data.indexOf(row)].softwareVersion = e.target.value;
-            setData(newData);
-          }}
-          className="border border-gray-300 rounded p-1 w-25"
-          readOnly={row.judgment === JUDGMENT_OPTIONS.EXCLUDED || row.is_target === false}
-        />
-      ),
+      render: (value: string, row: TestCaseResultRow) => {
+        const rowIndex = getRowIndex(row);
+        return (
+          <input
+            type="text"
+            value={value || ''}
+            onChange={(e) => updateRowData(rowIndex, 'softwareVersion', e.target.value)}
+            className="border border-gray-300 rounded p-1 w-25"
+            readOnly={isRowDisabled(row)}
+          />
+        );
+      },
     },
     {
       key: 'hardwareVersion',
@@ -268,19 +285,18 @@ const TestTable: React.FC<TestTableProps> = ({ data, setData, userName = '', exe
           <button onClick={() => handleBulkInput('hardwareVersion')} className="ml-2 text-blue-500 float-right">∨</button>
         </div>
       ),
-      render: (value: string, row: TestCaseResultRow) => (
-        <input
-          type="text"
-          value={value || ''}
-          onChange={(e) => {
-            const newData = [...data];
-            newData[data.indexOf(row)].hardwareVersion = e.target.value;
-            setData(newData);
-          }}
-          className="border border-gray-300 rounded p-1 w-25"
-          readOnly={row.judgment === JUDGMENT_OPTIONS.EXCLUDED || row.is_target === false}
-        />
-      ),
+      render: (value: string, row: TestCaseResultRow) => {
+        const rowIndex = getRowIndex(row);
+        return (
+          <input
+            type="text"
+            value={value || ''}
+            onChange={(e) => updateRowData(rowIndex, 'hardwareVersion', e.target.value)}
+            className="border border-gray-300 rounded p-1 w-25"
+            readOnly={isRowDisabled(row)}
+          />
+        );
+      },
     },
     {
       key: 'comparatorVersion',
@@ -290,36 +306,34 @@ const TestTable: React.FC<TestTableProps> = ({ data, setData, userName = '', exe
           <button onClick={() => handleBulkInput('comparatorVersion')} className="ml-2 text-blue-500 float-right">∨</button>
         </div>
       ),
-      render: (value: string, row: TestCaseResultRow) => (
-        <input
-          type="text"
-          value={value || ''}
-          onChange={(e) => {
-            const newData = [...data];
-            newData[data.indexOf(row)].comparatorVersion = e.target.value;
-            setData(newData);
-          }}
-          className="border border-gray-300 rounded p-1 w-25"
-          readOnly={row.judgment === JUDGMENT_OPTIONS.EXCLUDED || row.is_target === false}
-        />
-      ),
+      render: (value: string, row: TestCaseResultRow) => {
+        const rowIndex = getRowIndex(row);
+        return (
+          <input
+            type="text"
+            value={value || ''}
+            onChange={(e) => updateRowData(rowIndex, 'comparatorVersion', e.target.value)}
+            className="border border-gray-300 rounded p-1 w-25"
+            readOnly={isRowDisabled(row)}
+          />
+        );
+      },
     },
     {
       key: 'executionDate',
       header: '実施日',
-      render: (value: string, row: TestCaseResultRow) => (
-        <input
-          type="date"
-          value={value || ''}
-          onChange={(e) => {
-            const newData = [...data];
-            newData[data.indexOf(row)].executionDate = e.target.value;
-            setData(newData);
-          }}
-          className="border border-gray-300 rounded p-1 w-30"
-          readOnly={row.judgment === JUDGMENT_OPTIONS.EXCLUDED || row.is_target === false}
-        />
-      ),
+      render: (value: string, row: TestCaseResultRow) => {
+        const rowIndex = getRowIndex(row);
+        return (
+          <input
+            type="date"
+            value={value || ''}
+            onChange={(e) => updateRowData(rowIndex, 'executionDate', e.target.value)}
+            className="border border-gray-300 rounded p-1 w-30"
+            readOnly={isRowDisabled(row)}
+          />
+        );
+      },
     },
     {
       key: 'executor',
@@ -329,16 +343,13 @@ const TestTable: React.FC<TestTableProps> = ({ data, setData, userName = '', exe
         </div>
       ),
       render: (value: string, row: TestCaseResultRow) => {
-        const isReadOnly = row.judgment === JUDGMENT_OPTIONS.EXCLUDED || row.is_target === false
+        const rowIndex = getRowIndex(row);
+        const isReadOnly = isRowDisabled(row);
         return (
           <div className={`flex items-center ${isReadOnly ? 'bg-gray-200' : ''}`}>
             <select
               value={value || ''}
-              onChange={(e) => {
-                const newData = [...data];
-                newData[data.indexOf(row)].executor = e.target.value;
-                setData(newData);
-              }}
+              onChange={(e) => updateRowData(rowIndex, 'executor', e.target.value)}
               className="flex-grow border border-gray-300 rounded p-1"
               disabled={isReadOnly}
             >
@@ -349,7 +360,7 @@ const TestTable: React.FC<TestTableProps> = ({ data, setData, userName = '', exe
                 </option>
               ))}
             </select>
-            <button onClick={() => handleInsertSelf(data.indexOf(row))} className="ml-2 p-1" disabled={isReadOnly}>
+            <button onClick={() => handleInsertSelf(rowIndex)} className="ml-2 p-1" disabled={isReadOnly}>
               👤
             </button>
           </div>
@@ -359,67 +370,69 @@ const TestTable: React.FC<TestTableProps> = ({ data, setData, userName = '', exe
     {
       key: 'evidence',
       header: 'エビデンス',
-      render: (value: string, row: TestCaseResultRow) => (
-        <div>
-          <div className='flex flex-cols space-x-2 h-8'>
-            <textarea
-              id='content'
-              name='content'
-              value=''
-              placeholder={'ファイルを選択またはキャプチャーを貼り付けてください。'}
-              onPaste={(e) => handlePaste(e, data.indexOf(row))}
-              className={'flex w-89 resize-none border border-gray-300 rounded px-2 py-1'}
-              readOnly />
-            <div className='flex justify-center'>
-              <Button
-                type="button"
-                onClick={() => fileInputRefs.current[data.indexOf(row)]?.click()}
-                className="whitespace-nowrap"
-              >
-                ファイルを選択
-              </Button>
-              <input
-                type="file"
-                multiple
-                ref={(el) => { fileInputRefs.current[data.indexOf(row)] = el; }}
-                onChange={(e) => handleFileChange(e, data.indexOf(row))}
-                style={{ display: 'none' }} />
+      render: (_value: string, row: TestCaseResultRow) => {
+        const rowIndex = getRowIndex(row);
+        return (
+          <div>
+            <div className='flex flex-cols space-x-2 h-8'>
+              <textarea
+                id='content'
+                name='content'
+                value=''
+                placeholder={'ファイルを選択またはキャプチャーを貼り付けてください。'}
+                onPaste={(e) => handlePaste(e, rowIndex)}
+                className={'flex w-89 resize-none border border-gray-300 rounded px-2 py-1'}
+                readOnly />
+              <div className='flex justify-center'>
+                <Button
+                  type="button"
+                  onClick={() => fileInputRefs.current[rowIndex]?.click()}
+                  className="whitespace-nowrap"
+                >
+                  ファイルを選択
+                </Button>
+                <input
+                  type="file"
+                  multiple
+                  ref={(el) => { fileInputRefs.current[rowIndex] = el; }}
+                  onChange={(e) => handleFileChange(e, rowIndex)}
+                  style={{ display: 'none' }} />
+              </div>
+            </div>
+            <div className="flex flex-wrap w-90">
+              {row.evidence?.map((file, fileIndex) => {
+                const fileObject = typeof file === 'string' ? convertStringToEvidenceObject(file) : file;
+                return (
+                  <div key={fileObject.id} className="relative flex items-center justify-between border border-gray-300 p-1 m-1 rounded-sm">
+                    <span>{truncateFileName(fileObject.name.split('/').pop() || '')}</span>
+                    <button
+                      className="top-2 h-6 w-6 rounded-lg border bg-white text-red-500"
+                      onClick={() => handleFileDelete(fileIndex, rowIndex)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
-          <div className="flex flex-wrap w-90">
-            {row.evidence?.map((file, fileIndex) => {
-              const fileObject = typeof file === 'string' ? convertStringToEvidenceObject(file) : file;
-              return (
-                <div key={fileObject.id} className="relative flex items-center justify-between border border-gray-300 p-1 m-1 rounded-sm">
-                  <span>{truncateFileName(fileObject.name.split('/').pop() || '')}</span>
-                  <button
-                    className="top-2 h-6 w-6 rounded-lg border bg-white text-red-500"
-                    onClick={() => handleFileDelete(fileIndex, data.indexOf(row))}
-                  >
-                    ✕
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ),
+        );
+      },
     },
     {
       key: 'note',
       header: '備考欄',
-      render: (value: string, row: TestCaseResultRow) => (
-        <textarea
-          value={value || ''}
-          onChange={(e) => {
-            const newData = [...data];
-            newData[data.indexOf(row)].note = e.target.value;
-            setData(newData);
-          }}
-          className="border border-gray-300 rounded p-1 w-100 h-8"
-          readOnly={row.judgment === JUDGMENT_OPTIONS.EXCLUDED || row.is_target === false}
-        />
-      ),
+      render: (value: string, row: TestCaseResultRow) => {
+        const rowIndex = getRowIndex(row);
+        return (
+          <textarea
+            value={value || ''}
+            onChange={(e) => updateRowData(rowIndex, 'note', e.target.value)}
+            className="border border-gray-300 rounded p-1 w-100 h-8"
+            readOnly={isRowDisabled(row)}
+          />
+        );
+      },
     },
   ].filter(Boolean) as Column<TestCaseResultRow>[];
 
@@ -443,7 +456,7 @@ const TestTable: React.FC<TestTableProps> = ({ data, setData, userName = '', exe
               className="border border-gray-300 rounded p-2 mb-4 w-full"
             >
               {Object.entries(JUDGMENT_OPTIONS)
-                .filter(([key, value]) => value !== JUDGMENT_OPTIONS.EXCLUDED && value !== JUDGMENT_OPTIONS.EMPTY)
+                .filter(([_, value]) => value !== JUDGMENT_OPTIONS.EXCLUDED && value !== JUDGMENT_OPTIONS.EMPTY)
                 .map(([key, value]) => (
                   <option key={key} value={value}>{value}</option>
                 ))}

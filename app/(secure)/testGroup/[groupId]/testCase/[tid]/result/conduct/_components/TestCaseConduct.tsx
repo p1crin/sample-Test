@@ -38,7 +38,7 @@ export function TestCaseConduct({ labels, values }: TestCaseConductProps) {
     ...values,
     controlSpec: values.controlSpec.map(spec => spec.file_path),
     dataFlow: values.dataFlow.map(flow => flow.file_path),
-  }
+  };
   return (
     <section>
       <div className="text-left">
