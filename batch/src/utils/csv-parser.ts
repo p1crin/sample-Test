@@ -2,18 +2,79 @@ import { parse } from 'csv-parse/sync';
 import { UserCsvRow, ValidationResult, UserRole } from '../types/user-import.types';
 
 /**
+ * 日本語ヘッダーから英語プロパティ名へのマッピング
+ */
+const COLUMN_MAPPING: Record<string, keyof UserCsvRow> = {
+  // 日本語ヘッダー
+  'ID': 'id',
+  'ユーザID': 'id',
+  '氏名': 'name',
+  '名前': 'name',
+  'ID（メールアドレス）': 'email',
+  'メールアドレス': 'email',
+  'Email': 'email',
+  '権限': 'user_role',
+  'ユーザロール': 'user_role',
+  'ロール': 'user_role',
+  '部署': 'department',
+  '会社': 'company',
+  'パスワード': 'password',
+  'タグ': 'tags',
+  'ステータス': 'status',
+  '状態': 'status',
+  // 英語ヘッダー（既存対応）
+  'id': 'id',
+  'name': 'name',
+  'email': 'email',
+  'user_role': 'user_role',
+  'department': 'department',
+  'company': 'company',
+  'password': 'password',
+  'tags': 'tags',
+  'status': 'status',
+};
+
+/**
+ * CSVの行データを正規化する（日本語ヘッダー対応）
+ */
+function normalizeRow(rawRow: Record<string, string>): UserCsvRow {
+  const normalized: Partial<UserCsvRow> = {};
+
+  for (const [key, value] of Object.entries(rawRow)) {
+    const mappedKey = COLUMN_MAPPING[key];
+    if (mappedKey) {
+      normalized[mappedKey] = value || '';
+    }
+  }
+
+  // 必須プロパティのデフォルト値設定
+  return {
+    id: normalized.id || '',
+    name: normalized.name || '',
+    email: normalized.email || '',
+    user_role: normalized.user_role || '',
+    department: normalized.department || '',
+    company: normalized.company || '',
+    password: normalized.password || '',
+    tags: normalized.tags || '',
+    status: normalized.status || '',
+  };
+}
+
+/**
  * CSV文字列をパースする
  */
 export function parseCsv(csvContent: string): UserCsvRow[] {
   try {
     const records = parse(csvContent, {
-      columns: true,
+      columns: true,  // ヘッダー行を自動認識
       skip_empty_lines: true,
       trim: true,
       bom: true, // BOM対応
-    }) as UserCsvRow[];
+    }) as Record<string, string>[];
 
-    return records;
+    // 各行を正規化（日本語→英語プロパティ名に変換）
+    return records.map(rawRow => normalizeRow(rawRow));
   } catch (error) {
     console.error('CSVパースエラー:', error);
     throw new Error(`CSVのパースに失敗しました: ${error instanceof Error ? error.message : String(error)}`);
@@ -34,6 +95,29 @@ function isValidEmail(email: string): boolean {
 function isValidUserRole(role: string): boolean {
   const roleNum = parseInt(role, 10);
   return !isNaN(roleNum) && [UserRole.SYSTEM_ADMIN, UserRole.TEST_MANAGER, UserRole.GENERAL].includes(roleNum);
+}
+
+/**
+ * ステータスのバリデーション
+ */
+function isValidStatus(status: string): boolean {
+  if (!status || status.trim() === '') {
+    return true; // 空の場合はデフォルト値（有効）を使用
+  }
+  const normalized = status.trim().toLowerCase();
+  return ['有効', '無効', 'active', 'inactive', '0', '1', 'true', 'false'].includes(normalized);
+}
+
+/**
+ * ステータスをis_deletedフラグに変換
+ */
+export function parseStatus(status: string): boolean {
+  if (!status || status.trim() === '') {
+    return false; // デフォルトは有効（is_deleted=false）
+  }
+  const normalized = status.trim().toLowerCase();
+  // 無効の場合はtrue（is_deleted=true）
+  return ['無効', 'inactive', '1', 'true'].includes(normalized);
 }
 
 /**
@@ -72,6 +156,13 @@ export function validateUserRow(row: UserCsvRow, rowNumber: number): ValidationR
     const userId = parseInt(row.id, 10);
     if (isNaN(userId) || userId <= 0) {
       errors.push(`${rowNumber}行目: ユーザIDは正の整数である必要があります`);
+    }
+  }
+
+  // ステータスのバリデーション
+  if (row.status && row.status.trim() !== '') {
+    if (!isValidStatus(row.status)) {
+      errors.push(`${rowNumber}行目: ステータスは「有効」「無効」のいずれかである必要があります`);
     }
   }
 

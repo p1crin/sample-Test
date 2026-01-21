@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
 import { readCsvFromS3, writeResultToS3, writeImportResultCsv } from './utils/s3-client';
-import { parseCsv, validateAllRows } from './utils/csv-parser';
+import { parseCsv, validateAllRows, parseStatus } from './utils/csv-parser';
 import { hashPassword } from './utils/password-hash';
 import { UserCsvRow, UserImportResult, ImportSummary } from './types/user-import.types';
 
@@ -18,6 +18,85 @@ function validateEnvironmentVariables(): void {
 
   if (missing.length > 0) {
     throw new Error(`必須の環境変数が設定されていません: ${missing.join(', ')}`);
+  }
+}
+
+/**
+ * タグ文字列をパースして配列に変換
+ */
+function parseTags(tagsString: string): string[] {
+  if (!tagsString || tagsString.trim() === '') {
+    return [];
+  }
+  return tagsString
+    .split(';')
+    .map(tag => tag.trim())
+    .filter(tag => tag !== '');
+}
+
+/**
+ * タグを処理（存在しない場合は作成、ユーザとの関連付け）
+ */
+async function processUserTags(
+  tx: Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>,
+  userId: number,
+  tagsString: string
+): Promise<void> {
+  const tagNames = parseTags(tagsString);
+
+  if (tagNames.length === 0) {
+    return;
+  }
+
+  // 既存のユーザータグを削除（論理削除）
+  await tx.mt_user_tags.updateMany({
+    where: { user_id: userId },
+    data: { is_deleted: true },
+  });
+
+  // 各タグを処理
+  for (const tagName of tagNames) {
+    // タグが存在するか確認、存在しない場合は作成
+    let tag = await tx.mt_tags.findFirst({
+      where: { name: tagName, is_deleted: false },
+    });
+
+    if (!tag) {
+      tag = await tx.mt_tags.create({
+        data: { name: tagName },
+      });
+    }
+
+    // ユーザータグの関連付け（既存の場合は復活、新規の場合は作成）
+    const existingUserTag = await tx.mt_user_tags.findUnique({
+      where: {
+        user_id_tag_id: {
+          user_id: userId,
+          tag_id: tag.id,
+        },
+      },
+    });
+
+    if (existingUserTag) {
+      // 既存の場合は復活
+      await tx.mt_user_tags.update({
+        where: {
+          user_id_tag_id: {
+            user_id: userId,
+            tag_id: tag.id,
+          },
+        },
+        data: { is_deleted: false },
+      });
+    } else {
+      // 新規作成
+      await tx.mt_user_tags.create({
+        data: {
+          user_id: userId,
+          tag_id: tag.id,
+        },
+      });
+    }
   }
 }
 
@@ -40,6 +119,7 @@ async function importUserInTransaction(
   try {
     const isNewUser = !row.id || row.id.trim() === '';
     const userRole = parseInt(row.user_role, 10);
+    const isDeleted = parseStatus(row.status);
 
     if (isNewUser) {
       // 新規ユーザ作成
@@ -56,7 +136,7 @@ async function importUserInTransaction(
       const hashedPassword = await hashPassword(row.password);
 
       // ユーザ作成
-      await tx.mt_users.create({
+      const newUser = await tx.mt_users.create({
         data: {
           email: row.email,
           name: row.name,
@@ -64,9 +144,12 @@ async function importUserInTransaction(
           department: row.department || '',
           company: row.company || '',
           password: hashedPassword,
-          is_deleted: false,
+          is_deleted: isDeleted,
         },
       });
+
+      // タグを処理
+      await processUserTags(tx, newUser.id, row.tags);
 
       result.success = true;
       result.operation = 'created';
@@ -101,6 +184,7 @@ async function importUserInTransaction(
         user_role: number;
         department: string;
         company: string;
+        is_deleted: boolean;
         password?: string;
       } = {
         email: row.email,
@@ -108,6 +192,7 @@ async function importUserInTransaction(
         user_role: userRole,
         department: row.department || '',
         company: row.company || '',
+        is_deleted: isDeleted,
       };
 
       // パスワードが指定されている場合のみ更新
@@ -120,6 +205,9 @@ async function importUserInTransaction(
         where: { id: userId },
         data: updateData,
       });
+
+      // タグを処理
+      await processUserTags(tx, userId, row.tags);
 
       result.success = true;
       result.operation = 'updated';

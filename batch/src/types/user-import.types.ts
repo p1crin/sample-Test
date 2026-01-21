@@ -9,6 +9,8 @@ export interface UserCsvRow {
   department: string;
   company: string;
   password: string;        // 平文パスワード（新規または更新時のみ）
+  tags: string;            // タグ（セミコロン区切り）
+  status: string;          // ステータス（有効/無効）
 }
 
 /**
