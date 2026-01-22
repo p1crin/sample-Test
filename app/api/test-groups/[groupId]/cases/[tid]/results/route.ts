@@ -416,8 +416,8 @@ export async function POST(
           const testCaseNo = result.test_case_no;
           const newHistoryCount = newTestResultData.historyCount;
           // 実行日付の変換
-          const executionDate = result.execution_date
-            ? new Date(result.execution_date)
+          const executionDate = result.executionDate
+            ? new Date(result.executionDate)
             : null;
 
 
@@ -450,7 +450,7 @@ export async function POST(
               hardware_version: result.hardwareVersion,
               comparator_version: result.comparatorVersion,
               execution_date: executionDate,
-              executor: result.executer,
+              executor: result.executor,
               note: result.note,
             }
           });
@@ -463,9 +463,9 @@ export async function POST(
               history_count: newHistoryCount,
               result: result.result || null,
               judgment: result.judgment,
-              software_version: result.software_version || null,
-              hardware_version: result.hardware_version || null,
-              comparator_version: result.comparator_version || null,
+              software_version: result.softwareVersion || null,
+              hardware_version: result.hardwareVersion || null,
+              comparator_version: result.comparatorVersion || null,
               execution_date: executionDate,
               executor: result.executor || null,
               note: result.note || null,
