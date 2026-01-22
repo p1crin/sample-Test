@@ -187,12 +187,18 @@ export async function GET(
         // このテストケースのテスト内容を取得
         const testContent = (testContentsMap[key] || {}) as Record<string, unknown>;
 
-        // 利用可能な場合、最新のエビデンスパスを取得（全て）
-        const currentEvidences = evidencesByKey[key]
-          ? evidencesByKey[key].filter(
-              (e) => ((e as Record<string, unknown>).history_count as number) === 0
-            )
-          : [];
+        // 利用可能な場合、最大のhistory_countのエビデンスパスを取得（全て）
+        let currentEvidences: unknown[] = [];
+        if (evidencesByKey[key] && evidencesByKey[key].length > 0) {
+          // 最大のhistory_countを見つける
+          const maxHistoryCount = Math.max(
+            ...evidencesByKey[key].map((e) => (e as Record<string, unknown>).history_count as number)
+          );
+          // 最大のhistory_countでフィルタリング
+          currentEvidences = evidencesByKey[key].filter(
+            (e) => ((e as Record<string, unknown>).history_count as number) === maxHistoryCount
+          );
+        }
 
         const evidencePaths = currentEvidences.map(e =>
           (e as Record<string, unknown>).evidence_path as string
