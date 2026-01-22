@@ -187,17 +187,22 @@ export async function GET(
         // このテストケースのテスト内容を取得
         const testContent = (testContentsMap[key] || {}) as Record<string, unknown>;
 
-        // 利用可能な場合、最大のhistory_countのエビデンスパスを取得（全て）
+        // このテストケースの履歴を取得（ある場合）
+        const testCaseHistory = (historyByTestCase[key] || []) as Record<string, unknown>[];
+
+        // 結果履歴テーブルから最大のhistory_countを取得し、それに紐づくエビデンスを取得
         let currentEvidences: unknown[] = [];
-        if (evidencesByKey[key] && evidencesByKey[key].length > 0) {
-          // 最大のhistory_countを見つける
+        if (testCaseHistory.length > 0) {
+          // 結果履歴テーブルから最大のhistory_countを見つける
           const maxHistoryCount = Math.max(
-            ...evidencesByKey[key].map((e) => (e as Record<string, unknown>).history_count as number)
+            ...testCaseHistory.map((h) => (h as Record<string, unknown>).history_count as number)
           );
-          // 最大のhistory_countでフィルタリング
-          currentEvidences = evidencesByKey[key].filter(
-            (e) => ((e as Record<string, unknown>).history_count as number) === maxHistoryCount
-          );
+          // その最大のhistory_countに紐づくエビデンスを取得
+          currentEvidences = evidencesByKey[key]
+            ? evidencesByKey[key].filter(
+                (e) => ((e as Record<string, unknown>).history_count as number) === maxHistoryCount
+              )
+            : [];
         }
 
         const evidencePaths = currentEvidences.map(e =>
@@ -212,9 +217,6 @@ export async function GET(
           is_target: testContent.is_target,
           evidence: evidencePaths,
         };
-
-        // このテストケースの履歴を取得（ある場合）
-        const testCaseHistory = (historyByTestCase[key] || []) as Record<string, unknown>[];
 
         // 履歴レコードにテスト内容とエビデンスパスを追加
         const historyWithDetails = testCaseHistory.map((h) => {
