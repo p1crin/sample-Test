@@ -54,6 +54,77 @@ const TestCaseRegistrantion: React.FC = () => {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isTidChecking, setIsTidChecking] = useState(false);
 
+  // アップロード済みファイルを削除する共通関数
+  const deleteUploadedFiles = async () => {
+    const uploadedControlSpecIds = formData.controlSpecFile
+      .map(f => f.fileNo)
+      .filter((id): id is number => id !== undefined);
+    const uploadedDataFlowIds = formData.dataFlowFile
+      .map(f => f.fileNo)
+      .filter((id): id is number => id !== undefined);
+
+    const deletePromises: Promise<Response>[] = [];
+
+    // 制御仕様書ファイルの削除
+    for (const fileNo of uploadedControlSpecIds) {
+      const fileInfo = formData.controlSpecFile.find(f => f.fileNo === fileNo);
+      if (fileInfo) {
+        deletePromises.push(
+          apiFetch('/api/files', {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              testGroupId: groupId,
+              tid: formData.tid,
+              fileType: FILE_TYPE.CONTROL_SPEC,
+              fileNo: fileNo,
+              filePath: fileInfo.path,
+            }),
+          })
+        );
+      }
+    }
+
+    // データフローファイルの削除
+    for (const fileNo of uploadedDataFlowIds) {
+      const fileInfo = formData.dataFlowFile.find(f => f.fileNo === fileNo);
+      if (fileInfo) {
+        deletePromises.push(
+          apiFetch('/api/files', {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              testGroupId: groupId,
+              tid: formData.tid,
+              fileType: FILE_TYPE.DATA_FLOW,
+              fileNo: fileNo,
+              filePath: fileInfo.path,
+            }),
+          })
+        );
+      }
+    }
+
+    // ファイル削除実行
+    if (deletePromises.length > 0) {
+      try {
+        await Promise.all(deletePromises);
+        clientLogger.info('テストケース新規登録画面', 'アップロード済みファイル削除成功', {
+          deletedControlSpec: uploadedControlSpecIds,
+          deletedDataFlow: uploadedDataFlowIds
+        });
+      } catch (error) {
+        clientLogger.error('テストケース新規登録画面', 'アップロード済みファイル削除失敗', {
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+  };
+
   const handleFileChange = (fieldName: string, files: FileInfo[], deletedFile?: FileInfo) => {
     // 削除されたファイルがある場合の処理は、作成画面では不要
     // （編集画面との互換性のために引数は受け取る）
@@ -331,11 +402,15 @@ const TestCaseRegistrantion: React.FC = () => {
         }, 1500);
       } else {
         clientLogger.error('テストケース新規登録画面', 'テストケース作成失敗', { error: result.error });
+        // 登録失敗時はアップロードしたファイルを削除
+        await deleteUploadedFiles();
         setModalMessage('テストケースの作成に失敗しました');
         setIsModalOpen(true);
       }
     } catch (error) {
       clientLogger.error('テストケース新規登録画面', 'テストケース作成エラー', { error });
+      // 登録失敗時はアップロードしたファイルを削除
+      await deleteUploadedFiles();
       setModalMessage('テストケースの作成に失敗しました');
       setIsModalOpen(true);
     } finally {
@@ -343,7 +418,10 @@ const TestCaseRegistrantion: React.FC = () => {
     }
   };
 
-  const handleCancel = () => {
+  // 戻るボタン押下時処理
+  const handleCancel = async () => {
+    // キャンセル時はアップロードしたすべてのファイルを削除
+    await deleteUploadedFiles();
     router.back();
   };
 
