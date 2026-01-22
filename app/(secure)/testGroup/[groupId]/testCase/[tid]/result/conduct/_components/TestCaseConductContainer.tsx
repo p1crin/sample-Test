@@ -170,7 +170,7 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
           executor: '',
           evidence: null,
           note: '',
-          judgment: "未着手"
+          judgment: result.latestValidResult.is_target === false ? JUDGMENT_OPTIONS.EXCLUDED : "未着手"
         })) as TestCaseResultRow[];
         const historyData = Object.values(resultsData).flatMap((result) =>
           result.allHistory.map((histItem) => ({
