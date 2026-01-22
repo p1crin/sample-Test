@@ -273,7 +273,7 @@ export async function GET(
             execution_date: latestValidResult.execution_date || null,
             executor: latestValidResult.executor || null,
             note: latestValidResult.note || null,
-            evidence: latestValidResult.evidence || evidencePaths,
+            evidence: evidencePaths, // 常に最新のエビデンス（history_count === 0）を使用
           },
           allHistory: sortedHistory,
           historyCounts,
