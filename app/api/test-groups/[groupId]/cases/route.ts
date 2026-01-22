@@ -6,10 +6,7 @@ import { Prisma } from '@/generated/prisma/client';
 import { TestCase } from "@/types";
 import { logAPIEndpoint, logDatabaseQuery, QueryTimer } from "@/utils/database-logger";
 import { handleError } from "@/utils/errorHandler";
-import { existsSync } from 'fs';
-import { mkdir, writeFile } from 'fs/promises';
 import { NextRequest, NextResponse } from "next/server";
-import { join } from 'path';
 
 interface RouteParams {
   params: Promise<{ groupId: string }>;
@@ -185,47 +182,37 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   try {
     // 認証チェック
     const user = await requireAuth(req);
-    // FormData をパース
-    const formData = await req.formData();
-    const tid = formData.get('tid') as string;
-    const firstLayer = formData.get('first_layer') as string;
-    const secondLayer = formData.get('second_layer') as string;
-    const thirdLayer = formData.get('third_layer') as string;
-    const fourthLayer = formData.get('fourth_layer') as string;
-    const purpose = formData.get('purpose') as string;
-    const requestId = formData.get('request_id') as string;
-    const checkItems = formData.get('checkItems') as string;
-    const testProcedure = formData.get('testProcedure') as string;
-    const testContentsStr = formData.get('testContents') as string;
 
-    const testContents = testContentsStr ? JSON.parse(testContentsStr) : [];
+    // JSON形式でリクエストボディを受け取る（編集画面と同じ形式）
+    const body = await req.json();
+    const {
+      tid,
+      first_layer: firstLayer,
+      second_layer: secondLayer,
+      third_layer: thirdLayer,
+      fourth_layer: fourthLayer,
+      purpose,
+      request_id: requestId,
+      checkItems,
+      testProcedure,
+      controlSpecFile,
+      dataFlowFile,
+      testContents = [],
+    } = body;
 
-    // FileInfo 配列をパース（controlSpecFile と dataFlowFile）
+    // FileInfo 型の定義
     interface FileInfo {
       name: string;
       id: string;
       base64?: string;
       type?: string;
+      path?: string;
+      fileNo?: number;
+      fileType?: number;
     }
 
-    const controlSpecFiles: FileInfo[] = [];
-    const dataFlowFiles: FileInfo[] = [];
-
-    // controlSpecFile[0], controlSpecFile[1], ... をパース
-    let controlSpecIndex = 0;
-    while (formData.has(`controlSpecFile[${controlSpecIndex}]`)) {
-      const fileStr = formData.get(`controlSpecFile[${controlSpecIndex}]`) as string;
-      controlSpecFiles.push(JSON.parse(fileStr));
-      controlSpecIndex++;
-    }
-
-    // dataFlowFile[0], dataFlowFile[1], ... をパース
-    let dataFlowIndex = 0;
-    while (formData.has(`dataFlowFile[${dataFlowIndex}]`)) {
-      const fileStr = formData.get(`dataFlowFile[${dataFlowIndex}]`) as string;
-      dataFlowFiles.push(JSON.parse(fileStr));
-      dataFlowIndex++;
-    }
+    const controlSpecFiles: FileInfo[] = controlSpecFile || [];
+    const dataFlowFiles: FileInfo[] = dataFlowFile || [];
 
     // TIDの重複チェック
     const existingTestCase = await prisma.tt_test_cases.findUnique({
@@ -273,57 +260,25 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         },
       });
 
-      // ファイル保存処理
-      const uploadDir = join(process.cwd(), 'public', 'uploads', 'test-cases', String(testGroupId), tid);
+      // ファイル情報をtt_test_case_filesに記録
+      // ファイルは既に /api/files でアップロード済みなので、
+      // fileNo、fileType、filePathを使って記録するだけ
 
-      // ディレクトリが存在しない場合は作成
-      if (!existsSync(uploadDir)) {
-        await mkdir(uploadDir, { recursive: true });
-      }
-
-      // 制御仕様書ファイル保存
-      for (let i = 0; i < controlSpecFiles.length; i++) {
-        const fileInfo = controlSpecFiles[i];
-        if (fileInfo.base64) {
-          const controlSpecFileName = `control_spec_${Date.now()}_${i}_${fileInfo.name}`;
-          const controlSpecPath = join(uploadDir, controlSpecFileName);
-          const buffer = Buffer.from(fileInfo.base64, 'base64');
-          await writeFile(controlSpecPath, buffer);
-
-          // tt_test_case_files に記録（type=0: 制御仕様書）
-          await tx.tt_test_case_files.create({
-            data: {
-              test_group_id: testGroupId,
-              tid,
-              file_type: 0,
-              file_no: i + 1,
-              file_name: fileInfo.name,
-              file_path: `/uploads/test-cases/${groupId}/${tid}/${controlSpecFileName}`,
-            },
-          });
+      // 制御仕様書ファイルの記録
+      for (const fileInfo of controlSpecFiles) {
+        if (fileInfo.fileNo && fileInfo.path) {
+          // 既にアップロード済みのファイル情報をそのまま使用
+          // tt_test_case_filesテーブルには既に記録されているため、
+          // ここでは何もしない（/api/filesで既に記録済み）
         }
       }
 
-      // データフローファイル保存
-      for (let i = 0; i < dataFlowFiles.length; i++) {
-        const fileInfo = dataFlowFiles[i];
-        if (fileInfo.base64) {
-          const dataFlowFileName = `data_flow_${Date.now()}_${i}_${fileInfo.name}`;
-          const dataFlowPath = join(uploadDir, dataFlowFileName);
-          const buffer = Buffer.from(fileInfo.base64, 'base64');
-          await writeFile(dataFlowPath, buffer);
-
-          // tt_test_case_files に記録（type=1: データフロー）
-          await tx.tt_test_case_files.create({
-            data: {
-              test_group_id: testGroupId,
-              tid,
-              file_type: 1,
-              file_no: i + 1,
-              file_name: fileInfo.name,
-              file_path: `/uploads/test-cases/${groupId}/${tid}/${dataFlowFileName}`,
-            },
-          });
+      // データフローファイルの記録
+      for (const fileInfo of dataFlowFiles) {
+        if (fileInfo.fileNo && fileInfo.path) {
+          // 既にアップロード済みのファイル情報をそのまま使用
+          // tt_test_case_filesテーブルには既に記録されているため、
+          // ここでは何もしない（/api/filesで既に記録済み）
         }
       }
 

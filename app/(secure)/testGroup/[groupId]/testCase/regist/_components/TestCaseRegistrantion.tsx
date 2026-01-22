@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import ButtonGroup from '@/components/ui/buttonGroup';
 import { Modal } from '@/components/ui/modal';
 import { VerticalForm } from '@/components/ui/verticalForm';
-import { apiFetch, apiGet } from '@/utils/apiClient';
+import { apiFetch, apiGet, apiPost } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { FileInfo } from '@/utils/fileUtils';
 import { useParams, useRouter } from 'next/navigation';
@@ -13,6 +13,12 @@ import React, { useState } from 'react';
 import { CreateTestCaseListRow } from '../../../_components/types/testCase-list-row';
 import TestCaseForm from '../../[tid]/_components/testCaseForm';
 import { testCaseRegistSchema } from '../schemas/testCase-regist-schema';
+
+// ファイルタイプ定数（API側と統一）
+const FILE_TYPE = {
+  CONTROL_SPEC: 0,
+  DATA_FLOW: 1,
+} as const;
 
 type TestCase = {
   id: number;
@@ -48,11 +54,57 @@ const TestCaseRegistrantion: React.FC = () => {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isTidChecking, setIsTidChecking] = useState(false);
 
-  const handleFileChange = (fieldName: string, files: FileInfo[]) => {
+  const handleFileChange = (fieldName: string, files: FileInfo[], deletedFile?: FileInfo) => {
+    // 削除されたファイルがある場合の処理は、作成画面では不要
+    // （編集画面との互換性のために引数は受け取る）
     setFormData(prev => ({
       ...prev,
       [fieldName]: files
     }));
+  };
+
+  // ファイルアップロード処理（編集画面と同じ仕組み）
+  const handleFileUpload = async (file: FileInfo, fileType: number): Promise<FileInfo> => {
+    const formDataObj = new FormData();
+
+    // base64をBlobに変換
+    if (file.base64 && file.type) {
+      const byteString = atob(file.base64);
+      const arrayBuffer = new ArrayBuffer(byteString.length);
+      const uint8Array = new Uint8Array(arrayBuffer);
+      for (let i = 0; i < byteString.length; i++) {
+        uint8Array[i] = byteString.charCodeAt(i);
+      }
+      const blob = new Blob([uint8Array], { type: file.type });
+      const fileObj = new File([blob], file.name, { type: file.type });
+
+      formDataObj.append('file', fileObj);
+      formDataObj.append('testGroupId', String(groupId));
+      formDataObj.append('tid', formData.tid);
+      formDataObj.append('fileType', String(fileType));
+
+      const response = await apiFetch('/api/files', {
+        method: 'POST',
+        body: formDataObj,
+      });
+
+      if (response.ok) {
+        clientLogger.info('テストケース新規登録画面', 'ファイルアップロード成功');
+        const result = await response.json();
+        // アップロード成功後、サーバーから返されたfileNo等を設定
+        return {
+          ...file,
+          fileNo: result.data.fileNo,
+          path: result.data.filePath,
+          fileType: result.data.fileType,
+        };
+      } else {
+        clientLogger.error('テストケース新規登録画面', 'ファイルアップロード失敗');
+        throw new Error('ファイルアップロードに失敗しました');
+      }
+    }
+
+    return file;
   };
 
   const handleTestContentsChange = (contents: { testCase: string; expectedValue: string; is_target: boolean }[]) => {
@@ -251,43 +303,24 @@ const TestCaseRegistrantion: React.FC = () => {
     clientLogger.info('テストケース新規登録画面', 'テストケース登録開始', { formData, testContents });
 
     try {
-      const formDataObj = new FormData();
-      formDataObj.append('groupId', String(groupId));
-      formDataObj.append('tid', formData.tid);
-      formDataObj.append('first_layer', formData.first_layer);
-      formDataObj.append('second_layer', formData.second_layer);
-      formDataObj.append('third_layer', formData.third_layer);
-      formDataObj.append('fourth_layer', formData.fourth_layer);
-      formDataObj.append('purpose', formData.purpose);
-      formDataObj.append('request_id', formData.request_id);
-      formDataObj.append('checkItems', formData.checkItems);
-      formDataObj.append('testProcedure', formData.testProcedure);
+      // JSONペイロードを作成（編集画面と同じ形式）
+      const payload = {
+        tid: formData.tid,
+        first_layer: formData.first_layer,
+        second_layer: formData.second_layer,
+        third_layer: formData.third_layer,
+        fourth_layer: formData.fourth_layer,
+        purpose: formData.purpose,
+        request_id: formData.request_id,
+        checkItems: formData.checkItems,
+        testProcedure: formData.testProcedure,
+        controlSpecFile: formData.controlSpecFile,
+        dataFlowFile: formData.dataFlowFile,
+        testContents: testContents,
+      };
 
-      // 複数のファイルを処理
-      formData.controlSpecFile.forEach((fileInfo, index) => {
-        formDataObj.append(`controlSpecFile[${index}]`, JSON.stringify(fileInfo));
-      });
-      formData.dataFlowFile.forEach((fileInfo, index) => {
-        formDataObj.append(`dataFlowFile[${index}]`, JSON.stringify(fileInfo));
-      });
-
-      if (testContents.length > 0) {
-        formDataObj.append('testContents', JSON.stringify(testContents));
-      }
-
-      const response = await apiFetch(`/api/test-groups/${groupId}/cases`, {
-        method: 'POST',
-        body: formDataObj,
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(
-          errorData.error?.message || `API error: ${response.status}`
-        );
-      }
-
-      const result = await response.json();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await apiPost<any>(`/api/test-groups/${groupId}/cases`, payload);
 
       if (result.success) {
         clientLogger.info('テストケース新規登録画面', 'テストケース作成成功', { tid: formData.tid });
@@ -343,7 +376,8 @@ const TestCaseRegistrantion: React.FC = () => {
           label="制御仕様書"
           name="controlSpecFile"
           value={formData.controlSpecFile}
-          onChange={(e) => handleFileChange('controlSpecFile', e.target.value)}
+          onChange={(e, deletedFile) => handleFileChange('controlSpecFile', e.target.value, deletedFile)}
+          onFileUpload={(file) => handleFileUpload(file, FILE_TYPE.CONTROL_SPEC)}
           error={errors.controlSpecFile}
           isCopyable={true}
         />
@@ -351,7 +385,8 @@ const TestCaseRegistrantion: React.FC = () => {
           label="データフロー"
           name="dataFlowFile"
           value={formData.dataFlowFile}
-          onChange={(e) => handleFileChange('dataFlowFile', e.target.value)}
+          onChange={(e, deletedFile) => handleFileChange('dataFlowFile', e.target.value, deletedFile)}
+          onFileUpload={(file) => handleFileUpload(file, FILE_TYPE.DATA_FLOW)}
           error={errors.dataFlowFile}
           isCopyable={true}
         />
