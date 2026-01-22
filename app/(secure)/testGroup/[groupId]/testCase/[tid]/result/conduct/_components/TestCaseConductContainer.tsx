@@ -198,12 +198,19 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
           acc[historyCount].push(item);
           return acc;
         }, [] as TestCaseResultRow[][]).filter(group => group.length > 0);
+
+        // initialDataにhistoryCountを追加（履歴数+1）
+        const initialDataWithHistoryCount = initialData.map(item => ({
+          ...item,
+          historyCount: groupedHistoryData.length + 1
+        })) as TestCaseResultRow[];
+
         setPastTestCaseData(groupedHistoryData)
         // 履歴がないかチェック
         const allHistoryCountsZero = Object.values(resultsData).every(result => result.historyCounts.length === 0);
         setShowNewTestCaseConduct(allHistoryCountsZero);
         setButtonDisabled(allHistoryCountsZero);
-        setInitialTestCaseData(initialData);
+        setInitialTestCaseData(initialDataWithHistoryCount);
 
         // 追加: 実行者リストに結果の実行者を含める
         const resultExecutors = Object.values(resultsData).flatMap(result =>
