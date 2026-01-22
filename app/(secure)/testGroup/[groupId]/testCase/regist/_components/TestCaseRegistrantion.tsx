@@ -9,7 +9,7 @@ import { apiFetch, apiGet, apiPost } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { FileInfo } from '@/utils/fileUtils';
 import { useParams, useRouter } from 'next/navigation';
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { CreateTestCaseListRow } from '../../../_components/types/testCase-list-row';
 import TestCaseForm from '../../[tid]/_components/testCaseForm';
 import { testCaseRegistSchema } from '../schemas/testCase-regist-schema';
@@ -53,6 +53,88 @@ const TestCaseRegistrantion: React.FC = () => {
   const [modalMessage, setModalMessage] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isTidChecking, setIsTidChecking] = useState(false);
+
+  // 登録成功フラグ（ブラウザバック時の判定用）
+  const isRegistrationSuccessful = useRef(false);
+
+  // ブラウザバックやタブクローズ時のクリーンアップ
+  useEffect(() => {
+    return () => {
+      // コンポーネントがアンマウントされる時（ブラウザバック含む）
+      // 登録が成功していない場合のみファイルを削除
+      if (!isRegistrationSuccessful.current) {
+        const uploadedControlSpecIds = formData.controlSpecFile
+          .map(f => f.fileNo)
+          .filter((id): id is number => id !== undefined);
+        const uploadedDataFlowIds = formData.dataFlowFile
+          .map(f => f.fileNo)
+          .filter((id): id is number => id !== undefined);
+
+        // アップロード済みファイルがある場合のみ削除処理を実行
+        if (uploadedControlSpecIds.length > 0 || uploadedDataFlowIds.length > 0) {
+          const deletePromises: Promise<Response>[] = [];
+
+          // 制御仕様書ファイルの削除
+          for (const fileNo of uploadedControlSpecIds) {
+            const fileInfo = formData.controlSpecFile.find(f => f.fileNo === fileNo);
+            if (fileInfo) {
+              deletePromises.push(
+                apiFetch('/api/files', {
+                  method: 'DELETE',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    testGroupId: groupId,
+                    tid: formData.tid,
+                    fileType: FILE_TYPE.CONTROL_SPEC,
+                    fileNo: fileNo,
+                    filePath: fileInfo.path,
+                  }),
+                })
+              );
+            }
+          }
+
+          // データフローファイルの削除
+          for (const fileNo of uploadedDataFlowIds) {
+            const fileInfo = formData.dataFlowFile.find(f => f.fileNo === fileNo);
+            if (fileInfo) {
+              deletePromises.push(
+                apiFetch('/api/files', {
+                  method: 'DELETE',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    testGroupId: groupId,
+                    tid: formData.tid,
+                    fileType: FILE_TYPE.DATA_FLOW,
+                    fileNo: fileNo,
+                    filePath: fileInfo.path,
+                  }),
+                })
+              );
+            }
+          }
+
+          // ファイル削除実行（非同期だがクリーンアップなのでawaitしない）
+          Promise.all(deletePromises)
+            .then(() => {
+              clientLogger.info('テストケース新規登録画面', 'ブラウザバック時のファイル削除成功', {
+                deletedControlSpec: uploadedControlSpecIds,
+                deletedDataFlow: uploadedDataFlowIds
+              });
+            })
+            .catch((error) => {
+              clientLogger.error('テストケース新規登録画面', 'ブラウザバック時のファイル削除失敗', {
+                error: error instanceof Error ? error.message : String(error)
+              });
+            });
+        }
+      }
+    };
+  }, [formData.controlSpecFile, formData.dataFlowFile, formData.tid, groupId]);
 
   // アップロード済みファイルを削除する共通関数
   const deleteUploadedFiles = async () => {
@@ -394,6 +476,8 @@ const TestCaseRegistrantion: React.FC = () => {
       const result = await apiPost<any>(`/api/test-groups/${groupId}/cases`, payload);
 
       if (result.success) {
+        // 登録成功フラグを立てる（ブラウザバック時のファイル削除を防ぐため）
+        isRegistrationSuccessful.current = true;
         clientLogger.info('テストケース新規登録画面', 'テストケース作成成功', { tid: formData.tid });
         setModalMessage('テストケースを登録しました');
         setIsModalOpen(true);
