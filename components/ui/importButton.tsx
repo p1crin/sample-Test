@@ -13,12 +13,12 @@ export default function ImportButton({ type, disabled }: ImportButtonProps) {
         clientLogger.info('テストケース一覧画面', '検索ボタン押下');
     }
     return (
-        <Button
-            disabled={disabled}
-            onClick={handleImport}>
-            <Link href={`/importExecute?type=${type}`}>
+        <Link href={`/importExecute?type=${type}`}>
+            <Button
+                disabled={disabled}
+                onClick={handleImport}>
                 インポート
-            </Link>
-        </Button>
+            </Button>
+        </Link>
     );
 }
