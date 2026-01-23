@@ -136,6 +136,78 @@ const TestCaseRegistrantion: React.FC = () => {
     };
   }, [formData.controlSpecFile, formData.dataFlowFile, formData.tid, groupId]);
 
+  // タブクローズ・ページリロード時のクリーンアップ
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      // 登録が成功していない場合のみファイルを削除
+      if (!isRegistrationSuccessful.current) {
+        const uploadedControlSpecIds = formData.controlSpecFile
+          .map(f => f.fileNo)
+          .filter((id): id is number => id !== undefined);
+        const uploadedDataFlowIds = formData.dataFlowFile
+          .map(f => f.fileNo)
+          .filter((id): id is number => id !== undefined);
+
+        // アップロード済みファイルがある場合のみ削除処理を実行
+        if (uploadedControlSpecIds.length > 0 || uploadedDataFlowIds.length > 0) {
+          // 制御仕様書ファイルの削除
+          for (const fileNo of uploadedControlSpecIds) {
+            const fileInfo = formData.controlSpecFile.find(f => f.fileNo === fileNo);
+            if (fileInfo) {
+              // keepalive: true を使用してページアンロード後もリクエストを継続
+              fetch('/api/files', {
+                method: 'DELETE',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  testGroupId: groupId,
+                  tid: formData.tid,
+                  fileType: FILE_TYPE.CONTROL_SPEC,
+                  fileNo: fileNo,
+                  filePath: fileInfo.path,
+                }),
+                keepalive: true,
+              }).catch(() => {
+                // エラーは無視（ページがアンロードされるため）
+              });
+            }
+          }
+
+          // データフローファイルの削除
+          for (const fileNo of uploadedDataFlowIds) {
+            const fileInfo = formData.dataFlowFile.find(f => f.fileNo === fileNo);
+            if (fileInfo) {
+              // keepalive: true を使用してページアンロード後もリクエストを継続
+              fetch('/api/files', {
+                method: 'DELETE',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  testGroupId: groupId,
+                  tid: formData.tid,
+                  fileType: FILE_TYPE.DATA_FLOW,
+                  fileNo: fileNo,
+                  filePath: fileInfo.path,
+                }),
+                keepalive: true,
+              }).catch(() => {
+                // エラーは無視（ページがアンロードされるため）
+              });
+            }
+          }
+        }
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [formData.controlSpecFile, formData.dataFlowFile, formData.tid, groupId]);
+
   // アップロード済みファイルを削除する共通関数
   const deleteUploadedFiles = async () => {
     const uploadedControlSpecIds = formData.controlSpecFile

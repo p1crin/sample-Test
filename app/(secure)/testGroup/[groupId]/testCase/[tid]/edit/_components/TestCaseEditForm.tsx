@@ -198,6 +198,87 @@ export function TestCaseEditForm({
     };
   }, [formData.controlSpecFile, formData.dataFlowFile, formData.tid, groupId]);
 
+  // タブクローズ・ページリロード時のクリーンアップ
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      // 更新が成功していない場合のみ、新規追加されたファイルを削除
+      if (!isUpdateSuccessful.current) {
+        const currentControlSpecIds = formData.controlSpecFile
+          .map(f => f.fileNo)
+          .filter((id): id is number => id !== undefined);
+        const currentDataFlowIds = formData.dataFlowFile
+          .map(f => f.fileNo)
+          .filter((id): id is number => id !== undefined);
+
+        // 新規追加されたファイルのみを特定
+        const newControlSpecIds = currentControlSpecIds.filter(
+          id => !initialFileIds.current.controlSpec.includes(id)
+        );
+        const newDataFlowIds = currentDataFlowIds.filter(
+          id => !initialFileIds.current.dataFlow.includes(id)
+        );
+
+        // 新規追加されたファイルがある場合のみ削除処理を実行
+        if (newControlSpecIds.length > 0 || newDataFlowIds.length > 0) {
+          // 制御仕様書ファイルの削除
+          for (const fileNo of newControlSpecIds) {
+            const fileInfo = formData.controlSpecFile.find(f => f.fileNo === fileNo);
+            if (fileInfo) {
+              // keepalive: true を使用してページアンロード後もリクエストを継続
+              fetch('/api/files', {
+                method: 'DELETE',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  testGroupId: groupId,
+                  tid: formData.tid,
+                  fileType: FILE_TYPE.CONTROL_SPEC,
+                  fileNo: fileNo,
+                  filePath: fileInfo.path,
+                }),
+                keepalive: true,
+              }).catch(() => {
+                // エラーは無視（ページがアンロードされるため）
+              });
+            }
+          }
+
+          // データフローファイルの削除
+          for (const fileNo of newDataFlowIds) {
+            const fileInfo = formData.dataFlowFile.find(f => f.fileNo === fileNo);
+            if (fileInfo) {
+              // keepalive: true を使用してページアンロード後もリクエストを継続
+              fetch('/api/files', {
+                method: 'DELETE',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  testGroupId: groupId,
+                  tid: formData.tid,
+                  fileType: FILE_TYPE.DATA_FLOW,
+                  fileNo: fileNo,
+                  filePath: fileInfo.path,
+                }),
+                keepalive: true,
+              }).catch(() => {
+                // エラーは無視（ページがアンロードされるため）
+              });
+            }
+          }
+        }
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [formData.controlSpecFile, formData.dataFlowFile, formData.tid, groupId]);
+
+
   // テスト内容が変更されたときのハンドラー
   // IDは生成せず、データのみを保持（IDはTestCaseFormが内部管理）
   const handleTestContentsChange = (contents: { testCase: string; expectedValue: string; is_target: boolean }[]) => {
