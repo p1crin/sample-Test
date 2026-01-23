@@ -422,27 +422,30 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
         clientLogger.info('テスト結果登録画面', 'エビデンス削除開始', { count: deletedEvidences.length });
 
         for (const { file, testCaseNo, historyCount } of deletedEvidences) {
-          try {
-            await apiDelete('/api/evidences', {
-              testGroupId: groupId,
-              tid: tid,
-              testCaseNo: testCaseNo,
-              historyCount: historyCount,
-              evidenceNo: file.fileNo,
-            });
-            clientLogger.info('テスト結果登録画面', 'エビデンス削除成功', {
-              testCaseNo,
-              historyCount,
-              evidenceNo: file.fileNo,
-            });
-          } catch (deleteError) {
-            clientLogger.error('テスト結果登録画面', 'エビデンス削除失敗', {
-              error: deleteError,
-              testCaseNo,
-              historyCount,
-              evidenceNo: file.fileNo,
-            });
-            // エビデンス削除失敗は警告のみで続行
+          // fileNoが存在する場合のみ削除API呼び出し（アップロード済みのファイルのみ）
+          if (file.fileNo !== undefined) {
+            try {
+              await apiDelete('/api/evidences', {
+                testGroupId: groupId,
+                tid: tid,
+                testCaseNo: testCaseNo,
+                historyCount: historyCount,
+                evidenceNo: file.fileNo,
+              });
+              clientLogger.info('テスト結果登録画面', 'エビデンス削除成功', {
+                testCaseNo,
+                historyCount,
+                evidenceNo: file.fileNo,
+              });
+            } catch (deleteError) {
+              clientLogger.error('テスト結果登録画面', 'エビデンス削除失敗', {
+                error: deleteError,
+                testCaseNo,
+                historyCount,
+                evidenceNo: file.fileNo,
+              });
+              // エビデンス削除失敗は警告のみで続行
+            }
           }
         }
       }
