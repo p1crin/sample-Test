@@ -94,8 +94,8 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
 
   // 登録成功フラグ（タブクローズ時のクリーンアップ用）
   const isRegistrationSuccessful = useRef(false);
-  // 初期エビデンスパスを記録（新規追加されたエビデンスのみを削除するため）
-  const initialEvidencePaths = useRef<Map<string, Set<string>>>(new Map());
+  // 初期エビデンスNoを記録（新規追加されたエビデンスのみを削除するため）
+  const initialEvidenceNos = useRef<Map<string, Set<number>>>(new Map());
 
   const router = useRouter();
   const { data: session } = useSession();
@@ -262,35 +262,35 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
     });
   }, [groupId, tid, user]);
 
-  // 初期エビデンスパスを記録（新規追加されたエビデンスのみを削除するため）
+  // 初期エビデンスNoを記録（新規追加されたエビデンスのみを削除するため）
   useEffect(() => {
-    // 新規入力データのエビデンスパスを記録
+    // 新規入力データのエビデンスNoを記録
     initialTestCaseData.forEach((item) => {
       const key = `new_${item.test_case_no}`;
-      const evidencePaths = new Set<string>();
+      const evidenceNos = new Set<number>();
 
       item.evidence?.forEach((file) => {
-        if (file.path) {
-          evidencePaths.add(file.path);
+        if (file.fileNo !== undefined) {
+          evidenceNos.add(file.fileNo);
         }
       });
 
-      initialEvidencePaths.current.set(key, evidencePaths);
+      initialEvidenceNos.current.set(key, evidenceNos);
     });
 
-    // 履歴データのエビデンスパスを記録
+    // 履歴データのエビデンスNoを記録
     pastTestCaseData.forEach((historyData, historyIndex) => {
       historyData.forEach((item) => {
         const key = `history_${historyIndex + 1}_${item.test_case_no}`;
-        const evidencePaths = new Set<string>();
+        const evidenceNos = new Set<number>();
 
         item.evidence?.forEach((file) => {
-          if (file.path) {
-            evidencePaths.add(file.path);
+          if (file.fileNo !== undefined) {
+            evidenceNos.add(file.fileNo);
           }
         });
 
-        initialEvidencePaths.current.set(key, evidencePaths);
+        initialEvidenceNos.current.set(key, evidenceNos);
       });
     });
   }, [initialTestCaseData, pastTestCaseData]);
@@ -303,11 +303,11 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
         // 新規入力データから新規追加されたエビデンスを収集
         initialTestCaseData.forEach((item) => {
           const key = `new_${item.test_case_no}`;
-          const initialPaths = initialEvidencePaths.current.get(key) || new Set<string>();
+          const initialNos = initialEvidenceNos.current.get(key) || new Set<number>();
 
           item.evidence?.forEach((file) => {
-            // 新規追加されたエビデンスのみを削除（pathがあり、かつ初期パスに含まれない場合）
-            if (file.path && file.fileNo !== undefined && !initialPaths.has(file.path)) {
+            // 新規追加されたエビデンスのみを削除（fileNoがあり、かつ初期Noに含まれない場合）
+            if (file.fileNo !== undefined && !initialNos.has(file.fileNo)) {
               fetch('/api/evidences', {
                 method: 'DELETE',
                 headers: {
@@ -332,11 +332,11 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
         pastTestCaseData.forEach((historyData, historyIndex) => {
           historyData.forEach((item) => {
             const key = `history_${historyIndex + 1}_${item.test_case_no}`;
-            const initialPaths = initialEvidencePaths.current.get(key) || new Set<string>();
+            const initialNos = initialEvidenceNos.current.get(key) || new Set<number>();
 
             item.evidence?.forEach((file) => {
-              // 新規追加されたエビデンスのみを削除（pathがあり、かつ初期パスに含まれない場合）
-              if (file.path && file.fileNo !== undefined && !initialPaths.has(file.path)) {
+              // 新規追加されたエビデンスのみを削除（fileNoがあり、かつ初期Noに含まれない場合）
+              if (file.fileNo !== undefined && !initialNos.has(file.fileNo)) {
                 fetch('/api/evidences', {
                   method: 'DELETE',
                   headers: {
