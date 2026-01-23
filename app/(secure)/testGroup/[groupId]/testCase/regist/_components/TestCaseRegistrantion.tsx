@@ -208,56 +208,12 @@ const TestCaseRegistrantion: React.FC = () => {
   };
 
   const handleFileChange = (fieldName: string, files: FileInfo[], deletedFile?: FileInfo) => {
-    // 削除されたファイルがある場合の処理は、作成画面では不要
-    // （編集画面との互換性のために引数は受け取る）
+    // 作成画面では、ファイル選択時はbase64データのみを保持
+    // 実際のアップロードは登録ボタン押下時に実行
     setFormData(prev => ({
       ...prev,
       [fieldName]: files
     }));
-  };
-
-  // ファイルアップロード処理（編集画面と同じ仕組み）
-  const handleFileUpload = async (file: FileInfo, fileType: number): Promise<FileInfo> => {
-    const formDataObj = new FormData();
-
-    // base64をBlobに変換
-    if (file.base64 && file.type) {
-      const byteString = atob(file.base64);
-      const arrayBuffer = new ArrayBuffer(byteString.length);
-      const uint8Array = new Uint8Array(arrayBuffer);
-      for (let i = 0; i < byteString.length; i++) {
-        uint8Array[i] = byteString.charCodeAt(i);
-      }
-      const blob = new Blob([uint8Array], { type: file.type });
-      const fileObj = new File([blob], file.name, { type: file.type });
-
-      formDataObj.append('file', fileObj);
-      formDataObj.append('testGroupId', String(groupId));
-      formDataObj.append('tid', formData.tid);
-      formDataObj.append('fileType', String(fileType));
-
-      const response = await apiFetch('/api/files', {
-        method: 'POST',
-        body: formDataObj,
-      });
-
-      if (response.ok) {
-        clientLogger.info('テストケース新規登録画面', 'ファイルアップロード成功');
-        const result = await response.json();
-        // アップロード成功後、サーバーから返されたfileNo等を設定
-        return {
-          ...file,
-          fileNo: result.data.fileNo,
-          path: result.data.filePath,
-          fileType: result.data.fileType,
-        };
-      } else {
-        clientLogger.error('テストケース新規登録画面', 'ファイルアップロード失敗');
-        throw new Error('ファイルアップロードに失敗しました');
-      }
-    }
-
-    return file;
   };
 
   const handleTestContentsChange = (contents: { testCase: string; expectedValue: string; is_target: boolean }[]) => {
@@ -456,7 +412,98 @@ const TestCaseRegistrantion: React.FC = () => {
     clientLogger.info('テストケース新規登録画面', 'テストケース登録開始', { formData, testContents });
 
     try {
-      // JSONペイロードを作成（編集画面と同じ形式）
+      // ステップ1: すべてのファイルをアップロード
+      const uploadedControlSpecFiles: FileInfo[] = [];
+      const uploadedDataFlowFiles: FileInfo[] = [];
+
+      // 制御仕様書ファイルのアップロード
+      for (const file of formData.controlSpecFile) {
+        if (file.base64 && file.type) {
+          const formDataObj = new FormData();
+
+          // base64をBlobに変換
+          const byteString = atob(file.base64);
+          const arrayBuffer = new ArrayBuffer(byteString.length);
+          const uint8Array = new Uint8Array(arrayBuffer);
+          for (let i = 0; i < byteString.length; i++) {
+            uint8Array[i] = byteString.charCodeAt(i);
+          }
+          const blob = new Blob([uint8Array], { type: file.type });
+          const fileObj = new File([blob], file.name, { type: file.type });
+
+          formDataObj.append('file', fileObj);
+          formDataObj.append('testGroupId', String(groupId));
+          formDataObj.append('tid', formData.tid);
+          formDataObj.append('fileType', String(FILE_TYPE.CONTROL_SPEC));
+
+          const response = await apiFetch('/api/files', {
+            method: 'POST',
+            body: formDataObj,
+          });
+
+          if (response.ok) {
+            const result = await response.json();
+            uploadedControlSpecFiles.push({
+              ...file,
+              fileNo: result.data.fileNo,
+              path: result.data.filePath,
+              fileType: result.data.fileType,
+            });
+            clientLogger.info('テストケース新規登録画面', '制御仕様書アップロード成功', { fileName: file.name });
+          } else {
+            throw new Error('制御仕様書のアップロードに失敗しました');
+          }
+        }
+      }
+
+      // データフローファイルのアップロード
+      for (const file of formData.dataFlowFile) {
+        if (file.base64 && file.type) {
+          const formDataObj = new FormData();
+
+          // base64をBlobに変換
+          const byteString = atob(file.base64);
+          const arrayBuffer = new ArrayBuffer(byteString.length);
+          const uint8Array = new Uint8Array(arrayBuffer);
+          for (let i = 0; i < byteString.length; i++) {
+            uint8Array[i] = byteString.charCodeAt(i);
+          }
+          const blob = new Blob([uint8Array], { type: file.type });
+          const fileObj = new File([blob], file.name, { type: file.type });
+
+          formDataObj.append('file', fileObj);
+          formDataObj.append('testGroupId', String(groupId));
+          formDataObj.append('tid', formData.tid);
+          formDataObj.append('fileType', String(FILE_TYPE.DATA_FLOW));
+
+          const response = await apiFetch('/api/files', {
+            method: 'POST',
+            body: formDataObj,
+          });
+
+          if (response.ok) {
+            const result = await response.json();
+            uploadedDataFlowFiles.push({
+              ...file,
+              fileNo: result.data.fileNo,
+              path: result.data.filePath,
+              fileType: result.data.fileType,
+            });
+            clientLogger.info('テストケース新規登録画面', 'データフローアップロード成功', { fileName: file.name });
+          } else {
+            throw new Error('データフローのアップロードに失敗しました');
+          }
+        }
+      }
+
+      // アップロード成功したファイル情報をformDataに反映（削除処理用）
+      setFormData(prev => ({
+        ...prev,
+        controlSpecFile: uploadedControlSpecFiles,
+        dataFlowFile: uploadedDataFlowFiles,
+      }));
+
+      // ステップ2: テストケース登録（アップロード済みファイル情報を含める）
       const payload = {
         tid: formData.tid,
         first_layer: formData.first_layer,
@@ -467,8 +514,8 @@ const TestCaseRegistrantion: React.FC = () => {
         request_id: formData.request_id,
         checkItems: formData.checkItems,
         testProcedure: formData.testProcedure,
-        controlSpecFile: formData.controlSpecFile,
-        dataFlowFile: formData.dataFlowFile,
+        controlSpecFile: uploadedControlSpecFiles,
+        dataFlowFile: uploadedDataFlowFiles,
         testContents: testContents,
       };
 
@@ -504,8 +551,15 @@ const TestCaseRegistrantion: React.FC = () => {
 
   // 戻るボタン押下時処理
   const handleCancel = async () => {
-    // キャンセル時はアップロードしたすべてのファイルを削除
-    await deleteUploadedFiles();
+    // 作成画面では、登録ボタン押下前はファイルがアップロードされていないため、
+    // アップロード済みファイルがある場合のみ削除処理を実行
+    const hasUploadedFiles = formData.controlSpecFile.some(f => f.fileNo) ||
+                             formData.dataFlowFile.some(f => f.fileNo);
+
+    if (hasUploadedFiles) {
+      await deleteUploadedFiles();
+    }
+
     router.back();
   };
 
@@ -539,7 +593,6 @@ const TestCaseRegistrantion: React.FC = () => {
           name="controlSpecFile"
           value={formData.controlSpecFile}
           onChange={(e, deletedFile) => handleFileChange('controlSpecFile', e.target.value, deletedFile)}
-          onFileUpload={(file) => handleFileUpload(file, FILE_TYPE.CONTROL_SPEC)}
           error={errors.controlSpecFile}
           isCopyable={true}
         />
@@ -548,7 +601,6 @@ const TestCaseRegistrantion: React.FC = () => {
           name="dataFlowFile"
           value={formData.dataFlowFile}
           onChange={(e, deletedFile) => handleFileChange('dataFlowFile', e.target.value, deletedFile)}
-          onFileUpload={(file) => handleFileUpload(file, FILE_TYPE.DATA_FLOW)}
           error={errors.dataFlowFile}
           isCopyable={true}
         />
