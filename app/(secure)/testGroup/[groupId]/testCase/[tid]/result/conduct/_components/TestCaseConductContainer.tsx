@@ -44,6 +44,15 @@ const convertEvidenceToFileInfo = (evidence: unknown): FileInfo[] | null => {
           path: item,
         };
       }
+      // APIから返されるオブジェクト形式 { path, evidenceNo, name } の場合
+      if (typeof item === 'object' && item !== null && 'path' in item) {
+        return {
+          name: (item as { name?: string }).name || ((item as { path: string }).path.split('/').pop() || (item as { path: string }).path),
+          id: generateUniqueId(),
+          path: (item as { path: string }).path,
+          fileNo: (item as { evidenceNo?: number }).evidenceNo,
+        };
+      }
       // すでにFileInfo形式の場合
       return item;
     });

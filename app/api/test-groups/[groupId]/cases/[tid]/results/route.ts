@@ -205,17 +205,19 @@ export async function GET(
             : [];
         }
 
-        const evidencePaths = currentEvidences.map(e =>
-          (e as Record<string, unknown>).evidence_path as string
-        );
+        const evidenceDetails = currentEvidences.map(e => ({
+          path: (e as Record<string, unknown>).evidence_path as string,
+          evidenceNo: (e as Record<string, unknown>).evidence_no as number,
+          name: (e as Record<string, unknown>).evidence_name as string,
+        }));
 
-        // 結果にエビデンスパスとテスト内容を追加
+        // 結果にエビデンス詳細情報とテスト内容を追加
         const resultWithDetails = {
           ...r,
           test_case: testContent.test_case || null,
           expected_value: testContent.expected_value || null,
           is_target: testContent.is_target,
-          evidence: evidencePaths,
+          evidence: evidenceDetails,
         };
 
         // 履歴レコードにテスト内容とエビデンスパスを追加
@@ -228,16 +230,18 @@ export async function GET(
             )
             : [];
 
-          const historyEvidencePaths = historyEvidences.map(e =>
-            (e as Record<string, unknown>).evidence_path as string
-          );
+          const historyEvidenceDetails = historyEvidences.map(e => ({
+            path: (e as Record<string, unknown>).evidence_path as string,
+            evidenceNo: (e as Record<string, unknown>).evidence_no as number,
+            name: (e as Record<string, unknown>).evidence_name as string,
+          }));
 
           return {
             ...h,
             test_case: testContent.test_case || null,
             expected_value: testContent.expected_value || null,
             is_target: testContent.is_target,
-            evidence: historyEvidencePaths,
+            evidence: historyEvidenceDetails,
           };
         });
 
@@ -281,7 +285,7 @@ export async function GET(
             execution_date: latestValidResult.execution_date || null,
             executor: latestValidResult.executor || null,
             note: latestValidResult.note || null,
-            evidence: evidencePaths, // 常に最新のエビデンス（history_count === 0）を使用
+            evidence: evidenceDetails, // 常に最新のエビデンス詳細情報を使用
           },
           allHistory: sortedHistory,
           historyCounts,
