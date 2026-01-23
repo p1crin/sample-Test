@@ -508,7 +508,7 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
 
                     return (
                       <div
-                        key={file.id}
+                        key={`${rowIndex}-${fileIndex}`}
                         className="relative flex items-center justify-between border border-gray-300 p-2 rounded-sm bg-white"
                         style={{ minHeight: '40px', maxWidth: '180px' }}
                       >
