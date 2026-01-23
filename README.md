@@ -177,7 +177,12 @@ npm run dev
 - Route 53、ACM証明書
 - AWS Batch(ユーザーインポート用)
 
-詳細な構築手順は [AWSデプロイメントガイド](./docs/AWS_DEPLOYMENT_GUIDE.md) を参照してください。
+詳細な構築手順は [AWS環境構築ガイド](./docs/AWS_SETUP_GUIDE.md) を参照してください。
+
+> **更新情報(2026-01-23)**: ドキュメントを大幅に改善しました
+> - NATゲートウェイ不要の構成に変更(月額3,000〜5,000円のコスト削減)
+> - AWSコンソールのみで構築可能(CLI不要)
+> - 開発環境向けのコスト最適化設定を追加(月額約6,000円で運用可能)
 
 ### 自動デプロイ(CI/CD)
 
@@ -201,8 +206,10 @@ mainブランチへのプッシュで自動的に客先AWS ECSにデプロイさ
 
 ## ドキュメント
 
+### 環境構築
+
 - [クイックスタートガイド](./docs/QUICKSTART.md) - 最速セットアップ手順
-- [AWSデプロイメントガイド](./docs/AWS_DEPLOYMENT_GUIDE.md) - AWS環境構築の詳細手順
+- [AWS環境構築ガイド](./docs/AWS_SETUP_GUIDE.md) - AWS環境構築の詳細手順(開発・本番共通)
 - [CI/CDセットアップ](./docs/CI_CD_SETUP.md) - 自動デプロイの設定方法
 - [ローカルS3セットアップ](./docs/LOCAL_DEVELOPMENT_S3_SETUP.md) - ローカル開発でS3を使う方法
 

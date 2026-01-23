@@ -2,10 +2,15 @@
 
 このガイドでは、ProofLinkシステムを最速でセットアップする手順を説明します。
 
+> **更新情報(2026-01-23)**: AWS環境構築手順を大幅に改善しました。
+> - NATゲートウェイ不要でコスト削減
+> - AWSコンソールのみで構築可能(CLI不要)
+> - 開発環境向けのコスト最適化設定を追加
+
 ## 目次
 
 1. [ローカル開発環境のセットアップ](#ローカル開発環境のセットアップ)
-2. [AWS本番環境のデプロイ](#aws本番環境のデプロイ)
+2. [AWS環境のデプロイ](#aws環境のデプロイ)
 3. [自動デプロイの設定](#自動デプロイの設定)
 
 ---
@@ -79,76 +84,105 @@ npm run dev
 
 ---
 
-## AWS本番環境のデプロイ
+## AWS環境のデプロイ
 
 ### フェーズ1: インフラ構築(初回のみ)
 
-**所要時間: 約2-3時間**
+**所要時間: 開発環境 約1.5時間、本番環境 約2.5時間**
 
-詳細は `docs/AWS_DEPLOYMENT_GUIDE.md` を参照してください。
+詳細は `docs/AWS_SETUP_GUIDE.md` を参照してください。
+
+#### 主要な改善点
+
+- ✅ **NATゲートウェイ不要**: 月額3,000〜5,000円のコスト削減
+- ✅ **AWSコンソールのみ**: CLI不要で全ての操作が可能
+- ✅ **開発環境のコスト最適化**: 月額約6,000円で運用可能
 
 #### 主要ステップ
 
-1. **VPC作成** (10分)
+1. **VPCとネットワーク** (10分)
    - パブリック/プライベートサブネット
-   - NATゲートウェイ
+   - インターネットゲートウェイ(NATゲートウェイなし)
 
-2. **RDS PostgreSQL** (20分)
-   - Multi-AZ構成
-   - セキュリティグループ設定
+2. **セキュリティグループ** (10分)
+   - ALB用、ECS用、RDS用
 
-3. **S3バケット** (5分)
-   - ファイルストレージ用
-   - インポート用
+3. **RDS PostgreSQL** (20分)
+   - 開発環境: db.t4g.micro (約¥1,500/月)
+   - 本番環境: db.t4g.medium + Multi-AZ
 
-4. **ECR・ECS** (30分)
-   - コンテナリポジトリ
-   - Fargateクラスター
-   - タスク定義
+4. **S3バケット** (5分)
+   - ファイルストレージ
+   - ライフサイクルポリシー設定
 
-5. **ALB・Route 53** (20分)
-   - ロードバランサー
-   - SSL証明書(ACM)
-   - DNS設定
+5. **IAMロールとECR** (15分)
+   - ECSタスク実行ロール
+   - ECSタスクロール
+   - ECRリポジトリ
 
-6. **AWS Batch** (20分)
-   - ジョブ定義
-   - ジョブキュー
+6. **ECSクラスターとタスク定義** (20分)
+   - 開発環境: 0.5vCPU, 1GB (約¥1,800/月)
+   - 本番環境: 1vCPU, 2GB
 
-7. **WAF・CloudWatch** (15分)
-   - アクセス制御
-   - ログ・監視
+7. **ALB・DNS** (20分)
+   - Application Load Balancer
+   - Route 53設定(本番のみ)
+   - SSL証明書(本番のみ)
+
+8. **CloudWatch** (10分)
+   - ログ設定
+   - アラーム設定(本番のみ)
 
 ### フェーズ2: 初回デプロイ
 
-#### 方法A: 手動デプロイ
+#### ステップ1: Dockerイメージのビルドとプッシュ
+
+ローカルマシンで実行:
 
 ```bash
-# 1. Dockerイメージをビルド
-docker build -t prooflink-app .
+# 1. AWSアカウントIDを確認
+aws sts get-caller-identity --query Account --output text
 
 # 2. ECRにログイン
 aws ecr get-login-password --region ap-northeast-1 | \
   docker login --username AWS --password-stdin \
-  <account-id>.dkr.ecr.ap-northeast-1.amazonaws.com
+  {アカウントID}.dkr.ecr.ap-northeast-1.amazonaws.com
 
-# 3. イメージをタグ付け
-docker tag prooflink-app:latest \
-  <account-id>.dkr.ecr.ap-northeast-1.amazonaws.com/prooflink-app:latest
+# 3. Dockerイメージをビルド
+docker build -t prooflink-dev-app .
 
-# 4. ECRにプッシュ
-docker push <account-id>.dkr.ecr.ap-northeast-1.amazonaws.com/prooflink-app:latest
+# 4. イメージをタグ付け
+docker tag prooflink-dev-app:latest \
+  {アカウントID}.dkr.ecr.ap-northeast-1.amazonaws.com/prooflink-dev-app:latest
 
-# 5. ECSサービスを更新
-aws ecs update-service \
-  --cluster prooflink-cluster \
-  --service prooflink-service \
-  --force-new-deployment
+# 5. ECRにプッシュ
+docker push {アカウントID}.dkr.ecr.ap-northeast-1.amazonaws.com/prooflink-dev-app:latest
 ```
 
-#### 方法B: GitLab CI/CDでデプロイ
+#### ステップ2: ECSサービスの作成
 
-CI/CDセットアップ後は、`main`ブランチにプッシュするだけで自動デプロイされます。
+AWSコンソールで実行:
+
+1. ECS → クラスター → `prooflink-dev-cluster` を開く
+2. 「サービス」タブ → 「作成」
+3. 設定:
+   - 起動タイプ: Fargate
+   - タスク定義: `prooflink-dev-task`
+   - サービス名: `prooflink-dev-service`
+   - タスクの数: 1
+   - ネットワーク: パブリックサブネット
+   - **パブリックIPの自動割り当て: ENABLED** (重要)
+   - ロードバランサー: ALBを選択
+   - ターゲットグループ: `prooflink-tg`
+4. 「作成」をクリック
+
+#### ステップ3: 動作確認
+
+ブラウザでALBのDNS名にアクセス:
+
+開発環境: `http://prooflink-alb-xxxxx.ap-northeast-1.elb.amazonaws.com`
+
+本番環境: `https://prooflink.example.com`
 
 ---
 
@@ -201,12 +235,13 @@ GitLab CI/CDが自動的にデプロイを開始します。
 
 ### Q1: ローカルでS3を使いたい
 
-**A:** `.env`に以下を追加:
+**A:** `.env.local`に以下を追加:
 
 ```env
-AWS_S3_BUCKET_NAME="your-dev-bucket"
-AWS_ACCESS_KEY_ID="your-key"
-AWS_SECRET_ACCESS_KEY="your-secret"
+AWS_REGION=ap-northeast-1
+AWS_ACCESS_KEY_ID=your-key
+AWS_SECRET_ACCESS_KEY=your-secret
+AWS_S3_BUCKET_NAME=prooflink-dev-files-xxxxx
 ```
 
 詳細は `docs/LOCAL_DEVELOPMENT_S3_SETUP.md` を参照。
@@ -262,8 +297,7 @@ aws logs tail /ecs/prooflink-app --follow
 
 ## 次のステップ
 
-- **開発者向け**: [開発ガイド](./DEVELOPMENT.md)
-- **AWS構築**: [AWSデプロイメントガイド](./AWS_DEPLOYMENT_GUIDE.md)
+- **AWS環境構築**: [AWS環境構築ガイド](./AWS_SETUP_GUIDE.md) ← 新しいガイド
 - **CI/CD設定**: [CI/CDセットアップ](./CI_CD_SETUP.md)
 - **S3ローカル開発**: [S3セットアップガイド](./LOCAL_DEVELOPMENT_S3_SETUP.md)
 

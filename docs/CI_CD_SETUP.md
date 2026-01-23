@@ -62,20 +62,19 @@
 
 ### 完了している必要があるAWS設定
 
-以下のリソースが客先AWS環境に作成されていること:
+以下のリソースがAWS環境に作成されていること:
 
 - ✅ VPC、サブネット、セキュリティグループ
 - ✅ RDS PostgreSQL
 - ✅ S3バケット
-- ✅ ECRリポジトリ(`prooflink-app`, `prooflink-batch`)
-- ✅ ECSクラスター(`prooflink-cluster`)
-- ✅ ECSサービス(`prooflink-service`)
-- ✅ ECSタスク定義(`prooflink-task`)
-- ✅ ALB、Route 53、ACM証明書
-- ✅ AWS Batch(ジョブ定義、ジョブキュー)
+- ✅ ECRリポジトリ(`prooflink-dev-app` または `prooflink-prod-app`)
+- ✅ ECSクラスター(`prooflink-dev-cluster` または `prooflink-prod-cluster`)
+- ✅ ECSサービス(`prooflink-dev-service` または `prooflink-prod-service`)
+- ✅ ECSタスク定義(`prooflink-dev-task` または `prooflink-prod-task`)
+- ✅ ALB、Route 53(本番のみ)、ACM証明書(本番のみ)
 - ✅ IAMロール(ECS実行ロール、タスクロール)
 
-詳細は `docs/AWS_DEPLOYMENT_GUIDE.md` を参照。
+詳細は `docs/AWS_SETUP_GUIDE.md` を参照。
 
 ### GitLab環境
 
@@ -531,7 +530,7 @@ aws logs tail /ecs/prooflink-app --since 5m
 
 ## 参考資料
 
-- [AWS Deployment Guide](./AWS_DEPLOYMENT_GUIDE.md) - AWS環境構築手順
+- [AWS環境構築ガイド](./AWS_SETUP_GUIDE.md) - AWS環境構築手順
 - [GitLab CI/CD Documentation](https://docs.gitlab.com/ee/ci/)
 - [AWS ECS Task Definitions](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task_definitions.html)
 - [AWS CLI Reference](https://docs.aws.amazon.com/cli/latest/)
