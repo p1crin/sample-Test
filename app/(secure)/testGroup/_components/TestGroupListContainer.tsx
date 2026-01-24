@@ -291,6 +291,7 @@ export function TestGroupListContainer() {
       setModalContent('initial');
     } catch (error) {
       clientLogger.error('テストグループ一覧画面', '関連テストグループケース件数取得エラー', { error });
+      setApiError(error instanceof Error ? error : new Error(String(error)));
     }
   }
 
@@ -331,7 +332,7 @@ export function TestGroupListContainer() {
       if (result.success) {
         clientLogger.info('テストグループ一覧画面', 'テストグループ削除成功', { groupId: selectedTestGroup.id });
         //テストグループ一覧再描画
-        const queryString = buildQueryString(searchParams, 1, pageSize);
+        const queryString = buildQueryString(searchParams, page, pageSize);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const newList = await apiGet<any>(`/api/test-groups?${queryString}`);
         const count = newList.totalCount || (newList.data ? newList.data.length : 0);

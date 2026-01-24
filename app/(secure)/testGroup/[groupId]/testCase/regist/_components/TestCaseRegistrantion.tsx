@@ -5,14 +5,20 @@ import { Button } from '@/components/ui/button';
 import ButtonGroup from '@/components/ui/buttonGroup';
 import { Modal } from '@/components/ui/modal';
 import { VerticalForm } from '@/components/ui/verticalForm';
-import { apiFetch, apiGet } from '@/utils/apiClient';
+import { apiFetch, apiGet, apiPost } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { FileInfo } from '@/utils/fileUtils';
 import { useParams, useRouter } from 'next/navigation';
 import React, { useState } from 'react';
-import { CreateTestCaseListRow } from '../../../_components/types/testCase-list-row';
-import TestCaseForm from '../../[tid]/_components/testCaseForm';
+import { CreateTestCaseListRow } from '../../../\_components/types/testCase-list-row';
+import TestCaseForm from '../../\[tid\]/\_components/testCaseForm';
 import { testCaseRegistSchema } from '../schemas/testCase-regist-schema';
+
+// ファイルタイプ定数（API側と統一）
+const FILE_TYPE = {
+  CONTROL_SPEC: 0,
+  DATA_FLOW: 1,
+} as const;
 
 type TestCase = {
   id: number;
@@ -26,7 +32,6 @@ const TestCaseRegistrantion: React.FC = () => {
   const router = useRouter();
   const params = useParams();
   const groupId = parseInt(params.groupId as string);
-
   const [formData, setFormData] = useState<CreateTestCaseListRow>({
     tid: '',
     first_layer: '',
@@ -40,7 +45,6 @@ const TestCaseRegistrantion: React.FC = () => {
     controlSpecFile: [],
     dataFlowFile: [],
   });
-
   const [testContents, setTestContents] = useState<TestCase[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -49,6 +53,7 @@ const TestCaseRegistrantion: React.FC = () => {
   const [isTidChecking, setIsTidChecking] = useState(false);
 
   const handleFileChange = (fieldName: string, files: FileInfo[]) => {
+    // ファイル選択時はbase64データをstateに保持するのみ
     setFormData(prev => ({
       ...prev,
       [fieldName]: files
@@ -81,13 +86,11 @@ const TestCaseRegistrantion: React.FC = () => {
     if (!formData.tid.trim()) {
       return;
     }
-
     setIsTidChecking(true);
     clientLogger.info('テストケース新規登録画面', 'TID重複チェック開始', { tid: formData.tid });
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await apiGet<any>(`/api/test-cases/check-tid?groupId=${groupId}&tid=${encodeURIComponent(formData.tid)}`);
-
       if (result.success && result.isDuplicate) {
         setErrors(prev => ({
           ...prev,
@@ -235,6 +238,11 @@ const TestCaseRegistrantion: React.FC = () => {
         }
       });
       setErrors(newErrors);
+      // TIDエラーは気づきにくいのでバリデーションエラー時は画面をトップに移す
+      window.scroll({
+        top: 0,
+        behavior: "smooth",
+      });
       clientLogger.warn('テストケース新規登録画面', 'バリデーションエラー', { errors: newErrors });
       return;
     }
@@ -250,66 +258,86 @@ const TestCaseRegistrantion: React.FC = () => {
     setIsLoading(true);
     clientLogger.info('テストケース新規登録画面', 'テストケース登録開始', { formData, testContents });
 
+    // ファイル情報を除いてテストケースを登録
+    const payload = {
+      tid: formData.tid,
+      first_layer: formData.first_layer,
+      second_layer: formData.second_layer,
+      third_layer: formData.third_layer,
+      fourth_layer: formData.fourth_layer,
+      purpose: formData.purpose,
+      request_id: formData.request_id,
+      checkItems: formData.checkItems,
+      testProcedure: formData.testProcedure,
+      testContents: testContents,
+      // ファイル情報はここでは含めない
+      controlSpecFile: [],
+      dataFlowFile: [],
+    };
+
     try {
-      const formDataObj = new FormData();
-      formDataObj.append('groupId', String(groupId));
-      formDataObj.append('tid', formData.tid);
-      formDataObj.append('first_layer', formData.first_layer);
-      formDataObj.append('second_layer', formData.second_layer);
-      formDataObj.append('third_layer', formData.third_layer);
-      formDataObj.append('fourth_layer', formData.fourth_layer);
-      formDataObj.append('purpose', formData.purpose);
-      formDataObj.append('request_id', formData.request_id);
-      formDataObj.append('checkItems', formData.checkItems);
-      formDataObj.append('testProcedure', formData.testProcedure);
+      const result = await apiPost<any>(`/api/test-groups/${groupId}/cases`, payload);
 
-      // 複数のファイルを処理
-      formData.controlSpecFile.forEach((fileInfo, index) => {
-        formDataObj.append(`controlSpecFile[${index}]`, JSON.stringify(fileInfo));
-      });
-      formData.dataFlowFile.forEach((fileInfo, index) => {
-        formDataObj.append(`dataFlowFile[${index}]`, JSON.stringify(fileInfo));
-      });
-
-      if (testContents.length > 0) {
-        formDataObj.append('testContents', JSON.stringify(testContents));
+      if (!result.success) {
+        throw new Error(result.error || 'テストケースの作成に失敗しました');
       }
 
-      const response = await apiFetch(`/api/test-groups/${groupId}/cases`, {
-        method: 'POST',
-        body: formDataObj,
-      });
+      clientLogger.info('テストケース新規登録画面', 'テストケース作成成功、ファイルアップロード開始', { tid: formData.tid });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(
-          errorData.error?.message || `API error: ${response.status}`
-        );
+      // ファイルアップロード
+      const allFiles = [
+        ...formData.controlSpecFile.map(file => ({ file, type: FILE_TYPE.CONTROL_SPEC, name: '制御仕様書' })),
+        ...formData.dataFlowFile.map(file => ({ file, type: FILE_TYPE.DATA_FLOW, name: 'データフロー' }))
+      ];
+
+      for (const { file, type, name } of allFiles) {
+        if (file.base64 && file.type) {
+          const formDataObj = new FormData();
+          const byteString = atob(file.base64);
+          const arrayBuffer = new ArrayBuffer(byteString.length);
+          const uint8Array = new Uint8Array(arrayBuffer);
+          for (let i = 0; i < byteString.length; i++) {
+            uint8Array[i] = byteString.charCodeAt(i);
+          }
+          const blob = new Blob([uint8Array], { type: file.type });
+          const fileObj = new File([blob], file.name, { type: file.type });
+
+          formDataObj.append('file', fileObj);
+          formDataObj.append('testGroupId', String(groupId));
+          formDataObj.append('tid', formData.tid);
+          formDataObj.append('fileType', String(type));
+
+          const response = await apiFetch('/api/files', {
+            method: 'POST',
+            body: formDataObj,
+          });
+
+          if (!response.ok) {
+            throw new Error(`${name}「${file.name}」のアップロードに失敗しました`);
+          }
+          clientLogger.info('テストケース新規登録画面', `${name}アップロード成功`, { fileName: file.name });
+        }
       }
 
-      const result = await response.json();
+      // 全て成功
+      clientLogger.info('テストケース新規登録画面', '全ての処理が成功', { tid: formData.tid });
+      setModalMessage('テストケースを登録しました');
+      setIsModalOpen(true);
+      setTimeout(() => {
+        router.push(`/testGroup/${groupId}/testCase`);
+      }, 1500);
 
-      if (result.success) {
-        clientLogger.info('テストケース新規登録画面', 'テストケース作成成功', { tid: formData.tid });
-        setModalMessage('テストケースを登録しました');
-        setIsModalOpen(true);
-        setTimeout(() => {
-          router.push(`/testGroup/${groupId}/testCase`);
-        }, 1500);
-      } else {
-        clientLogger.error('テストケース新規登録画面', 'テストケース作成失敗', { error: result.error });
-        setModalMessage('テストケースの作成に失敗しました');
-        setIsModalOpen(true);
-      }
     } catch (error) {
-      clientLogger.error('テストケース新規登録画面', 'テストケース作成エラー', { error });
-      setModalMessage('テストケースの作成に失敗しました');
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      clientLogger.error('テストケース新規登録画面', '登録処理中にエラーが発生', { error: errorMessage });
+      setModalMessage(`テストケースの作成に失敗しました。`);
       setIsModalOpen(true);
     } finally {
       setIsLoading(false);
     }
   };
 
+  // 戻るボタン押下時処理
   const handleCancel = () => {
     router.back();
   };
@@ -343,7 +371,7 @@ const TestCaseRegistrantion: React.FC = () => {
           label="制御仕様書"
           name="controlSpecFile"
           value={formData.controlSpecFile}
-          onChange={(e) => handleFileChange('controlSpecFile', e.target.value)}
+          onChange={(e, deletedFile) => handleFileChange('controlSpecFile', e.target.value)}
           error={errors.controlSpecFile}
           isCopyable={true}
         />
@@ -351,12 +379,11 @@ const TestCaseRegistrantion: React.FC = () => {
           label="データフロー"
           name="dataFlowFile"
           value={formData.dataFlowFile}
-          onChange={(e) => handleFileChange('dataFlowFile', e.target.value)}
+          onChange={(e, deletedFile) => handleFileChange('dataFlowFile', e.target.value)}
           error={errors.dataFlowFile}
           isCopyable={true}
         />
       </div>
-
       {/* テスト内容セクション */}
       <div className="mb-6">
         <h2 className="text-lg font-bold mb-4">テスト内容</h2>
@@ -367,9 +394,7 @@ const TestCaseRegistrantion: React.FC = () => {
           <div className="text-red-500 text-sm mt-2">{errors.testContents}</div>
         )}
       </div>
-
       <ButtonGroup buttons={buttons} />
-
       {/* 登録結果モーダル */}
       <Modal open={isModalOpen} onClose={() => setIsModalOpen(false)}>
         <p className="mb-8">{modalMessage}</p>

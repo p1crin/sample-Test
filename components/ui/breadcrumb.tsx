@@ -23,7 +23,9 @@ const Breadcrumb = () => {
     regist: '新規登録',
     edit: '編集',
     testSummaryResult: 'テスト集計結果表示',
-    password: 'パスワード変更'
+    password: 'パスワード変更',
+    testImportExecute: 'テストインポート実施',
+    userImportExecute: 'ユーザインポート実施'
   };
 
   return (

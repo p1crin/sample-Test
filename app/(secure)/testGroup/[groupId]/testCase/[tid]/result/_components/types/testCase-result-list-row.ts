@@ -18,7 +18,8 @@ export type TestCaseResultRow = {
   note: string;
   is_target: boolean;
   historyCount?: number; // 追跡用（オプション）
-  deletedEvidences?: FileInfo[]; // 削除予定のエビデンス（Method A用）
+  deletedEvidences?: FileInfo[]; // 削除予定のエビデンス
+  uploading?: boolean; //アップロード中判定
 };
 
 export type ResultWithHistory = {

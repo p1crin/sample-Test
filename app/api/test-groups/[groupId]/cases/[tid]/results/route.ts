@@ -187,28 +187,38 @@ export async function GET(
         // このテストケースのテスト内容を取得
         const testContent = (testContentsMap[key] || {}) as Record<string, unknown>;
 
-        // 利用可能な場合、最新のエビデンスパスを取得（全て）
-        const currentEvidences = evidencesByKey[key]
-          ? evidencesByKey[key].filter(
-              (e) => ((e as Record<string, unknown>).history_count as number) === 0
+        // このテストケースの履歴を取得（ある場合）
+        const testCaseHistory = (historyByTestCase[key] || []) as Record<string, unknown>[];
+
+        // 結果履歴テーブルから最大のhistory_countを取得し、それに紐づくエビデンスを取得
+        let currentEvidences: unknown[] = [];
+        if (testCaseHistory.length > 0) {
+          // 結果履歴テーブルから最大のhistory_countを見つける
+          const maxHistoryCount = Math.max(
+            ...testCaseHistory.map((h) => (h as Record<string, unknown>).history_count as number)
+          );
+          // その最大のhistory_countに紐づくエビデンスを取得
+          currentEvidences = evidencesByKey[key]
+            ? evidencesByKey[key].filter(
+              (e) => ((e as Record<string, unknown>).history_count as number) === maxHistoryCount
             )
-          : [];
+            : [];
+        }
 
-        const evidencePaths = currentEvidences.map(e =>
-          (e as Record<string, unknown>).evidence_path as string
-        );
+        const evidenceDetails = currentEvidences.map(e => ({
+          path: (e as Record<string, unknown>).evidence_path as string,
+          fileNo: (e as Record<string, unknown>).evidence_no as number,
+          name: (e as Record<string, unknown>).evidence_name as string,
+        }));
 
-        // 結果にエビデンスパスとテスト内容を追加
+        // 結果にエビデンス詳細情報とテスト内容を追加
         const resultWithDetails = {
           ...r,
           test_case: testContent.test_case || null,
           expected_value: testContent.expected_value || null,
           is_target: testContent.is_target,
-          evidence: evidencePaths,
+          evidence: evidenceDetails,
         };
-
-        // このテストケースの履歴を取得（ある場合）
-        const testCaseHistory = (historyByTestCase[key] || []) as Record<string, unknown>[];
 
         // 履歴レコードにテスト内容とエビデンスパスを追加
         const historyWithDetails = testCaseHistory.map((h) => {
@@ -220,16 +230,18 @@ export async function GET(
             )
             : [];
 
-          const historyEvidencePaths = historyEvidences.map(e =>
-            (e as Record<string, unknown>).evidence_path as string
-          );
+          const historyEvidenceDetails = historyEvidences.map(e => ({
+            path: (e as Record<string, unknown>).evidence_path as string,
+            fileNo: (e as Record<string, unknown>).evidence_no as number,
+            name: (e as Record<string, unknown>).evidence_name as string,
+          }));
 
           return {
             ...h,
             test_case: testContent.test_case || null,
             expected_value: testContent.expected_value || null,
             is_target: testContent.is_target,
-            evidence: historyEvidencePaths,
+            evidence: historyEvidenceDetails,
           };
         });
 
@@ -273,7 +285,7 @@ export async function GET(
             execution_date: latestValidResult.execution_date || null,
             executor: latestValidResult.executor || null,
             note: latestValidResult.note || null,
-            evidence: latestValidResult.evidence || evidencePaths,
+            evidence: evidenceDetails, // 常に最新のエビデンス詳細情報を使用
           },
           allHistory: sortedHistory,
           historyCounts,
@@ -337,7 +349,6 @@ export async function POST(
   const user = await requireAuth(req);
   const { groupId: groupIdParam, tid } = await params;
   const groupId = parseInt(groupIdParam, 10);
-
   try {
     // 形式チェック
     if (isNaN(groupId)) {
@@ -402,16 +413,59 @@ export async function POST(
     // トランザクション内で処理
     const result = await prisma.$transaction(async (tx) => {
       let fileCount = 0;
+      // historyDataListの処理
+      if (historyDataList) {
+        for (const historyList of historyDataList) {
+          const historyCountForUpdate = historyList.historyCount;
+
+          for (const history of historyList.testResult) {
+            const { test_case_no, ...rest } = history;
+
+            // 履歴テーブルの更新
+            await tx.tt_test_results_history.updateMany({
+              where: {
+                test_group_id: groupId,
+                tid: tid,
+                test_case_no: test_case_no,
+                history_count: historyCountForUpdate,
+              },
+              data: {
+                result: rest.result || null,
+                judgment: rest.judgment || JUDGMENT_OPTIONS.UNTOUCHED,
+                software_version: rest.softwareVersion || null,
+                hardware_version: rest.hardwareVersion || null,
+                comparator_version: rest.comparatorVersion || null,
+                execution_date: rest.executionDate ? new Date(rest.executionDate) : null,
+                executor: rest.executor,
+                updated_at: new Date(),
+              },
+            });
+          }
+        }
+        logDatabaseQuery({
+          operation: 'UPDATE',
+          table: 'tt_test_results_history',
+          rowsAffected: historyDataList.length,
+          query: 'update',
+          params: [
+            {
+              testGroup: groupId,
+              tid: tid,
+            }
+          ],
+          executionTime: apiTimer.elapsed(),
+        });
+      }
+
       // newTestResultDataの処理
       if (newTestResultData) {
         for (const result of newTestResultData.testResult) {
           const testCaseNo = result.test_case_no;
           const newHistoryCount = newTestResultData.historyCount;
           // 実行日付の変換
-          const executionDate = result.execution_date
-            ? new Date(result.execution_date)
+          const executionDate = result.executionDate
+            ? new Date(result.executionDate)
             : null;
-
 
           // テスト結果テーブルを更新
           await tx.tt_test_results.upsert({
@@ -442,7 +496,7 @@ export async function POST(
               hardware_version: result.hardwareVersion,
               comparator_version: result.comparatorVersion,
               execution_date: executionDate,
-              executor: result.executer,
+              executor: result.executor,
               note: result.note,
             }
           });
@@ -455,32 +509,14 @@ export async function POST(
               history_count: newHistoryCount,
               result: result.result || null,
               judgment: result.judgment,
-              software_version: result.software_version || null,
-              hardware_version: result.hardware_version || null,
-              comparator_version: result.comparator_version || null,
+              software_version: result.softwareVersion || null,
+              hardware_version: result.hardwareVersion || null,
+              comparator_version: result.comparatorVersion || null,
               execution_date: executionDate,
               executor: result.executor || null,
               note: result.note || null,
             },
           });
-
-          // TODO:エビデンステーブルにレコードを追加
-          // let fileNumber = 0;
-          // for (const file of result.evidence) {
-          //   await tx.tt_test_evidences.create({
-          //     data: {
-          //       test_group_id: groupId,
-          //       tid: tid,
-          //       test_case_no: testCaseNo,
-          //       history_count: newHistoryCount,
-          //       evidence_no: fileNumber,
-          //       evidence_name: file,
-          //       evidence_path: `/uploads/test-cases/${groupId}/${tid}/${file}`
-          //     }
-          //   });
-          //   fileNumber++;
-          //   fileCount++;
-          // }
         }
         logDatabaseQuery({
           operation: 'UPSERT',
@@ -518,64 +554,6 @@ export async function POST(
               testGroup: groupId,
               tid: tid,
             },
-          ],
-          executionTime: apiTimer.elapsed(),
-        });
-
-        // historyDataListの処理
-        if (historyDataList) {
-          fileCount = 0;
-          for (const historyList of historyDataList) {
-            for (const history of historyList.testResult) {
-              let fileNo = 0;
-              const { historyCount, test_case_no, ...rest } = history;
-              // 履歴テーブルの更新
-              await tx.tt_test_results_history.updateMany({
-                where: {
-                  test_group_id: groupId,
-                  tid: tid,
-                  test_case_no: test_case_no,
-                  history_count: historyCount,
-                },
-                data: {
-                  result: rest.result,
-                  judgment: rest.judgment,
-                  software_version: rest.softwareVersion,
-                  hardware_version: rest.hardwareVersion,
-                  comparator_version: rest.comparatorVersion,
-                  execution_date: rest.executionDate ? new Date(rest.executionDate) : null,
-                  executor: rest.executor,
-                  updated_at: new Date(),
-                },
-              });
-              // for (const file of rest.evidence) {
-              //   // エビデンステーブルの更新
-              //   await tx.tt_test_evidences.updateMany({
-              //     where: {
-              //       test_group_id: groupId,
-              //       tid: tid,
-              //       test_case_no: test_case_no,
-              //       history_count: historyCount,
-              //       evidence_no: fileNo,
-              //     },
-              //     data: {
-
-              //     }
-              //   });
-              // }
-            }
-          }
-        }
-        logDatabaseQuery({
-          operation: 'UPDATE',
-          table: 'tt_test_results_history',
-          rowsAffected: 1,
-          query: 'update',
-          params: [
-            {
-              testGroup: groupId,
-              tid: tid,
-            }
           ],
           executionTime: apiTimer.elapsed(),
         });

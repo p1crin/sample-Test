@@ -1,5 +1,5 @@
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
 import { isAdmin, isTestManager } from '@/app/lib/auth';
+import { authOptions } from '@/app/lib/authOption';
 import ForbiddenUI from '@/components/ui/forbiddenUI';
 import InternalServerErrorUI from '@/components/ui/internalServerErrorUI';
 import UnauthorizedUI from '@/components/ui/unauthorizedUI';

@@ -83,6 +83,9 @@ export function TestCaseEditForm({
   const [editModalMessage, setEditModalMessage] = useState('');
   const [editIsLoading, setEditIsLoading] = useState(false);
 
+  // 更新成功フラグ（ブラウザバック時の判定用）
+  const isUpdateSuccessful = useRef(false);
+
   // テストケースのフォーマットの各値取得
   useEffect(() => {
     // 初回のみ初期ファイルIDを保存
@@ -107,6 +110,86 @@ export function TestCaseEditForm({
     setFormData(form);
     setTestContents(contents);
   }, [form, contents]);
+
+  // タブクローズ・ページリロード時のクリーンアップ
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      // 更新が成功していない場合のみ、新規追加されたファイルを削除
+      if (!isUpdateSuccessful.current) {
+        const currentControlSpecIds = formData.controlSpecFile
+          .map(f => f.fileNo)
+          .filter((id): id is number => id !== undefined);
+        const currentDataFlowIds = formData.dataFlowFile
+          .map(f => f.fileNo)
+          .filter((id): id is number => id !== undefined);
+
+        // 新規追加されたファイルのみを特定
+        const newControlSpecIds = currentControlSpecIds.filter(
+          id => !initialFileIds.current.controlSpec.includes(id)
+        );
+        const newDataFlowIds = currentDataFlowIds.filter(
+          id => !initialFileIds.current.dataFlow.includes(id)
+        );
+
+        // 新規追加されたファイルがある場合のみ削除処理を実行
+        if (newControlSpecIds.length > 0 || newDataFlowIds.length > 0) {
+          // 制御仕様書ファイルの削除
+          for (const fileNo of newControlSpecIds) {
+            const fileInfo = formData.controlSpecFile.find(f => f.fileNo === fileNo);
+            if (fileInfo) {
+              // keepalive: true を使用してページアンロード後もリクエストを継続
+              fetch('/api/files/test-info', {
+                method: 'DELETE',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  testGroupId: groupId,
+                  tid: formData.tid,
+                  fileType: FILE_TYPE.CONTROL_SPEC,
+                  fileNo: fileNo,
+                  filePath: fileInfo.path,
+                }),
+                keepalive: true,
+              }).catch(() => {
+                // エラーは無視（ページがアンロードされるため）
+              });
+            }
+          }
+
+          // データフローファイルの削除
+          for (const fileNo of newDataFlowIds) {
+            const fileInfo = formData.dataFlowFile.find(f => f.fileNo === fileNo);
+            if (fileInfo) {
+              // keepalive: true を使用してページアンロード後もリクエストを継続
+              fetch('/api/files/test-info', {
+                method: 'DELETE',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  testGroupId: groupId,
+                  tid: formData.tid,
+                  fileType: FILE_TYPE.DATA_FLOW,
+                  fileNo: fileNo,
+                  filePath: fileInfo.path,
+                }),
+                keepalive: true,
+              }).catch(() => {
+                // エラーは無視（ページがアンロードされるため）
+              });
+            }
+          }
+        }
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [formData.controlSpecFile, formData.dataFlowFile, formData.tid, groupId]);
 
   // テスト内容が変更されたときのハンドラー
   // IDは生成せず、データのみを保持（IDはTestCaseFormが内部管理）
@@ -183,7 +266,7 @@ export function TestCaseEditForm({
       formDataObj.append('tid', formData.tid);
       formDataObj.append('fileType', String(fileType));
 
-      const response = await apiFetch('/api/files', {
+      const response = await apiFetch('/api/files/test-info', {
         method: 'POST',
         body: formDataObj,
       });
@@ -322,6 +405,11 @@ export function TestCaseEditForm({
         }
       });
       setEditErrors(newErrors);
+      // TIDエラーは気づきにくいのでバリデーションエラー時は画面をトップに移す
+      window.scroll({
+        top: 0,
+        behavior: "smooth",
+      });
       clientLogger.warn('テストケース編集画面', 'バリデーションエラー', { errors: newErrors });
       return;
     }
@@ -357,7 +445,7 @@ export function TestCaseEditForm({
       for (const file of deletedFiles) {
         deletePromises.push(
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          apiDelete<any>('/api/files', {
+          apiDelete<any>('/api/files/test-info', {
             testGroupId: groupId,
             tid: formData.tid,
             fileNo: file.fileNo,
@@ -378,6 +466,8 @@ export function TestCaseEditForm({
       }
 
       if (result.success) {
+        // 更新成功フラグを立てる（ブラウザバック時のファイル削除を防ぐため）
+        isUpdateSuccessful.current = true;
         clientLogger.info('テストケース編集画面', 'テストケース更新成功');
         setEditModalMessage('テストケースを更新しました');
         setEditIsModalOpen(true);
@@ -416,7 +506,7 @@ export function TestCaseEditForm({
     for (const fileNo of newControlSpecIds) {
       deletePromises.push(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        apiDelete<any>('/api/files', {
+        apiDelete<any>('/api/files/test-info', {
           testGroupId: groupId,
           tid: formData.tid,
           fileNo: fileNo,
@@ -428,7 +518,7 @@ export function TestCaseEditForm({
     for (const fileNo of newDataFlowIds) {
       deletePromises.push(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        apiDelete<any>('/api/files', {
+        apiDelete<any>('/api/files/test-info', {
           testGroupId: groupId,
           tid: formData.tid,
           fileNo: fileNo,
@@ -441,7 +531,7 @@ export function TestCaseEditForm({
       if (file.base64) {
         deletePromises.push(
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          apiDelete<any>('/api/files', {
+          apiDelete<any>('/api/files/test-info', {
             testGroupId: groupId,
             tid: formData.tid,
             fileNo: file.fileNo,

@@ -35,4 +35,5 @@ declare module 'next-auth/jwt' {
 
 const handler = NextAuth(authOptions);
 
-export { handler as GET, handler as POST, authOptions };
+// "authOptions"をexportから削除
+export { handler as GET, handler as POST };

@@ -7,7 +7,7 @@ import { apiGet, apiPost, apiDelete } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { TestCaseDetailRow } from '../../_components/types/testCase-detail-list-row';
 import { TestCaseResultRow, TestResultsData } from '../../_components/types/testCase-result-list-row';
 import { TestCaseConduct } from './TestCaseConduct';
@@ -83,6 +83,11 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
   const [modalMessage, setModalMessage] = useState('');
   const [executorsList, setExecutorsList] = useState<Array<{ id: number; name: string; }>>([]);
 
+  // 登録成功フラグ（タブクローズ時のクリーンアップ用）
+  const isRegistrationSuccessful = useRef(false);
+  // 初期エビデンスIDを記録（新規追加されたエビデンスのみを削除するため）
+  const initialEvidenceIds = useRef<Map<string, Set<number>>>(new Map());
+
   const router = useRouter();
   const { data: session } = useSession();
   const user = session?.user;
@@ -137,8 +142,6 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
         clientLogger.error('テストケース結果確認画面', 'テストケース詳細取得失敗', { error: errorMessage });
         setLoadError('テストケース詳細の取得に失敗しました');
         setApiError(err instanceof Error ? err : new Error(String(err)));
-      } finally {
-        setIsLoading(false);
       }
     };
 
@@ -170,7 +173,7 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
           executor: '',
           evidence: null,
           note: '',
-          judgment: "未着手"
+          judgment: result.latestValidResult.is_target === false ? JUDGMENT_OPTIONS.EXCLUDED : "未着手"
         })) as TestCaseResultRow[];
         const historyData = Object.values(resultsData).flatMap((result) =>
           result.allHistory.map((histItem) => ({
@@ -198,14 +201,20 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
           acc[historyCount].push(item);
           return acc;
         }, [] as TestCaseResultRow[][]).filter(group => group.length > 0);
+
+        // initialDataにhistoryCountを追加（履歴数+1）
+        const initialDataWithHistoryCount = initialData.map(item => ({
+          ...item,
+          historyCount: groupedHistoryData.length + 1
+        })) as TestCaseResultRow[];
         setPastTestCaseData(groupedHistoryData)
         // 履歴がないかチェック
         const allHistoryCountsZero = Object.values(resultsData).every(result => result.historyCounts.length === 0);
         setShowNewTestCaseConduct(allHistoryCountsZero);
         setButtonDisabled(allHistoryCountsZero);
-        setInitialTestCaseData(initialData);
+        setInitialTestCaseData(initialDataWithHistoryCount);
 
-        // 追加: 実行者リストに結果の実行者を含める
+        // 実行者リストに結果の実行者を含める
         const resultExecutors = Object.values(resultsData).flatMap(result =>
           result.allHistory.map(histItem => ({
             id: histItem.executor_id ?? -Date.now() - Math.floor(Math.random() * 1000), // 負の値で一時IDを生成
@@ -241,6 +250,111 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
     });
   }, [groupId, tid, user]);
 
+  // 初期エビデンスIDを記録（新規追加されたエビデンスのみを削除するため）
+  useEffect(() => {
+    // 新規入力データのエビデンスIDを記録
+    initialTestCaseData.forEach((item) => {
+      const key = `new_${item.test_case_no}`;
+      const evidenceIds = new Set<number>();
+
+      item.evidence?.forEach((file) => {
+        if (file.fileNo !== undefined) {
+          evidenceIds.add(file.fileNo);
+        }
+      });
+
+      initialEvidenceIds.current.set(key, evidenceIds);
+    });
+
+    // 履歴データのエビデンスIDを記録
+    pastTestCaseData.forEach((historyData, historyIndex) => {
+      historyData.forEach((item) => {
+        const key = `history_${historyIndex + 1}_${item.test_case_no}`;
+        const evidenceIds = new Set<number>();
+
+        item.evidence?.forEach((file) => {
+          if (file.fileNo !== undefined) {
+            evidenceIds.add(file.fileNo);
+          }
+        });
+
+        initialEvidenceIds.current.set(key, evidenceIds);
+      });
+    });
+  }, [initialTestCaseData, pastTestCaseData]);
+
+  // タブクローズ・ページリロード・ブラウザバック時のクリーンアップ
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      // 登録が成功していない場合のみ、新規追加されたエビデンスを削除
+      if (!isRegistrationSuccessful.current) {
+        // 新規入力データから新規追加されたエビデンスを収集
+        initialTestCaseData.forEach((item) => {
+          const key = `new_${item.test_case_no}`;
+          const initialIds = initialEvidenceIds.current.get(key) || new Set<number>();
+
+          item.evidence?.forEach((file) => {
+            // 新規追加されたエビデンスのみを削除
+            if (file.fileNo !== undefined && !initialIds.has(file.fileNo)) {
+              fetch('/api/files/evidences', {
+                method: 'DELETE',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  testGroupId: groupId,
+                  tid: tid,
+                  testCaseNo: item.test_case_no,
+                  historyCount: item.historyCount ?? 0,
+                  fileNo: file.fileNo,
+                }),
+                keepalive: true,
+              }).catch(() => {
+                // エラーは無視（ページがアンロードされるため）
+              });
+            }
+          });
+        });
+
+        // 履歴データから新規追加されたエビデンスを収集
+        pastTestCaseData.forEach((historyData, historyIndex) => {
+          historyData.forEach((item) => {
+            const key = `history_${historyIndex + 1}_${item.test_case_no}`;
+            const initialIds = initialEvidenceIds.current.get(key) || new Set<number>();
+
+            item.evidence?.forEach((file) => {
+              // 新規追加されたエビデンスのみを削除
+              if (file.fileNo !== undefined && !initialIds.has(file.fileNo)) {
+                fetch('/api/files/evidences', {
+                  method: 'DELETE',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    testGroupId: groupId,
+                    tid: tid,
+                    testCaseNo: item.test_case_no,
+                    historyCount: historyIndex + 1,
+                    fileNo: file.fileNo,
+                  }),
+                  keepalive: true,
+                }).catch(() => {
+                  // エラーは無視（ページがアンロードされるため）
+                });
+              }
+            });
+          });
+        });
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [initialTestCaseData, pastTestCaseData, groupId, tid]);
+
   const handleShowTestTable = () => {
     setShowNewTestCaseConduct(true);
     setButtonDisabled(true);
@@ -263,7 +377,7 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
     setIsLoading(true);
     // API呼び出し
     try {
-      // Method A: 削除予定のエビデンスを収集して物理削除
+      // 削除予定のエビデンスを収集して物理削除
       const deletedEvidences: Array<{
         file: FileInfo;
         testCaseNo: number;
@@ -306,24 +420,24 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
 
         for (const { file, testCaseNo, historyCount } of deletedEvidences) {
           try {
-            await apiDelete('/api/evidences', {
+            await apiDelete('/api/files/evidences', {
               testGroupId: groupId,
               tid: tid,
               testCaseNo: testCaseNo,
               historyCount: historyCount,
-              evidenceNo: file.fileNo,
+              fileNo: file.fileNo,
             });
             clientLogger.info('テスト結果登録画面', 'エビデンス削除成功', {
               testCaseNo,
               historyCount,
-              evidenceNo: file.fileNo,
+              fileNo: file.fileNo,
             });
           } catch (deleteError) {
             clientLogger.error('テスト結果登録画面', 'エビデンス削除失敗', {
               error: deleteError,
               testCaseNo,
               historyCount,
-              evidenceNo: file.fileNo,
+              fileNo: file.fileNo,
             });
             // エビデンス削除失敗は警告のみで続行
           }
@@ -386,6 +500,8 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
       const response = await apiPost<any>(`/api/test-groups/${groupId}/cases/${tid}/results`, combinedFormData);
 
       if (response.success) {
+        // 登録成功フラグを設定（タブクローズ時のクリーンアップをスキップ）
+        isRegistrationSuccessful.current = true;
         clientLogger.info('テスト結果登録画面', 'テスト結果登録成功', { tid: tid });
         setModalMessage('テスト結果を登録しました');
         setIsModalOpen(true);

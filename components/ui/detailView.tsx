@@ -1,5 +1,6 @@
 import { Modal } from '@/components/ui/modal';
 import clientLogger from '@/utils/client-logger';
+import { isImage } from '@/utils/fileUtils';
 import { cn } from '@/utils/utils';
 import * as React from 'react';
 import { useEffect, useState } from 'react';
@@ -84,10 +85,6 @@ const DetailView: React.FC<DetailViewProps> = ({ labels, values, isFull = false 
   const handleImageClick = (imageSrc: string) => {
     setModalImage(imageSrc);
     setModalOpen(true);
-  };
-
-  const isImage = (src: string) => {
-    return /\.(jpeg|jpg|png|gif|bmp|webp)$/i.test(src);
   };
 
   // 画像のURLを取得（S3署名付きURLまたはローカルパス）

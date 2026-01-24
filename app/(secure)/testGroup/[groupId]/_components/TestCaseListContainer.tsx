@@ -2,7 +2,6 @@
 
 import { Column } from '@/components/datagrid/DataGrid';
 import { Button } from '@/components/ui/button';
-import ImportButton from '@/components/ui/importButton';
 import Loading from '@/components/ui/loading';
 import { Modal } from '@/components/ui/modal';
 import SeachForm from '@/components/ui/searchForm';
@@ -183,7 +182,7 @@ export function TestCaseListContainer() {
       if (result.success) {
         clientLogger.info('テストケース一覧画面', 'テストケース削除成功', { tid: selectedTestCase.tid });
         // テストケース一覧再描画
-        const queryString = buildQueryString(searchParams, 1, pageSize);
+        const queryString = buildQueryString(searchParams, page, pageSize);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const newList = await apiGet<any>(`/api/test-groups/${testGroupId}/cases?/${queryString}`);
         const count = newList.totalCount || (newList.data ? newList.data.length : 0);
@@ -315,6 +314,12 @@ export function TestCaseListContainer() {
     router.push(`${pathName}/regist`);
   };
 
+  // ユーザインポート実施画面遷移
+  const toTestImportPage = () => {
+    clientLogger.info('テストケース一覧画面', 'インポートボタン押下');
+    router.push(`/testGroup/${testGroupId}/testCase/testImportExecute`);
+  };
+
   return (
     <div>
       {/* テストケース一覧データ読み込み中の表示 */}
@@ -329,9 +334,11 @@ export function TestCaseListContainer() {
             <Button onClick={handleAddTestCase} disabled={!canEdit}>
               テストケース新規登録
             </Button>
-            <ImportButton
-              type={'test'}
-              disabled={!canEdit} />
+            <Button
+              onClick={() => toTestImportPage()}
+            >
+              インポート
+            </Button>
           </div>
           {sortedItems.length > 0 ? (
             <TestCaseList

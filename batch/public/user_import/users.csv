@@ -1,0 +1,8 @@
+﻿id,email,name,password,department,company,user_role,タグ,ステータス
+1,admin@example.com,管理者A,,QA Management,Test Company Inc.,0,Security Testing;Performance Testing,0
+2,manager@example.com,設計者A,,Test Management,Test Company Inc.,1,Performance Testing;Integration Testing,0
+3,tester1@example.com,試験者A,,QA Engineering,Test Company Inc.,2,Integration Testing;User Acceptance Testing,0
+4,tester2@example.com,試験者B,,QA Engineering,Test Company Inc.,2,,1
+5,tester3@example.com,バッチテスト,B@tchTest123,QA Engineering,Test Company Inc.,2,,0
+6,tester4@example.com,バッチテスト,B@tchTest123,QA Engineering,Test Company Inc.,2,,0
+,tester5@example.com,S3テスト,B@tchTest123,QA Engineering,Test Company Inc.,2,,0

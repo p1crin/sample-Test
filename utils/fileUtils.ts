@@ -108,3 +108,12 @@ export const processClipboardItems = async (items: DataTransferItemList): Promis
 
   return files.filter(Boolean) as FileInfo[];
 };
+
+/**
+ * ファイルが画像か否か判定する関数
+ * @param src ファイルパス
+ * @returns 画像なら`true`
+ */
+export const isImage = (src: string) => {
+  return /\.(jpeg|jpg|png|gif|bmp|webp)$/i.test(src);
+};

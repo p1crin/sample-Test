@@ -6,10 +6,7 @@ import { Prisma } from '@/generated/prisma/client';
 import { TestCase } from "@/types";
 import { logAPIEndpoint, logDatabaseQuery, QueryTimer } from "@/utils/database-logger";
 import { handleError } from "@/utils/errorHandler";
-import { existsSync } from 'fs';
-import { mkdir, writeFile } from 'fs/promises';
 import { NextRequest, NextResponse } from "next/server";
-import { join } from 'path';
 
 interface RouteParams {
   params: Promise<{ groupId: string }>;
@@ -101,10 +98,10 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
     const dataQuery = Prisma.sql`
       SELECT ttc.test_group_id, ttc.tid, ttc.first_layer, ttc.second_layer, ttc.third_layer, ttc.fourth_layer,
         ttc.purpose, ttc.request_id, ttc.check_items, ttc.test_procedure, ttc.created_at, ttc.updated_at,
-        SUM(CASE WHEN (tc.test_group_id IS NOT NULL AND tr.judgment IS NULL) OR tr.judgment = '未着手' THEN 1 ELSE 0 END):: INTEGER AS not_started_items,
+        SUM(CASE WHEN (tc.test_group_id IS NOT NULL AND tr.judgment IS NULL AND tc.is_target = true) OR (tr.judgment = '未着手' AND tc.is_target = true) THEN 1 ELSE 0 END):: INTEGER AS not_started_items,
         SUM(CASE WHEN tr.judgment IN('OK', '参照OK') THEN 1 ELSE 0 END):: INTEGER AS ok_items,
         SUM(CASE WHEN tr.judgment = 'NG' THEN 1 ELSE 0 END):: INTEGER AS ng_items,
-        SUM(CASE WHEN tr.judgment = '対象外' THEN 1 ELSE 0 END):: INTEGER AS excluded_items
+        SUM(CASE WHEN tr.judgment = '対象外' OR tc.is_target = false THEN 1 ELSE 0 END):: INTEGER AS excluded_items
       FROM tt_test_cases ttc
       LEFT JOIN tt_test_contents tc
         ON ttc.test_group_id = tc.test_group_id
@@ -185,47 +182,21 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   try {
     // 認証チェック
     const user = await requireAuth(req);
-    // FormData をパース
-    const formData = await req.formData();
-    const tid = formData.get('tid') as string;
-    const firstLayer = formData.get('first_layer') as string;
-    const secondLayer = formData.get('second_layer') as string;
-    const thirdLayer = formData.get('third_layer') as string;
-    const fourthLayer = formData.get('fourth_layer') as string;
-    const purpose = formData.get('purpose') as string;
-    const requestId = formData.get('request_id') as string;
-    const checkItems = formData.get('checkItems') as string;
-    const testProcedure = formData.get('testProcedure') as string;
-    const testContentsStr = formData.get('testContents') as string;
 
-    const testContents = testContentsStr ? JSON.parse(testContentsStr) : [];
-
-    // FileInfo 配列をパース（controlSpecFile と dataFlowFile）
-    interface FileInfo {
-      name: string;
-      id: string;
-      base64?: string;
-      type?: string;
-    }
-
-    const controlSpecFiles: FileInfo[] = [];
-    const dataFlowFiles: FileInfo[] = [];
-
-    // controlSpecFile[0], controlSpecFile[1], ... をパース
-    let controlSpecIndex = 0;
-    while (formData.has(`controlSpecFile[${controlSpecIndex}]`)) {
-      const fileStr = formData.get(`controlSpecFile[${controlSpecIndex}]`) as string;
-      controlSpecFiles.push(JSON.parse(fileStr));
-      controlSpecIndex++;
-    }
-
-    // dataFlowFile[0], dataFlowFile[1], ... をパース
-    let dataFlowIndex = 0;
-    while (formData.has(`dataFlowFile[${dataFlowIndex}]`)) {
-      const fileStr = formData.get(`dataFlowFile[${dataFlowIndex}]`) as string;
-      dataFlowFiles.push(JSON.parse(fileStr));
-      dataFlowIndex++;
-    }
+    // JSON形式でリクエストボディを受け取る（編集画面と同じ形式）
+    const body = await req.json();
+    const {
+      tid,
+      first_layer: firstLayer,
+      second_layer: secondLayer,
+      third_layer: thirdLayer,
+      fourth_layer: fourthLayer,
+      purpose,
+      request_id: requestId,
+      checkItems,
+      testProcedure,
+      testContents = [],
+    } = body;
 
     // TIDの重複チェック
     const existingTestCase = await prisma.tt_test_cases.findUnique({
@@ -273,60 +244,6 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         },
       });
 
-      // ファイル保存処理
-      const uploadDir = join(process.cwd(), 'public', 'uploads', 'test-cases', String(testGroupId), tid);
-
-      // ディレクトリが存在しない場合は作成
-      if (!existsSync(uploadDir)) {
-        await mkdir(uploadDir, { recursive: true });
-      }
-
-      // 制御仕様書ファイル保存
-      for (let i = 0; i < controlSpecFiles.length; i++) {
-        const fileInfo = controlSpecFiles[i];
-        if (fileInfo.base64) {
-          const controlSpecFileName = `control_spec_${Date.now()}_${i}_${fileInfo.name}`;
-          const controlSpecPath = join(uploadDir, controlSpecFileName);
-          const buffer = Buffer.from(fileInfo.base64, 'base64');
-          await writeFile(controlSpecPath, buffer);
-
-          // tt_test_case_files に記録（type=0: 制御仕様書）
-          await tx.tt_test_case_files.create({
-            data: {
-              test_group_id: testGroupId,
-              tid,
-              file_type: 0,
-              file_no: i + 1,
-              file_name: fileInfo.name,
-              file_path: `/uploads/test-cases/${groupId}/${tid}/${controlSpecFileName}`,
-            },
-          });
-        }
-      }
-
-      // データフローファイル保存
-      for (let i = 0; i < dataFlowFiles.length; i++) {
-        const fileInfo = dataFlowFiles[i];
-        if (fileInfo.base64) {
-          const dataFlowFileName = `data_flow_${Date.now()}_${i}_${fileInfo.name}`;
-          const dataFlowPath = join(uploadDir, dataFlowFileName);
-          const buffer = Buffer.from(fileInfo.base64, 'base64');
-          await writeFile(dataFlowPath, buffer);
-
-          // tt_test_case_files に記録（type=1: データフロー）
-          await tx.tt_test_case_files.create({
-            data: {
-              test_group_id: testGroupId,
-              tid,
-              file_type: 1,
-              file_no: i + 1,
-              file_name: fileInfo.name,
-              file_path: `/uploads/test-cases/${groupId}/${tid}/${dataFlowFileName}`,
-            },
-          });
-        }
-      }
-
       // tt_test_contents に登録（テストケースと期待値が両方入力されているもののみ）
       if (testContents && testContents.length > 0) {
         let testCaseNo = 1;
@@ -341,7 +258,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
                 test_case_no: testCaseNo,
                 test_case: tc.testCase,
                 expected_value: tc.expectedValue,
-                is_target: !tc.excluded,
+                is_target: tc.is_target,
               },
             });
             testCaseNo++;

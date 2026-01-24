@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Modal } from '../ui/modal';
 import { Column } from './DataGrid';
 import clientLogger from '@/utils/client-logger';
-import { FileInfo } from '@/utils/fileUtils';
+import { FileInfo, isImage } from '@/utils/fileUtils';
 
 type TableCellContentProps<T> = {
   column: Column<T>;
@@ -63,14 +63,9 @@ const RenderFileLink = ({ file, index }: { file: string | FileInfo | null, index
     fetchFileUrl();
   }, [filePath]);
 
-  // 画像判定: fileTypeがある場合はそれを使用、なければ拡張子で判定
-  const isImage = fileType
-    ? fileType.startsWith('image/')
-    : /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(filePath);
-
   const handleClick = (e: { preventDefault: () => void; }) => {
     e.preventDefault();
-    if (isImage) {
+    if (isImage(filePath)) {
       setModalImage(fileUrl || filePath);
       setModalOpen(true);
     } else {

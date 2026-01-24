@@ -2,7 +2,6 @@
 import { Column } from '@/components/datagrid/DataGrid';
 import { Button } from '@/components/ui/button';
 import ExportButton from '@/components/ui/exportButton';
-import ImportButton from '@/components/ui/importButton';
 import Loading from '@/components/ui/loading';
 import { Modal } from '@/components/ui/modal';
 import SeachForm from '@/components/ui/searchForm';
@@ -206,8 +205,14 @@ export function UserListContainer() {
   const toUserEditPage = (id: number) => {
     router.push(`/user/${id}/edit`);
   };
+  // ユーザインポート実施画面遷移
+  const toUserImportPage = () => {
+    clientLogger.info('ユーザ一覧画面', 'インポートボタン押下');
+    router.push('user/userImportExecute');
+  };
 
   const userDelete = async () => {
+    clientLogger.info('ユーザ一覧画面', '削除ボタン押下');
     if (!selectedUser) {
       throw new Error('削除対象ユーザが見つかりません')
     }
@@ -411,7 +416,11 @@ export function UserListContainer() {
               ユーザ登録
             </Button>
             <ExportButton />
-            <ImportButton type={'user'} />
+            <Button
+              onClick={() => toUserImportPage()}
+            >
+              インポート
+            </Button>
           </div>
           {
             updatedItems.length > 0 ? (

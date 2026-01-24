@@ -1,6 +1,6 @@
 import { apiPost } from '@/utils/apiClient';
 import clientLogger from "@/utils/client-logger";
-import { FileInfo, getUniqueFileNames, processClipboardItems, processFileList } from '@/utils/fileUtils';
+import { FileInfo, getUniqueFileNames, isImage, processClipboardItems, processFileList } from '@/utils/fileUtils';
 import React, { useEffect, useRef, useState } from 'react';
 import { Button } from './button';
 
@@ -219,7 +219,7 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
               className="relative m-2 flex items-center justify-between border border-gray-300 p-2 rounded-sm"
               style={{ minHeight: '48px', maxHeight: '96px', width: '200px' }}
             >
-              {file.path && fileUrls[file.path] ? (
+              {file.path && fileUrls[file.path] && isImage(file.path) ? (
                 <img
                   src={fileUrls[file.path]}
                   alt={file.name}

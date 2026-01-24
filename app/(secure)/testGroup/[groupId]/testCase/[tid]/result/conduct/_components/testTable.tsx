@@ -2,14 +2,16 @@ import { TestCaseResultRow } from '@/app/(secure)/testGroup/[groupId]/testCase/[
 import { Column, DataGrid, SortConfig } from '@/components/datagrid/DataGrid';
 import { Button } from '@/components/ui/button';
 import { Modal } from '@/components/ui/modal';
-import { FileInfo, processClipboardItems, processFileList, getUniqueFileNames } from '@/utils/fileUtils';
 import { JUDGMENT_OPTIONS, JudgmentOption } from '@/constants/constants';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
 import clientLogger from '@/utils/client-logger';
+import { formatDateWithHyphen } from '@/utils/date-formatter';
+import { FileInfo, getUniqueFileNames, processClipboardItems, processFileList, isImage } from '@/utils/fileUtils';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+
 
 interface TestTableProps {
   groupId: number;
-  tid: string,
+  tid: string;
   data: TestCaseResultRow[];
   setData: React.Dispatch<React.SetStateAction<TestCaseResultRow[]>>;
   userName?: string;
@@ -123,7 +125,7 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
       formData.append('historyCount', String(historyCount));
 
       // FormDataの場合はfetchを直接使用（Content-Typeは自動設定される）
-      const fetchResponse = await fetch('/api/evidences', {
+      const fetchResponse = await fetch('/api/files/evidences', {
         method: 'POST',
         body: formData,
       });
@@ -138,17 +140,17 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
 
       if (response.success) {
         clientLogger.info('TestTable', 'エビデンスアップロード成功', {
-          evidenceNo: response.data.evidenceNo,
+          fileNo: response.data.fileNo,
           evidencePath: response.data.evidencePath,
           fileName: file.name,
           fileType: file.type
         });
 
-        // アップロード成功時、pathとevidenceNoを含むFileInfoを返す
+        // アップロード成功時、pathとfileNoを含むFileInfoを返す
         return {
           ...file,
           path: response.data.evidencePath,
-          fileNo: response.data.evidenceNo,
+          fileNo: response.data.fileNo,
         };
       } else {
         throw new Error(`エビデンスのアップロードに失敗しました: ${response.error || 'unknown error'}`);
@@ -175,6 +177,7 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
     // 各ファイルを順次アップロード
     let processedFiles = newFiles;
     if (newFiles.length > 0) {
+      updateRowData(rowIndex, 'uploading', true);
       try {
         processedFiles = [];
         for (const file of newFiles) {
@@ -184,6 +187,8 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
       } catch (error) {
         clientLogger.error('TestTable', 'ペーストしたファイルのアップロードに失敗しました', { error });
         return;
+      } finally {
+        updateRowData(rowIndex, 'uploading', false);
       }
     }
 
@@ -194,7 +199,7 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
       newData[rowIndex] = { ...newData[rowIndex], evidence: uniqueFiles };
       return newData;
     });
-  }, [setData, uploadEvidenceFile]);
+  }, [setData, uploadEvidenceFile, updateRowData]);
 
   // ファイル選択ハンドラー
   const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>, rowIndex: number) => {
@@ -206,6 +211,7 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
     // 各ファイルを順次アップロード
     let processedFiles = newFiles;
     if (newFiles.length > 0) {
+      updateRowData(rowIndex, 'uploading', true);
       try {
         processedFiles = [];
         for (const file of newFiles) {
@@ -215,6 +221,8 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
       } catch (error) {
         clientLogger.error('TestTable', '選択したファイルのアップロードに失敗しました', { error });
         return;
+      } finally {
+        updateRowData(rowIndex, 'uploading', false);
       }
     }
 
@@ -232,21 +240,22 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
     }
   }, [setData, uploadEvidenceFile]);
 
-  // ファイル削除ハンドラー（Method A: 削除リストに追加のみ）
+  // ファイル削除ハンドラー（削除リストに追加のみ）
   const handleFileDelete = useCallback((fileIndex: number, rowIndex: number) => {
     setData(prevData => {
       const newData = [...prevData];
-      const deletedFile = newData[rowIndex].evidence?.[fileIndex];
+      const deletedFile = newData[rowIndex]?.evidence?.[fileIndex];
 
-      if (newData[rowIndex].evidence) {
+      if (newData[rowIndex]?.evidence) {
         // エビデンス配列から削除
         newData[rowIndex] = {
           ...newData[rowIndex],
           evidence: newData[rowIndex].evidence!.filter((_, index) => index !== fileIndex)
         };
 
-        // Method A: pathがある場合は削除リストに追加（物理削除はsubmit時）
-        if (deletedFile && deletedFile.path) {
+        // fileNoがある場合は削除リストに追加（物理削除はsubmit時）
+        // fileNoがない場合はアップロード前のローカルファイルなので削除不要
+        if (deletedFile && deletedFile.fileNo !== undefined) {
           const deletedEvidences = newData[rowIndex].deletedEvidences || [];
           newData[rowIndex] = {
             ...newData[rowIndex],
@@ -420,7 +429,7 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
         return (
           <input
             type="date"
-            value={value || ''}
+            value={formatDateWithHyphen(value) || ''}
             onChange={(e) => updateRowData(rowIndex, 'executionDate', e.target.value)}
             className="border border-gray-300 rounded p-1 w-30"
             readOnly={isRowDisabled(row)}
@@ -474,19 +483,19 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
               <div className='flex space-x-2 items-center'>
                 <textarea
                   value=''
-                  placeholder={'ファイルを選択またはキャプチャーを貼り付けてください。'}
+                  placeholder={'エビデンスを選択/貼付'}
                   onPaste={(e) => !isReadOnly && handlePaste(e, rowIndex)}
                   className='flex-1 h-8 resize-none border border-gray-300 rounded px-2 py-1 text-sm'
                   readOnly
-                  disabled={isReadOnly}
+                  disabled={isReadOnly || row.uploading}
                 />
                 <Button
                   type="button"
                   onClick={() => fileInputRefs.current[rowIndex]?.click()}
                   className="whitespace-nowrap h-8 text-sm px-3"
-                  disabled={isReadOnly}
+                  disabled={isReadOnly || row.uploading}
                 >
-                  ファイルを選択
+                  {row.uploading ? 'アップロード中...' : 'ファイルを選択'}
                 </Button>
                 <input
                   type="file"
@@ -502,29 +511,26 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
               {row.evidence && row.evidence.length > 0 && (
                 <div className="flex flex-wrap gap-2">
                   {row.evidence.map((file, fileIndex) => {
-                    // 画像ファイルかどうかを判定
-                    const isImage = file.type?.startsWith('image/');
-
                     return (
                       <div
-                        key={file.id}
+                        key={`${rowIndex}-${fileIndex}`}
                         className="relative flex items-center justify-between border border-gray-300 p-2 rounded-sm bg-white"
-                        style={{ minHeight: '40px', maxWidth: '180px' }}
+                        style={{ minHeight: '40px', maxWidth: '300px' }}
                       >
-                        {file.path && isImage ? (
+                        {file.path && isImage(file.path) ? (
                           <img
                             src={file.path}
                             alt={file.name}
-                            className="object-contain h-8 max-w-[80px]"
+                            className="object-contain h-8 max-w-120"
                           />
-                        ) : file.base64 && isImage ? (
+                        ) : file.base64 && file.type?.startsWith('image/') ? (
                           <img
                             src={`data:${file.type};base64,${file.base64}`}
                             alt={file.name}
-                            className="object-contain h-8 max-w-[80px]"
+                            className="object-contain h-8 max-w-120"
                           />
                         ) : (
-                          <span className="text-xs truncate max-w-[120px]">{file.name}</span>
+                          <span className="text-xs truncate max-w-120">{file.name}</span>
                         )}
 
                         <button

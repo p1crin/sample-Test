@@ -12,116 +12,6 @@ import { ResultWithHistory, TestCaseResultRow, TestResultsData } from './types/t
 import { TestCaseDetailRow } from './types/testCase-detail-list-row';
 import { formatDateJST } from '@/utils/date-formatter';
 
-
-/**
- * 
-🔴 重大な問題
-1. Hooks Rulesの違反 - TestCaseConductContainer.tsx:57-59, 205
-
-if (!user) {
-  return;  // ← useEffectの前にreturnしている
-}
-useEffect(() => { ... }, [..., user]);  // ← Hooks Rulesに違反
-問題: Hooksは条件分岐の前に呼び出す必要があります。userが存在しない場合にreturnすると、useEffectが呼ばれないことがあります。
-
-修正案:
-
-
-useEffect(() => {
-  if (!user) return;
-  // 処理...
-}, [groupId, tid, user]);
-2. データ整合性の問題 - TestCaseConductContainer.tsx:177
-
-id: histItem.executor_id ?? Math.random(), // 0以上1未満の小数を振る
-問題: Math.random()は一意性を保証しません。衝突の可能性があります。
-
-修正案:
-
-
-id: histItem.executor_id ?? -Date.now(), // 負の値で区別
-// または
-id: histItem.executor_id ?? `temp-${Math.random()}`, // 文字列として区別
-3. 複雑な状態更新ロジック - TestCaseConductContainer.tsx:381-389
-
-setData={(newData) => setPastTestCaseData(prevState => {
-  const newState = [...prevState];
-  if (typeof newData === 'function') {
-    newState[pastTestCaseData.length - 1 - index] = newData(newState[...]);
-  } else {
-    newState[pastTestCaseData.length - 1 - index] = newData;
-  }
-  return newState;
-})}
-問題: クロージャ内でpastTestCaseDataを参照しているため、stale closureの問題が発生する可能性があります。
-
-修正案: インデックスを直接渡す専用のハンドラーを作成する
-
-🟡 重要な問題
-4. パフォーマンスの問題 - testTable.tsx
-
-newData[data.indexOf(row)].result = e.target.value;
-問題: data.indexOf(row)が各セルの変更で呼ばれます（O(n)）。行数が多いと遅くなります。
-
-修正案: 行にindexを持たせるか、useCallbackでメモ化する
-
-5. 型安全性の欠如 - TestCaseConductContainer.tsx:64, 91, 115, 276
-
-const result = await apiGet<any>(`/api/...`);
-問題: any型が多用されており、型チェックが効きません。
-
-修正案: 適切な型定義を作成して使用する
-
-6. 非同期処理の最適化 - TestCaseConductContainer.tsx:202-204
-
-fetchExecutors();
-fetchTestCaseDetail();
-fetchTestResults();
-問題: 3つの関数が順次実行されます。fetchExecutorsとfetchTestCaseDetailは並列実行可能です。
-
-修正案:
-
-
-await Promise.all([fetchExecutors(), fetchTestCaseDetail()]);
-await fetchTestResults(); // これだけは後で実行
-7. 重複した条件式 - testTable.tsx
-
-row.judgment === JUDGMENT_OPTIONS.EXCLUDED || row.is_target === false
-問題: この条件が20箇所以上で繰り返されています。
-
-修正案:
-
-
-const isRowDisabled = (row: TestCaseResultRow) => 
-  row.judgment === JUDGMENT_OPTIONS.EXCLUDED || row.is_target === false;
-🟢 軽微な問題
-8. デバッグコードの残留 - page.tsx:40
-
-console.log(error)
-修正案: clientLoggerを使用するか削除する
-
-9. スペルミス - TestCaseConductContainer.tsx:141
-
-const hisitoryData = ...  // ← "history"のスペルミス
-10. セミコロンの欠落 - TestCaseConduct.tsx:41
-
-dataFlow: values.dataFlow.map(flow => flow.file_path),
-}  // ← セミコロンがない
-11. エラーハンドリングの不統一
-loadErrorとapiErrorの両方を使っているが、使い分けが不明確
-エラーメッセージの文字列マッチングに依存（脆弱）
-12. 未使用のインポート - testTable.tsx:5
-
-import { FileInfo, generateUniqueId } from '@/utils/fileUtils';
-// FileInfoは未使用
-📊 全体的な改善提案
-状態管理の簡素化: 履歴データの扱いが複雑すぎます。データ構造を見直すことを推奨します
-型定義の整備: API レスポンスの型を定義してanyを排除
-エラーハンドリングの統一: エラー処理を一貫した方法で実装
-パフォーマンス最適化: useMemo/useCallbackの活用、不要な再レンダリングの削減
-テストの追加: 複雑なロジック（履歴のグルーピング、ファイル名の重複処理など）にユニットテストを追加
-特に優先的に対応すべきは🔴 重大な問題の1-3です。これらはバグやデータ破損につながる可能性があります。
- */
 // 判定のバリデーションを行うための型ガード
 const isValidJudgment = (value: unknown): value is JudgmentOption => {
   return typeof value === 'string' && Object.values(JUDGMENT_OPTIONS).includes(value as JudgmentOption);
@@ -228,7 +118,7 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
   }, [groupId, tid]);
 
   const handleCancel = () => {
-    router.back();
+    router.push(`/testGroup/${groupId}/testCase/`);
   };
 
   const handleShowTestTable = () => {
@@ -379,6 +269,7 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
                     executionDate: formatDateJST((getResultValue(result, 'executionDate')) as string) || '',
                     executor: (getResultValue(result, 'executor') as string) || '',
                     evidence: evidence,
+                    is_target: (getResultValue(result, 'is_target') as boolean) || false,
                     note: (getResultValue(result, 'note') as string) || '',
                   };
                 });
