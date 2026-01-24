@@ -360,11 +360,19 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
                       : JUDGMENT_OPTIONS.UNTOUCHED;
                   const evidenceValue = getResultValue(result, 'evidence');
                   // evidenceは配列またはnullとして扱う
-                  const evidence = Array.isArray(evidenceValue)
-                    ? evidenceValue
-                    : evidenceValue
-                      ? [evidenceValue as string]
-                      : null;
+                  let evidence: string[] | null = null;
+                  if (Array.isArray(evidenceValue)) {
+                    // オブジェクト配列の場合（{ path, evidenceNo, name }）、pathを抽出
+                    if (evidenceValue.length > 0 && typeof evidenceValue[0] === 'object' && evidenceValue[0] !== null && 'path' in evidenceValue[0]) {
+                      evidence = evidenceValue.map((e: any) => e.path as string);
+                    } else {
+                      // 文字列配列の場合はそのまま使用
+                      evidence = evidenceValue as string[];
+                    }
+                  } else if (evidenceValue) {
+                    // 文字列の場合は配列に変換
+                    evidence = [evidenceValue as string];
+                  }
 
                   return {
                     historyCount: historyCount,

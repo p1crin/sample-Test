@@ -245,8 +245,9 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
           evidence: newData[rowIndex].evidence!.filter((_, index) => index !== fileIndex)
         };
 
-        // Method A: pathがある場合は削除リストに追加（物理削除はsubmit時）
-        if (deletedFile && deletedFile.path) {
+        // Method A: fileNoがある場合は削除リストに追加（物理削除はsubmit時）
+        // fileNoがない場合はアップロード前のローカルファイルなので削除不要
+        if (deletedFile && deletedFile.fileNo !== undefined) {
           const deletedEvidences = newData[rowIndex].deletedEvidences || [];
           newData[rowIndex] = {
             ...newData[rowIndex],
@@ -507,7 +508,7 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
 
                     return (
                       <div
-                        key={file.id}
+                        key={`${rowIndex}-${fileIndex}`}
                         className="relative flex items-center justify-between border border-gray-300 p-2 rounded-sm bg-white"
                         style={{ minHeight: '40px', maxWidth: '180px' }}
                       >
