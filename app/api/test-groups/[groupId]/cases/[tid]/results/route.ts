@@ -7,6 +7,83 @@ import { ERROR_MESSAGES } from '@/constants/errorMessages';
 import { STATUS_CODES } from '@/constants/statusCodes';
 import { JUDGMENT_OPTIONS } from '@/constants/constants';
 
+// エビデンス詳細情報の型
+type EvidenceDetail = {
+  path: string;
+  fileNo: number;
+  name: string;
+};
+
+// テスト内容の型
+type TestContent = {
+  test_group_id: number;
+  tid: string;
+  test_case_no: number;
+  test_case: string | null;
+  expected_value: string | null;
+  is_target: boolean;
+};
+
+// テストエビデンスの型
+type TestEvidence = {
+  test_group_id: number;
+  tid: string;
+  test_case_no: number;
+  history_count: number;
+  evidence_no: number;
+  evidence_name: string | null;
+  evidence_path: string | null;
+};
+
+// テスト結果の型
+type TestResult = {
+  test_group_id: number;
+  tid: string;
+  test_case_no: number;
+  result: string | null;
+  judgment: string | null;
+  software_version: string | null;
+  hardware_version: string | null;
+  comparator_version: string | null;
+  execution_date: Date | null;
+  executor: string | null;
+  note: string | null;
+};
+
+// テスト結果履歴の型
+type TestResultHistory = TestResult & {
+  history_count: number;
+};
+
+// 履歴レコードの拡張型
+type HistoryWithDetails = TestResultHistory & {
+  test_case: string | null;
+  expected_value: string | null;
+  is_target: boolean;
+  evidence: EvidenceDetail[];
+};
+
+// グループ化された結果の型
+type GroupedResult = {
+  latestValidResult: {
+    test_case_no: number;
+    test_case: string | null;
+    expected_value: string | null;
+    is_target: boolean;
+    result: string | null;
+    judgment: string | null;
+    software_version: string | null;
+    hardware_version: string | null;
+    comparator_version: string | null;
+    execution_date: Date | null;
+    executor: string | null;
+    note: string | null;
+    evidence: EvidenceDetail[];
+  };
+  allHistory: HistoryWithDetails[];
+  historyCounts: number[];
+};
+
 // GET /api/test-groups/[groupId]/cases/[tid]/results - テスト結果リストを取得
 export async function GET(
   req: NextRequest,
@@ -117,12 +194,10 @@ export async function GET(
     });
 
     // test_case_noごとのテスト内容のマップを作成
-    const testContentsMap = testContents.reduce((acc: Record<string, unknown>, content: unknown) => {
-      const c = content as Record<string, unknown>;
-      const key = c.test_case_no as string | number;
-      acc[key] = c;
-      return acc;
-    }, {});
+    const testContentsMap: Record<number, TestContent> = {};
+    for (const content of testContents) {
+      testContentsMap[content.test_case_no] = content as TestContent;
+    }
 
     // 全てのtest_case_noとhistory_countsに対するエビデンスを取得
     const evidencesTimer = new QueryTimer();
@@ -148,92 +223,70 @@ export async function GET(
     });
 
     // test_case_noごとにエビデンスをグループ化
-    const evidencesByKey: Record<string, unknown[]> = {};
-    evidences.forEach((evidence: unknown) => {
-      const e = evidence as Record<string, unknown>;
-      const key = e.test_case_no as string | number;
-      if (!evidencesByKey[key]) {
-        evidencesByKey[key] = [];
+    const evidencesByKey: Record<number, TestEvidence[]> = {};
+    for (const evidence of evidences) {
+      const e = evidence as TestEvidence;
+      if (!evidencesByKey[e.test_case_no]) {
+        evidencesByKey[e.test_case_no] = [];
       }
-      evidencesByKey[key].push(evidence);
-    });
-
-    // test_case_noごとに履歴をグループ化
-    const historyByTestCase: Record<string | number, unknown[]> = {};
-    history.forEach((h: unknown) => {
-      const historyRecord = h as Record<string, unknown>;
-      const key = historyRecord.test_case_no as string | number;
-      if (!historyByTestCase[key]) {
-        historyByTestCase[key] = [];
-      }
-      historyByTestCase[key].push(historyRecord);
-    });
-
-    // 履歴付きのグループ化された結果を構築
-    interface ResultWithHistory {
-      latestValidResult: Record<string, unknown>;
-      allHistory: Record<string, unknown>[];
-      historyCounts: number[];
+      evidencesByKey[e.test_case_no].push(e);
     }
 
-    const groupedResults: Record<string, ResultWithHistory> = {};
+    // test_case_noごとに履歴をグループ化
+    const historyByTestCase: Record<number, TestResultHistory[]> = {};
+    for (const h of history) {
+      const historyRecord = h as TestResultHistory;
+      if (!historyByTestCase[historyRecord.test_case_no]) {
+        historyByTestCase[historyRecord.test_case_no] = [];
+      }
+      historyByTestCase[historyRecord.test_case_no].push(historyRecord);
+    }
+
+    // 履歴付きのグループ化された結果を構築
+    const groupedResults: Record<number, GroupedResult> = {};
 
     // 現在の結果を処理
-    results.forEach((result: unknown) => {
-      const r = result as Record<string, unknown>;
-      const key = r.test_case_no as string | number;
+    for (const result of results) {
+      const r = result as TestResult;
+      const key = r.test_case_no;
 
       if (!groupedResults[key]) {
         // このテストケースのテスト内容を取得
-        const testContent = (testContentsMap[key] || {}) as Record<string, unknown>;
+        const testContent = testContentsMap[key] || { test_case: null, expected_value: null, is_target: true };
 
         // このテストケースの履歴を取得（ある場合）
-        const testCaseHistory = (historyByTestCase[key] || []) as Record<string, unknown>[];
+        const testCaseHistory = historyByTestCase[key] || [];
 
         // 結果履歴テーブルから最大のhistory_countを取得し、それに紐づくエビデンスを取得
-        let currentEvidences: unknown[] = [];
+        let currentEvidences: TestEvidence[] = [];
         if (testCaseHistory.length > 0) {
           // 結果履歴テーブルから最大のhistory_countを見つける
           const maxHistoryCount = Math.max(
-            ...testCaseHistory.map((h) => (h as Record<string, unknown>).history_count as number)
+            ...testCaseHistory.map((h) => h.history_count)
           );
           // その最大のhistory_countに紐づくエビデンスを取得
           currentEvidences = evidencesByKey[key]
-            ? evidencesByKey[key].filter(
-              (e) => ((e as Record<string, unknown>).history_count as number) === maxHistoryCount
-            )
+            ? evidencesByKey[key].filter((e) => e.history_count === maxHistoryCount)
             : [];
         }
 
-        const evidenceDetails = currentEvidences.map(e => ({
-          path: (e as Record<string, unknown>).evidence_path as string,
-          fileNo: (e as Record<string, unknown>).evidence_no as number,
-          name: (e as Record<string, unknown>).evidence_name as string,
+        const evidenceDetails: EvidenceDetail[] = currentEvidences.map(e => ({
+          path: e.evidence_path || '',
+          fileNo: e.evidence_no,
+          name: e.evidence_name || '',
         }));
 
-        // 結果にエビデンス詳細情報とテスト内容を追加
-        const resultWithDetails = {
-          ...r,
-          test_case: testContent.test_case || null,
-          expected_value: testContent.expected_value || null,
-          is_target: testContent.is_target,
-          evidence: evidenceDetails,
-        };
-
         // 履歴レコードにテスト内容とエビデンスパスを追加
-        const historyWithDetails = testCaseHistory.map((h) => {
-          const historyCount = (h as Record<string, unknown>).history_count as number;
+        const historyWithDetails: HistoryWithDetails[] = testCaseHistory.map((h) => {
           // 履歴アイテムに対して、このhistory_countに一致するエビデンスを全て取得
           const historyEvidences = evidencesByKey[key]
-            ? evidencesByKey[key].filter(
-              (e) => ((e as Record<string, unknown>).history_count as number) === historyCount
-            )
+            ? evidencesByKey[key].filter((e) => e.history_count === h.history_count)
             : [];
 
-          const historyEvidenceDetails = historyEvidences.map(e => ({
-            path: (e as Record<string, unknown>).evidence_path as string,
-            fileNo: (e as Record<string, unknown>).evidence_no as number,
-            name: (e as Record<string, unknown>).evidence_name as string,
+          const historyEvidenceDetails: EvidenceDetail[] = historyEvidences.map(e => ({
+            path: e.evidence_path || '',
+            fileNo: e.evidence_no,
+            name: e.evidence_name || '',
           }));
 
           return {
@@ -246,16 +299,50 @@ export async function GET(
         });
 
         // 最新データへのマージ
-        let latestValidResult: Record<string, unknown> = resultWithDetails;
+        type LatestResult = {
+          test_case_no: number;
+          result: string | null;
+          judgment: string | null;
+          software_version: string | null;
+          hardware_version: string | null;
+          comparator_version: string | null;
+          execution_date: Date | null;
+          executor: string | null;
+          note: string | null;
+          evidence: EvidenceDetail[];
+        };
+
+        let latestValidResult: LatestResult = {
+          test_case_no: r.test_case_no,
+          result: r.result,
+          judgment: r.judgment,
+          software_version: r.software_version,
+          hardware_version: r.hardware_version,
+          comparator_version: r.comparator_version,
+          execution_date: r.execution_date,
+          executor: r.executor,
+          note: r.note,
+          evidence: evidenceDetails,
+        };
 
         // 現在の結果が"再実施対象外"の場合、履歴から有効な結果を探す
-        const currentJudgment = (r.judgment as string) || '';
+        const currentJudgment = r.judgment || '';
         if (currentJudgment === '再実施対象外' && historyWithDetails.length > 0) {
-          for (let i = 0; i < historyWithDetails.length; i++) {
-            const histResult = historyWithDetails[i] as Record<string, unknown>;
-            const histJudgment = (histResult.judgment as string) || '';
+          for (const histResult of historyWithDetails) {
+            const histJudgment = histResult.judgment || '';
             if (histJudgment !== '再実施対象外') {
-              latestValidResult = histResult;
+              latestValidResult = {
+                test_case_no: histResult.test_case_no,
+                result: histResult.result,
+                judgment: histResult.judgment,
+                software_version: histResult.software_version,
+                hardware_version: histResult.hardware_version,
+                comparator_version: histResult.comparator_version,
+                execution_date: histResult.execution_date,
+                executor: histResult.executor,
+                note: histResult.note,
+                evidence: histResult.evidence,
+              };
               break;
             }
           }
@@ -263,13 +350,9 @@ export async function GET(
         }
 
         // 履歴をhistory_countの昇順でソート（表示順序のために最も古いものを最初に、最新のものを最後に）
-        const sortedHistory = [...historyWithDetails].sort((a, b) => {
-          const countA = (a as Record<string, unknown>).history_count as number;
-          const countB = (b as Record<string, unknown>).history_count as number;
-          return countA - countB;
-        });
+        const sortedHistory = [...historyWithDetails].sort((a, b) => a.history_count - b.history_count);
 
-        const historyCounts = sortedHistory.map((h) => (h as Record<string, unknown>).history_count as number);
+        const historyCounts = sortedHistory.map((h) => h.history_count);
 
         groupedResults[key] = {
           latestValidResult: {
@@ -277,28 +360,27 @@ export async function GET(
             test_case: testContent.test_case || null,
             expected_value: testContent.expected_value || null,
             is_target: testContent.is_target,
-            result: latestValidResult.result || null,
-            judgment: latestValidResult.judgment || null,
-            software_version: latestValidResult.software_version || null,
-            hardware_version: latestValidResult.hardware_version || null,
-            comparator_version: latestValidResult.comparator_version || null,
-            execution_date: latestValidResult.execution_date || null,
-            executor: latestValidResult.executor || null,
-            note: latestValidResult.note || null,
+            result: latestValidResult.result,
+            judgment: latestValidResult.judgment,
+            software_version: latestValidResult.software_version,
+            hardware_version: latestValidResult.hardware_version,
+            comparator_version: latestValidResult.comparator_version,
+            execution_date: latestValidResult.execution_date,
+            executor: latestValidResult.executor,
+            note: latestValidResult.note,
             evidence: evidenceDetails, // 常に最新のエビデンス詳細情報を使用
           },
           allHistory: sortedHistory,
           historyCounts,
         };
       }
-    });
+    }
 
     // test_contentにデータがあり、他のテーブルにデータがない場合の処理
-    testContents.forEach((content: unknown) => {
-      const c = content as Record<string, unknown>;
-      const key = c.test_case_no as string | number;
-      if (!groupedResults[key]) {
-        groupedResults[key] = {
+    for (const content of testContents) {
+      const c = content as TestContent;
+      if (!groupedResults[c.test_case_no]) {
+        groupedResults[c.test_case_no] = {
           latestValidResult: {
             test_case_no: c.test_case_no,
             test_case: c.test_case || null,
@@ -318,7 +400,7 @@ export async function GET(
           historyCounts: [],
         };
       }
-    });
+    }
 
     logAPIEndpoint({
       method: 'GET',

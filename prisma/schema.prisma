@@ -128,7 +128,6 @@ model tt_test_evidences {
   created_at              DateTime                @default(now()) @db.Timestamp(6)
   updated_at              DateTime                @default(now()) @updatedAt @db.Timestamp(6)
   is_deleted              Boolean                 @default(false)
-  tt_test_results_history tt_test_results_history @relation(fields: [test_group_id, tid, test_case_no, history_count], references: [test_group_id, tid, test_case_no, history_count], onDelete: Cascade, onUpdate: NoAction)
 
   @@id([test_group_id, tid, test_case_no, history_count, evidence_no])
 }
@@ -207,7 +206,6 @@ model tt_test_results_history {
   created_at         DateTime            @default(now()) @db.Timestamp(6)
   updated_at         DateTime            @default(now()) @updatedAt @db.Timestamp(6)
   is_deleted         Boolean             @default(false)
-  tt_test_evidences  tt_test_evidences[]
   tt_test_contents   tt_test_contents    @relation(fields: [test_group_id, tid, test_case_no], references: [test_group_id, tid, test_case_no], onDelete: Cascade, onUpdate: NoAction)
 
   @@id([test_group_id, tid, test_case_no, history_count])

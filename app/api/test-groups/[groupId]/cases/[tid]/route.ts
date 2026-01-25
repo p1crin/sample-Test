@@ -320,6 +320,14 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ grou
             test_case: content.testCase || null,
             expected_value: content.expectedValue || null,
             is_target: content.is_target || null,
+            tt_test_cases: {
+              connect: {
+                test_group_id_tid: {
+                  test_group_id: testGroupId,
+                  tid: tid
+                }
+              }
+            }
           }
         })
         testCaseNo++;

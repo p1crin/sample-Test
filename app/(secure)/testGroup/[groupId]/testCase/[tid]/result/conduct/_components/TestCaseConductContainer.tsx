@@ -7,7 +7,7 @@ import { apiGet, apiPost, apiDelete } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { TestCaseDetailRow } from '../../_components/types/testCase-detail-list-row';
 import { TestCaseResultRow, TestResultsData } from '../../_components/types/testCase-result-list-row';
 import { TestCaseConduct } from './TestCaseConduct';
@@ -85,8 +85,12 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
 
   // 登録成功フラグ（タブクローズ時のクリーンアップ用）
   const isRegistrationSuccessful = useRef(false);
+  // ナビゲーション中フラグ（クライアントサイドナビゲーション時のクリーンアップ用）
+  const isNavigatingAway = useRef(false);
   // 初期エビデンスIDを記録（新規追加されたエビデンスのみを削除するため）
   const initialEvidenceIds = useRef<Map<string, Set<number>>>(new Map());
+  // 初期エビデンスID記録済みフラグ
+  const initialEvidenceIdsRecorded = useRef(false);
 
   const router = useRouter();
   const { data: session } = useSession();
@@ -181,6 +185,7 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
             test_case_no: histItem.test_case_no,
             test_case: histItem.test_case,
             expected_value: histItem.expected_value,
+            is_target: histItem.is_target,
             result: histItem.result || '',
             judgment: isValidJudgment(histItem.judgment) ? histItem.judgment : JUDGMENT_OPTIONS.EMPTY,
             softwareVersion: histItem.software_version || '',
@@ -200,11 +205,20 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
           }
           acc[historyCount].push(item);
           return acc;
-        }, [] as TestCaseResultRow[][]).filter(group => group.length > 0);
+        }, [] as TestCaseResultRow[][])
+          .filter(group => group.length > 0)
+          .map(group =>
+            // 各グループ内でindexを再設定
+            group.map((item, idx) => ({
+              ...item,
+              index: idx + 1
+            }))
+          );
 
-        // initialDataにhistoryCountを追加（履歴数+1）
-        const initialDataWithHistoryCount = initialData.map(item => ({
+        // initialDataにhistoryCountとindexを追加（履歴数+1）
+        const initialDataWithHistoryCount = initialData.map((item, idx) => ({
           ...item,
+          index: idx + 1,
           historyCount: groupedHistoryData.length + 1
         })) as TestCaseResultRow[];
         setPastTestCaseData(groupedHistoryData)
@@ -251,7 +265,14 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
   }, [groupId, tid, user]);
 
   // 初期エビデンスIDを記録（新規追加されたエビデンスのみを削除するため）
+  // 注意: 初回ロード時のみ記録し、その後の変更では更新しない
   useEffect(() => {
+    // 既に記録済みの場合はスキップ
+    if (initialEvidenceIdsRecorded.current) return;
+
+    // データがまだロードされていない場合はスキップ
+    if (initialTestCaseData.length === 0 && pastTestCaseData.length === 0) return;
+
     // 新規入力データのエビデンスIDを記録
     initialTestCaseData.forEach((item) => {
       const key = `new_${item.test_case_no}`;
@@ -281,79 +302,124 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
         initialEvidenceIds.current.set(key, evidenceIds);
       });
     });
+
+    // 記録済みフラグを立てる
+    initialEvidenceIdsRecorded.current = true;
+    clientLogger.info('テスト結果登録画面', '初期エビデンスID記録完了', {
+      keys: Array.from(initialEvidenceIds.current.keys()),
+      counts: Array.from(initialEvidenceIds.current.entries()).map(([k, v]) => ({ key: k, count: v.size }))
+    });
   }, [initialTestCaseData, pastTestCaseData]);
+
+  // 新規追加されたエビデンスを削除するクリーンアップ関数
+  const cleanupNewEvidences = useCallback(async (useKeepalive: boolean = false): Promise<void> => {
+    clientLogger.info('テスト結果登録画面', 'クリーンアップ開始', {
+      useKeepalive,
+      isRegistrationSuccessful: isRegistrationSuccessful.current,
+      initialEvidenceIdsRecorded: initialEvidenceIdsRecorded.current,
+    });
+
+    // 登録が成功している場合はクリーンアップ不要
+    if (isRegistrationSuccessful.current) {
+      clientLogger.info('テスト結果登録画面', 'クリーンアップスキップ（登録成功済み）');
+      return;
+    }
+
+    const deletePromises: Promise<void>[] = [];
+
+    const deleteEvidence = (testCaseNo: number, historyCount: number, fileNo: number): Promise<void> => {
+      return fetch('/api/files/evidences', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          testGroupId: groupId,
+          tid: tid,
+          testCaseNo: testCaseNo,
+          historyCount: historyCount,
+          fileNo: fileNo,
+        }),
+        keepalive: useKeepalive,
+      }).then(() => {
+        clientLogger.info('テスト結果登録画面', 'エビデンス削除成功', { testCaseNo, historyCount, fileNo });
+      }).catch((err) => {
+        if (!useKeepalive) {
+          clientLogger.error('テスト結果登録画面', 'エビデンス削除失敗', { error: err });
+        }
+        // keepaliveの場合はページがアンロードされるためエラーは無視
+      });
+    };
+
+    // 新規入力データから新規追加されたエビデンスを削除
+    initialTestCaseData.forEach((item) => {
+      const key = `new_${item.test_case_no}`;
+      const initialIds = initialEvidenceIds.current.get(key) || new Set<number>();
+
+      clientLogger.info('テスト結果登録画面', 'エビデンスチェック（新規）', {
+        key,
+        initialIds: Array.from(initialIds),
+        currentEvidence: item.evidence?.map(f => ({ fileNo: f.fileNo, name: f.name })) || [],
+      });
+
+      item.evidence?.forEach((file) => {
+        if (file.fileNo !== undefined && !initialIds.has(file.fileNo)) {
+          clientLogger.info('テスト結果登録画面', '削除対象エビデンス検出', {
+            testCaseNo: item.test_case_no,
+            historyCount: item.historyCount ?? 0,
+            fileNo: file.fileNo,
+            fileName: file.name,
+          });
+          deletePromises.push(deleteEvidence(item.test_case_no, item.historyCount ?? 0, file.fileNo));
+        }
+      });
+    });
+
+    // 履歴データから新規追加されたエビデンスを削除
+    pastTestCaseData.forEach((historyData, historyIndex) => {
+      historyData.forEach((item) => {
+        const key = `history_${historyIndex + 1}_${item.test_case_no}`;
+        const initialIds = initialEvidenceIds.current.get(key) || new Set<number>();
+
+        item.evidence?.forEach((file) => {
+          if (file.fileNo !== undefined && !initialIds.has(file.fileNo)) {
+            deletePromises.push(deleteEvidence(item.test_case_no, historyIndex + 1, file.fileNo));
+          }
+        });
+      });
+    });
+
+    clientLogger.info('テスト結果登録画面', 'クリーンアップ削除対象数', { count: deletePromises.length });
+
+    // すべての削除リクエストが完了するまで待機（keepaliveの場合は待機不要）
+    if (!useKeepalive && deletePromises.length > 0) {
+      await Promise.all(deletePromises);
+      clientLogger.info('テスト結果登録画面', 'クリーンアップ完了');
+    }
+  }, [initialTestCaseData, pastTestCaseData, groupId, tid]);
 
   // タブクローズ・ページリロード・ブラウザバック時のクリーンアップ
   useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      // 登録が成功していない場合のみ、新規追加されたエビデンスを削除
-      if (!isRegistrationSuccessful.current) {
-        // 新規入力データから新規追加されたエビデンスを収集
-        initialTestCaseData.forEach((item) => {
-          const key = `new_${item.test_case_no}`;
-          const initialIds = initialEvidenceIds.current.get(key) || new Set<number>();
+    const handleBeforeUnload = () => {
+      // keepalive: trueでリクエストを送信（ページアンロード後も継続）
+      cleanupNewEvidences(true);
+    };
 
-          item.evidence?.forEach((file) => {
-            // 新規追加されたエビデンスのみを削除
-            if (file.fileNo !== undefined && !initialIds.has(file.fileNo)) {
-              fetch('/api/files/evidences', {
-                method: 'DELETE',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  testGroupId: groupId,
-                  tid: tid,
-                  testCaseNo: item.test_case_no,
-                  historyCount: item.historyCount ?? 0,
-                  fileNo: file.fileNo,
-                }),
-                keepalive: true,
-              }).catch(() => {
-                // エラーは無視（ページがアンロードされるため）
-              });
-            }
-          });
-        });
-
-        // 履歴データから新規追加されたエビデンスを収集
-        pastTestCaseData.forEach((historyData, historyIndex) => {
-          historyData.forEach((item) => {
-            const key = `history_${historyIndex + 1}_${item.test_case_no}`;
-            const initialIds = initialEvidenceIds.current.get(key) || new Set<number>();
-
-            item.evidence?.forEach((file) => {
-              // 新規追加されたエビデンスのみを削除
-              if (file.fileNo !== undefined && !initialIds.has(file.fileNo)) {
-                fetch('/api/files/evidences', {
-                  method: 'DELETE',
-                  headers: {
-                    'Content-Type': 'application/json',
-                  },
-                  body: JSON.stringify({
-                    testGroupId: groupId,
-                    tid: tid,
-                    testCaseNo: item.test_case_no,
-                    historyCount: historyIndex + 1,
-                    fileNo: file.fileNo,
-                  }),
-                  keepalive: true,
-                }).catch(() => {
-                  // エラーは無視（ページがアンロードされるため）
-                });
-              }
-            });
-          });
-        });
-      }
+    // ブラウザの戻る/進むボタン対応
+    const handlePopState = () => {
+      isNavigatingAway.current = true;
+      // popstate時はすぐにクリーンアップを実行（keepalive: trueでリクエスト継続を保証）
+      cleanupNewEvidences(true);
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('popstate', handlePopState);
 
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('popstate', handlePopState);
     };
-  }, [initialTestCaseData, pastTestCaseData, groupId, tid]);
+  }, [cleanupNewEvidences]);
 
   const handleShowTestTable = () => {
     setShowNewTestCaseConduct(true);
@@ -521,7 +587,11 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
       setIsLoading(false);
     }
   };
-  const handleCancel = () => {
+  const handleCancel = async () => {
+    // ナビゲーションフラグを設定してクリーンアップを実行
+    isNavigatingAway.current = true;
+    // 削除完了を待ってからナビゲーション
+    await cleanupNewEvidences(false);
     router.back();
   };
 
