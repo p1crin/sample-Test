@@ -19,14 +19,11 @@ const RenderFileLink = ({ file, index }: { file: string | FileInfo | null, index
   const [modalImage, setModalImage] = useState<string | null>(null);
   const [fileUrl, setFileUrl] = useState<string>('');
 
-  if (!file) return null;
+  // FileInfo型の場合はpathプロパティを使用（Hooksの前に変数定義）
+  const filePath = file ? (typeof file === 'string' ? file : (file.path || file.name)) : '';
+  const fileName = file ? (typeof file === 'string' ? file.split('/').pop() : file.name) : '';
 
-  // FileInfo型の場合はpathプロパティを使用
-  const filePath = typeof file === 'string' ? file : (file.path || file.name);
-  const fileName = typeof file === 'string' ? file.split('/').pop() : file.name;
-  const fileType = typeof file === 'string' ? null : file.type;
-
-  // S3パスの場合に署名付きURLを取得
+  // S3パスの場合に署名付きURLを取得（すべてのHooksは条件分岐の前に配置）
   useEffect(() => {
     const fetchFileUrl = async () => {
       if (!filePath) return;
@@ -62,6 +59,9 @@ const RenderFileLink = ({ file, index }: { file: string | FileInfo | null, index
 
     fetchFileUrl();
   }, [filePath]);
+
+  // fileがnullの場合は早期return（Hooksの後に配置）
+  if (!file) return null;
 
   const handleClick = (e: { preventDefault: () => void; }) => {
     e.preventDefault();

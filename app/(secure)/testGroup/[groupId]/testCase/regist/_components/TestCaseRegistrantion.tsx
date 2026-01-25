@@ -307,7 +307,7 @@ const TestCaseRegistrantion: React.FC = () => {
           formDataObj.append('tid', formData.tid);
           formDataObj.append('fileType', String(type));
 
-          const response = await apiFetch('/api/files', {
+          const response = await apiFetch('/api/files/test-info', {
             method: 'POST',
             body: formDataObj,
           });

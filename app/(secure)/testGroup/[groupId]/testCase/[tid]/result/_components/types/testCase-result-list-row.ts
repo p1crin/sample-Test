@@ -3,6 +3,7 @@ import { FileInfo } from "@/utils/fileUtils";
 
 // 項目のエンティティ型
 export type TestCaseResultRow = {
+  index?: number; // 表示用の行番号
   checked?: boolean;
   test_case_no: number;
   test_case: string;
