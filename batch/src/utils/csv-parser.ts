@@ -1,5 +1,5 @@
-import { parse } from 'csv-parse/sync';
 import { UserCsvRow, ValidationResult, UserRole } from '../types/user-import.types';
+import { parseCsvBase, normalizeRowWithMapping } from './csv-parser-base';
 
 /**
  * 日本語ヘッダーから英語プロパティ名へのマッピング
@@ -18,50 +18,34 @@ const COLUMN_MAPPING: Record<string, keyof UserCsvRow> = {
 };
 
 /**
+ * UserCsvRowのデフォルト値
+ */
+const DEFAULT_USER_ROW: UserCsvRow = {
+  id: '',
+  name: '',
+  email: '',
+  user_role: '',
+  department: '',
+  company: '',
+  password: '',
+  tags: '',
+  status: '',
+};
+
+/**
  * CSVの行データを正規化する（日本語ヘッダー対応）
  */
 function normalizeRow(rawRow: Record<string, string>): UserCsvRow {
-  const normalized: Partial<UserCsvRow> = {};
-
-  for (const [key, value] of Object.entries(rawRow)) {
-    const mappedKey = COLUMN_MAPPING[key];
-    if (mappedKey) {
-      normalized[mappedKey] = value || '';
-    }
-  }
-
-  // 必須プロパティのデフォルト値設定
-  return {
-    id: normalized.id || '',
-    name: normalized.name || '',
-    email: normalized.email || '',
-    user_role: normalized.user_role || '',
-    department: normalized.department || '',
-    company: normalized.company || '',
-    password: normalized.password || '',
-    tags: normalized.tags || '',
-    status: normalized.status || '',
-  };
+  return normalizeRowWithMapping(rawRow, COLUMN_MAPPING, DEFAULT_USER_ROW);
 }
 
 /**
  * CSV文字列をパースする
  */
 export function parseCsv(csvContent: string): UserCsvRow[] {
-  try {
-    const records = parse(csvContent, {
-      columns: true,  // ヘッダー行を自動認識
-      skip_empty_lines: true,
-      trim: true,
-      bom: true, // BOM対応
-    }) as Record<string, string>[];
-
-    // 各行を正規化（日本語→英語プロパティ名に変換）
-    return records.map(rawRow => normalizeRow(rawRow));
-  } catch (error) {
-    console.error('CSVパースエラー:', error);
-    throw new Error(`CSVのパースに失敗しました: ${error instanceof Error ? error.message : String(error)}`);
-  }
+  const records = parseCsvBase(csvContent);
+  // 各行を正規化（日本語→英語プロパティ名に変換）
+  return records.map(rawRow => normalizeRow(rawRow));
 }
 
 /**
@@ -174,3 +158,6 @@ export function validateAllRows(rows: UserCsvRow[]): { valid: boolean; errors: s
     errors: allErrors,
   };
 }
+
+// 注: validateAllRowsGeneric を使った実装も可能ですが、
+// 既存の実装を維持してシンプルさを優先しています

@@ -1,9 +1,17 @@
 import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
-import { readCsvFromS3, writeResultToS3, writeImportResultCsv } from './utils/s3-client';
+import {
+  readCsvFromS3,
+  writeResultToS3,
+  writeImportResultCsv,
+  readCsvFromLocal,
+  writeResultToLocal,
+  writeImportResultCsvToLocal
+} from './utils/s3-client';
 import { parseCsv, validateAllRows, parseStatus } from './utils/csv-parser';
 import { hashPassword } from './utils/password-hash';
 import { UserCsvRow, UserImportResult, ImportSummary } from './types/user-import.types';
+import * as path from 'path';
 
 dotenv.config();
 
@@ -13,7 +21,17 @@ const prisma = new PrismaClient();
  * 環境変数の検証
  */
 function validateEnvironmentVariables(): void {
-  const required = ['INPUT_S3_BUCKET', 'INPUT_S3_KEY', 'OUTPUT_S3_BUCKET', 'DATABASE_URL'];
+  const storageMode = process.env.STORAGE_MODE || 's3';
+  let required: string[] = ['DATABASE_URL'];
+
+  if (storageMode === 's3') {
+    required.push('INPUT_S3_BUCKET', 'INPUT_S3_KEY', 'OUTPUT_S3_BUCKET');
+  } else if (storageMode === 'local') {
+    required.push('INPUT_FILE_PATH', 'OUTPUT_DIR_PATH');
+  } else {
+    throw new Error(`STORAGE_MODEは "s3" または "local" である必要があります（現在の値: ${storageMode}）`);
+  }
+
   const missing = required.filter(key => !process.env[key]);
 
   if (missing.length > 0) {
@@ -233,17 +251,36 @@ async function main(): Promise<void> {
     // 環境変数の検証
     validateEnvironmentVariables();
 
-    const inputBucket = process.env.INPUT_S3_BUCKET!;
-    const inputKey = process.env.INPUT_S3_KEY!;
-    const outputBucket = process.env.OUTPUT_S3_BUCKET!;
+    const storageMode = process.env.STORAGE_MODE || 's3';
     const executorName = process.env.EXECUTOR_NAME || 'system';
 
-    console.log(`入力: s3://${inputBucket}/${inputKey}`);
+    let inputSource: string;
+    let outputLocation: string;
+
+    if (storageMode === 's3') {
+      const inputBucket = process.env.INPUT_S3_BUCKET!;
+      const inputKey = process.env.INPUT_S3_KEY!;
+      const outputBucket = process.env.OUTPUT_S3_BUCKET!;
+      inputSource = `s3://${inputBucket}/${inputKey}`;
+      outputLocation = `s3://${outputBucket}`;
+    } else {
+      const inputFilePath = process.env.INPUT_FILE_PATH!;
+      const outputDirPath = process.env.OUTPUT_DIR_PATH!;
+      inputSource = inputFilePath;
+      outputLocation = outputDirPath;
+    }
+
+    console.log(`ストレージモード: ${storageMode}`);
+    console.log(`入力: ${inputSource}`);
 
     // 実行開始をDBに記録（import_status=0: 実施中）
+    const fileName = storageMode === 's3'
+      ? process.env.INPUT_S3_KEY!
+      : path.basename(process.env.INPUT_FILE_PATH!);
+
     const importRecord = await prisma.tt_import_results.create({
       data: {
-        file_name: inputKey,
+        file_name: fileName,
         import_status: 0, // 0: 実施中
         executor_name: executorName,
         import_type: 0, // 0: ユーザインポート
@@ -254,9 +291,17 @@ async function main(): Promise<void> {
     importResultId = importRecord.id;
     console.log(`インポート実行ID: ${importResultId}`);
 
-    // S3からCSVを読み込み
+    // CSVファイルを読み込み
     console.log('CSVファイルを読み込み中...');
-    const csvContent = await readCsvFromS3(inputBucket, inputKey);
+    let csvContent: string;
+    if (storageMode === 's3') {
+      const inputBucket = process.env.INPUT_S3_BUCKET!;
+      const inputKey = process.env.INPUT_S3_KEY!;
+      csvContent = await readCsvFromS3(inputBucket, inputKey);
+    } else {
+      const inputFilePath = process.env.INPUT_FILE_PATH!;
+      csvContent = await readCsvFromLocal(inputFilePath);
+    }
 
     // CSVをパース
     console.log('CSVをパース中...');
@@ -286,16 +331,22 @@ async function main(): Promise<void> {
         },
       });
 
-      // S3に結果を書き込み（参考用）
+      // 結果を書き込み（参考用）
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const resultJsonKey = `user-import-results/result-${timestamp}.json`;
-      await writeResultToS3(
-        outputBucket,
-        resultJsonKey,
-        JSON.stringify({ error: errorMessage, errors: validation.errors }, null, 2)
-      );
+      const resultContent = JSON.stringify({ error: errorMessage, errors: validation.errors }, null, 2);
 
-      console.error(`\n結果ファイル: s3://${outputBucket}/${resultJsonKey}`);
+      if (storageMode === 's3') {
+        const outputBucket = process.env.OUTPUT_S3_BUCKET!;
+        const resultJsonKey = `user-import-results/result-${timestamp}.json`;
+        await writeResultToS3(outputBucket, resultJsonKey, resultContent);
+        console.error(`\n結果ファイル: s3://${outputBucket}/${resultJsonKey}`);
+      } else {
+        const outputDirPath = process.env.OUTPUT_DIR_PATH!;
+        const resultJsonPath = path.join(outputDirPath, `result-${timestamp}.json`);
+        await writeResultToLocal(resultJsonPath, resultContent);
+        console.error(`\n結果ファイル: ${resultJsonPath}`);
+      }
+
       process.exit(1);
     }
 
@@ -357,14 +408,39 @@ async function main(): Promise<void> {
       completedAt: endTime.toISOString(),
     };
 
-    // 結果をS3に書き込み
+    // 結果を書き込み
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const resultJsonKey = `user-import-results/result-${timestamp}.json`;
-    const resultCsvKey = `user-import-results/result-${timestamp}.csv`;
 
-    console.log('結果をS3に書き込み中...');
-    await writeResultToS3(outputBucket, resultJsonKey, JSON.stringify(summary, null, 2));
-    await writeImportResultCsv(outputBucket, resultCsvKey, results);
+    console.log('結果を書き込み中...');
+    if (storageMode === 's3') {
+      const outputBucket = process.env.OUTPUT_S3_BUCKET!;
+      const resultJsonKey = `user-import-results/result-${timestamp}.json`;
+      const resultCsvKey = `user-import-results/result-${timestamp}.csv`;
+
+      await writeResultToS3(outputBucket, resultJsonKey, JSON.stringify(summary, null, 2));
+      await writeImportResultCsv(outputBucket, resultCsvKey, results);
+
+      // 結果を表示
+      console.log('\n=== インポート完了 ===');
+      console.log(successMessage);
+      console.log(`\n結果ファイル:`);
+      console.log(`  JSON: s3://${outputBucket}/${resultJsonKey}`);
+      console.log(`  CSV: s3://${outputBucket}/${resultCsvKey}`);
+    } else {
+      const outputDirPath = process.env.OUTPUT_DIR_PATH!;
+      const resultJsonPath = path.join(outputDirPath, `result-${timestamp}.json`);
+      const resultCsvPath = path.join(outputDirPath, `result-${timestamp}.csv`);
+
+      await writeResultToLocal(resultJsonPath, JSON.stringify(summary, null, 2));
+      await writeImportResultCsvToLocal(resultCsvPath, results);
+
+      // 結果を表示
+      console.log('\n=== インポート完了 ===');
+      console.log(successMessage);
+      console.log(`\n結果ファイル:`);
+      console.log(`  JSON: ${resultJsonPath}`);
+      console.log(`  CSV: ${resultCsvPath}`);
+    }
 
     // DBレコードを更新（import_status=1: 成功）
     const successMessage = `${successCount}件のユーザを正常にインポートしました（新規: ${createdCount}件, 更新: ${updatedCount}件）`;
@@ -376,13 +452,6 @@ async function main(): Promise<void> {
         message: successMessage,
       },
     });
-
-    // 結果を表示
-    console.log('\n=== インポート完了 ===');
-    console.log(successMessage);
-    console.log(`\n結果ファイル:`);
-    console.log(`  JSON: s3://${outputBucket}/${resultJsonKey}`);
-    console.log(`  CSV: s3://${outputBucket}/${resultCsvKey}`);
   } catch (error) {
     console.error('ユーザインポートバッチでエラーが発生しました:', error);
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -400,9 +469,14 @@ async function main(): Promise<void> {
         });
       } else {
         // インポートレコード作成前のエラー
+        const storageMode = process.env.STORAGE_MODE || 's3';
+        const fileName = storageMode === 's3'
+          ? (process.env.INPUT_S3_KEY || 'unknown')
+          : (process.env.INPUT_FILE_PATH ? path.basename(process.env.INPUT_FILE_PATH) : 'unknown');
+
         await prisma.tt_import_results.create({
           data: {
-            file_name: process.env.INPUT_S3_KEY || 'unknown',
+            file_name: fileName,
             import_status: 2, // 2: エラー
             executor_name: process.env.EXECUTOR_NAME || 'system',
             import_type: 0, // 0: ユーザインポート

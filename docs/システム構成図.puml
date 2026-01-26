@@ -1,101 +1,144 @@
 @startuml システムアーキテクチャ図
-title システムアーキテクチャ図
+title ProofLink システムアーキテクチャ図（本番環境）
 
-skinparam rectangle { 
-  BackgroundColor<<aws>> LightYellow 
-  BackgroundColor<<app>> LightBlue 
+skinparam rectangle {
+  BackgroundColor<<aws>> LightYellow
+  BackgroundColor<<app>> LightBlue
   BackgroundColor<<data>> LightGreen
+  BackgroundColor<<security>> LightCoral
 }
 
 actor "管理者" as Admin
 actor "テスト管理者" as TestManager
 actor "一般ユーザ" as GeneralUser
 
-rectangle "客先NW" {
-  [Webブラウザ] as Browser
-  [VPN Gateway] as VPN
-}
+cloud "インターネット" as Internet
 
-rectangle "AWS Cloud" <<aws>> {    
-  rectangle "VPC (10.0.0.0/16)" {        
+rectangle "AWS Cloud (ap-northeast-1)" <<aws>> {
 
-    rectangle "Public Subnet" {
-      [NAT Gateway]
+  rectangle "Route 53" {
+    [DNS] as DNS
+    note right: prooflink.example.com
+  }
+
+  rectangle "ACM" {
+    [SSL証明書] as ACM
+  }
+
+  rectangle "VPC (10.0.0.0/16)" {
+
+    rectangle "Public Subnet 1\n(10.0.1.0/24 / AZ-a)" as PubSub1 {
+      [ALB] as ALB
+      [ECS Task 1] as ECS1
     }
 
-    rectangle "Private Subnet" {      
+    rectangle "Public Subnet 2\n(10.0.2.0/24 / AZ-c)" as PubSub2 {
+      [ECS Task 2] as ECS2
+    }
 
-      rectangle "Internal ELB" <<aws>> {        
-        [Application Load Balancer]
-        [WAF]
-        note right: Internal ALB\nVPN経由のみ到達可
-      }
+    rectangle "Private Subnet 1\n(10.0.11.0/24 / AZ-a)" as PriSub1 {
+      database "RDS Primary" as RDSPrimary
+    }
 
-      rectangle "EC2 / ECS Fargate" <<app>> {        
-        [テストケースDBアプリ]                            
-        [Prisma Client]      
-      }      
+    rectangle "Private Subnet 2\n(10.0.12.0/24 / AZ-c)" as PriSub2 {
+      database "RDS Standby" as RDSStandby
+    }
 
-      database "RDS PostgreSQL\nMulti-AZ" as RDS      
+    [Internet Gateway] as IGW
+  }
 
-      rectangle "AWS Batch" {        
-        [Job Queue]        
-        [Job Definition]        
-        note right: ファイル処理\nExcelインポート  
-      }    
-    }  
-  }    
+  rectangle "ECS Fargate Cluster" <<app>> {
+    [prooflink-app\n(Next.js + Prisma)]
+    note right: パブリックIP付き\nポート3000
+  }
 
-  storage "S3" as S3 {    
-    [制御仕様書]    
-    [データフロー]    
-    [エビデンス]  
-    [インポートファイル]
-    [CAPLファイル]
-  }    
+  rectangle "AWS Batch" {
+    [Job Queue]
+    [Fargate Job\n(ユーザインポート)]
+    [Fargate Job\n(テストケースインポート)]
+    note right: インポート処理\n・ユーザCSV\n・テストケースZIP
+  }
 
-  rectangle "CloudWatch" {    
-    [Logs]    
-    [Alarms]
-  }    
+  rectangle "ECR" {
+    [prooflink-prod-app]
+    [prooflink-batch]
+  }
 
-  rectangle "Secrets Manager" {    
-    [DB接続情報]    
-    [JWT秘密鍵]  
-  }    
+  storage "S3" as S3 {
+    [evidences/]
+    [imports/]
+    [control-specs/]
+    [dataflows/]
+    [test-cases/]
+  }
 
-  rectangle "IAM" {    
-    [ECS Task Role]    
-    [Batch Role]  
+  rectangle "CloudWatch" {
+    [Logs\n(/ecs/prooflink-prod-app)]
+    [Alarms\n(CPU/Memory)]
+    [Container Insights]
+  }
+
+  rectangle "IAM" <<security>> {
+    [prooflink-ecs-task-role]
+    [prooflink-ecs-task-execution-role]
+    [prooflink-batch-role]
   }
 }
 
 ' --- アクセス経路 ---
-Admin --> Browser
-TestManager --> Browser
-GeneralUser --> Browser
+Admin --> Internet
+TestManager --> Internet
+GeneralUser --> Internet
 
-Browser --> VPN : 社内NW
-VPN --> [Application Load Balancer] : HTTPS (VPN経由)
+Internet --> DNS : HTTPS
+DNS --> ALB : Route 53エイリアス
+ALB --> ACM : 証明書参照
+ALB --> IGW
+
+' --- ネットワーク通信 ---
+IGW --> ECS1 : HTTP:3000
+IGW --> ECS2 : HTTP:3000
+
+ECS1 --> RDSPrimary : PostgreSQL:5432
+ECS2 --> RDSPrimary : PostgreSQL:5432
+RDSPrimary <..> RDSStandby : 同期レプリケーション\n(Multi-AZ)
 
 ' --- アプリケーション通信 ---
-[Application Load Balancer] --> [テストケースDBアプリ] : HTTPS
-[テストケースDBアプリ] --> [Prisma Client]
-[Prisma Client] --> RDS : SQL
+ECS1 --> S3 : ファイル操作\n(VPCエンドポイント経由)
+ECS2 --> S3 : ファイル操作\n(VPCエンドポイント経由)
 
-[テストケースDBアプリ] --> S3 : ファイル操作
-[テストケースDBアプリ] --> [Job Queue] : ジョブ起動
+ECS1 --> [Job Queue] : ジョブ起動
+[Job Queue] --> [Fargate Job\n(ユーザインポート)]
+[Job Queue] --> [Fargate Job\n(テストケースインポート)]
+[Fargate Job\n(ユーザインポート)] --> S3 : CSV読込
+[Fargate Job\n(ユーザインポート)] --> RDSPrimary : 書込
+[Fargate Job\n(テストケースインポート)] --> S3 : ZIP読込/ファイル保存
+[Fargate Job\n(テストケースインポート)] --> RDSPrimary : 書込
 
-[Job Queue] --> [Job Definition]
-[Job Definition] --> S3 : 読込
-[Job Definition] --> RDS : 書込
+' --- ログ・監視 ---
+ECS1 --> [Logs\n(/ecs/prooflink-prod-app)]
+ECS2 --> [Logs\n(/ecs/prooflink-prod-app)]
+[Fargate Job\n(ユーザインポート)] --> [Logs\n(/ecs/prooflink-prod-app)]
+[Fargate Job\n(テストケースインポート)] --> [Logs\n(/ecs/prooflink-prod-app)]
 
-[テストケースDBアプリ] --> [Logs] : ログ送信
-[Job Definition] --> [Logs]
+' --- IAMロール ---
+[ECS Fargate Cluster] ..> [prooflink-ecs-task-role] : S3/CloudWatch
+[ECS Fargate Cluster] ..> [prooflink-ecs-task-execution-role] : ECRプル/ログ
+[AWS Batch] ..> [prooflink-batch-role] : S3/RDS/CloudWatch
 
-[テストケースDBアプリ] --> [Secrets Manager]
-[Prisma Client] --> [Secrets Manager]
+' --- イメージ取得 ---
+ECS1 ..> [prooflink-prod-app] : イメージプル
+ECS2 ..> [prooflink-prod-app] : イメージプル
+[Fargate Job\n(ユーザインポート)] ..> [prooflink-batch] : イメージプル
+[Fargate Job\n(テストケースインポート)] ..> [prooflink-batch] : イメージプル
 
-[EC2 / ECS Fargate] ..> [ECS Task Role] : 使用
-[AWS Batch] ..> [Batch Role] : 使用
+legend right
+  |= コンポーネント |= 設定 |
+  | ALB | Internet-facing, HTTPS終端 |
+  | ECS Fargate | 1vCPU, 2GB, パブリックIP |
+  | RDS PostgreSQL | db.t4g.medium, Multi-AZ |
+  | S3 | VPCエンドポイント経由 |
+  | NATゲートウェイ | 不要(コスト削減) |
+endlegend
+
 @enduml
