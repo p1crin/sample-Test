@@ -166,9 +166,11 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
         // 履歴付きの結果を保存
         const resultsData = data.results as TestResultsData;
         setResultsWithHistory(resultsData);
-        // 初期のテストケースデータを設定
-        const initialData = Object.values(resultsData).map((result) => ({
+        // 初期のテストケースデータを設定（checkedフィールドも初期化）
+        const initialData = Object.values(resultsData).map((result, index) => ({
           ...result.latestValidResult,
+          index: index + 1,
+          checked: result.latestValidResult.is_target !== false,
           result: '',
           softwareVersion: '',
           hardwareVersion: '',

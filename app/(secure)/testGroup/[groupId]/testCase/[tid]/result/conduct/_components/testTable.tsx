@@ -6,7 +6,7 @@ import { JUDGMENT_OPTIONS, JudgmentOption } from '@/constants/constants';
 import clientLogger from '@/utils/client-logger';
 import { formatDateWithHyphen } from '@/utils/date-formatter';
 import { FileInfo, getUniqueFileNames, processClipboardItems, processFileList, isImage } from '@/utils/fileUtils';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 
 
 interface TestTableProps {
@@ -30,19 +30,7 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
   const [page, setPage] = useState(1);
   const [inputValue, setInputValue] = useState('');
   const [allChecked, setAllChecked] = useState(true);
-  const [isInitialRender, setIsInitialRender] = useState(true);
   const fileInputRefs = useRef<(HTMLInputElement | null)[]>([]);
-  useEffect(() => {
-    if (isInitialRender && data) {
-      const updatedData = data.map((row, index) => ({
-        index: index + 1,
-        ...row,
-        checked: !isRowDisabled(row) ? true : false,
-      }));
-      setData(updatedData);
-      setIsInitialRender(false);
-    }
-  }, [data, isInitialRender, setData]);
 
   // 行のインデックスを取得するメモ化された関数（パフォーマンス最適化）
   const getRowIndex = useCallback((row: TestCaseResultRow): number => {
@@ -69,7 +57,6 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
 
     setData(newData);
     setIsDialogOpen(false);
-    setIsInitialRender(false);
   };
 
   // 行のデータを更新する汎用ハンドラー（メモ化）
