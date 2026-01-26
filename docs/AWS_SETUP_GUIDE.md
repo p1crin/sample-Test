@@ -17,6 +17,7 @@
    - [Step 9: ロードバランサー(ALB)](#step-9-ロードバランサーalb)
    - [Step 10: Route 53 DNS設定](#step-10-route-53-dns設定)
    - [Step 11: CloudWatch設定](#step-11-cloudwatch設定)
+   - [Step 12: AWS Batch(ユーザーインポート用)](#step-12-aws-batchユーザーインポート用)
 5. [コスト最適化設定(開発環境)](#5-コスト最適化設定開発環境)
 6. [トラブルシューティング](#6-トラブルシューティング)
 
@@ -776,6 +777,293 @@ HTTPS リスナーの追加設定:
 
 ---
 
+### Step 12: AWS Batch(ユーザーインポート用)
+
+#### 12-1. 概要
+
+AWS Batchを使用して、大量のユーザーデータをCSVからインポートします。バッチジョブはFargateで実行され、S3からCSVを読み込み、PostgreSQLにデータを投入します。
+
+**処理フロー:**
+```
+[Webアプリ] → [CSVをS3アップロード] → [AWS Batch起動] → [Fargateでバッチ実行]
+                                                           ↓
+                                                     [PostgreSQL更新]
+                                                           ↓
+                                                     [結果をS3保存]
+```
+
+**用途:**
+- ユーザー情報の一括インポート(数千〜数万件)
+- テストデータの一括登録
+- 定期的なデータ同期処理
+
+> **注意**: 開発環境でバッチ処理が不要な場合は、このステップをスキップできます。
+
+#### 12-2. バッチ用セキュリティグループの作成
+
+1. 「**VPC**」→「**セキュリティグループ**」→「**セキュリティグループを作成**」
+
+| 項目 | 値 |
+|------|-----|
+| セキュリティグループ名 | `prooflink-batch-sg` |
+| 説明 | Security group for AWS Batch |
+| VPC | `prooflink-dev-vpc` または `prooflink-prod-vpc` |
+
+**インバウンドルール:**
+- 不要(バッチジョブは外部からアクセスされない)
+
+**アウトバウンドルール:**
+| タイプ | ポート | 送信先 | 説明 |
+|--------|--------|--------|------|
+| すべてのトラフィック | すべて | 0.0.0.0/0 | ECRプル、S3アクセス、外部API用 |
+
+#### 12-3. RDSセキュリティグループの更新
+
+バッチジョブからRDSへのアクセスを許可します。
+
+1. 「**VPC**」→「**セキュリティグループ**」→ `prooflink-rds-sg` を選択
+2. 「**インバウンドルール**」タブ→「**インバウンドルールを編集**」
+3. 「**ルールを追加**」をクリック
+
+| タイプ | ポート | ソース | 説明 |
+|--------|--------|--------|------|
+| PostgreSQL | 5432 | `prooflink-batch-sg` | Batchからのアクセス |
+
+4. 「**ルールを保存**」をクリック
+
+#### 12-4. Batch用IAMロールの作成
+
+##### 12-4-1. Batch実行ロール
+
+1. 「**IAM**」→「**ロール**」→「**ロールを作成**」
+
+| 項目 | 値 |
+|------|-----|
+| 信頼されたエンティティタイプ | AWSのサービス |
+| ユースケース | Elastic Container Service → **Elastic Container Service Task** |
+
+2. 「**次へ**」をクリック
+
+**許可ポリシー:**
+- `AmazonECSTaskExecutionRolePolicy` (AWSマネージドポリシー)
+
+3. 「**次へ**」をクリック
+
+| 項目 | 値 |
+|------|-----|
+| ロール名 | `prooflink-batch-execution-role` |
+| 説明 | Execution role for AWS Batch tasks |
+
+4. 「**ロールを作成**」をクリック
+
+##### 12-4-2. Batchタスクロール
+
+1. 「**IAM**」→「**ロール**」→「**ロールを作成**」
+
+| 項目 | 値 |
+|------|-----|
+| 信頼されたエンティティタイプ | AWSのサービス |
+| ユースケース | Elastic Container Service → **Elastic Container Service Task** |
+
+2. 「**次へ**」をクリック(ポリシーは後で追加)
+
+| 項目 | 値 |
+|------|-----|
+| ロール名 | `prooflink-batch-task-role` |
+
+3. 「**ロールを作成**」をクリック
+
+4. 作成したロール `prooflink-batch-task-role` をクリック
+
+5. 「**許可を追加**」→「**インラインポリシーを作成**」
+
+6. 「**JSON**」タブを選択して以下を貼り付け:
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "S3Access",
+            "Effect": "Allow",
+            "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:DeleteObject",
+                "s3:ListBucket"
+            ],
+            "Resource": [
+                "arn:aws:s3:::prooflink-*-files-*",
+                "arn:aws:s3:::prooflink-*-files-*/*"
+            ]
+        },
+        {
+            "Sid": "CloudWatchLogs",
+            "Effect": "Allow",
+            "Action": [
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+            ],
+            "Resource": "arn:aws:logs:ap-northeast-1:*:log-group:/aws/batch/prooflink-*:*"
+        }
+    ]
+}
+```
+
+7. 「**次へ**」をクリック
+
+| 項目 | 値 |
+|------|-----|
+| ポリシー名 | `ProoflinkBatchTaskPolicy` |
+
+8. 「**ポリシーを作成**」をクリック
+
+#### 12-5. Batch用ECRリポジトリの作成
+
+1. 「**ECR**」→「**リポジトリ**」→「**リポジトリを作成**」
+
+| 項目 | 開発環境 | 本番環境 |
+|------|---------|---------|
+| 可視性設定 | プライベート | プライベート |
+| リポジトリ名 | `prooflink-dev-batch` | `prooflink-prod-batch` |
+| タグのイミュータビリティ | 無効 | 有効(推奨) |
+| プッシュ時のスキャン | 無効 | 有効(推奨) |
+| 暗号化設定 | AES-256 | AES-256 |
+
+2. 「**リポジトリを作成**」をクリック
+
+#### 12-6. CloudWatch Logsグループの作成
+
+1. 「**CloudWatch**」→「**ロググループ**」→「**ロググループを作成**」
+
+| 項目 | 開発環境 | 本番環境 |
+|------|---------|---------|
+| ロググループ名 | `/aws/batch/prooflink-dev` | `/aws/batch/prooflink-prod` |
+| ログの保持期間 | 3日 | 30日 |
+
+2. 「**作成**」をクリック
+
+#### 12-7. コンピューティング環境の作成
+
+1. 「**AWS Batch**」→「**コンピューティング環境**」→「**作成**」
+
+**基本設定:**
+
+| 項目 | 値 |
+|------|-----|
+| オーケストレーションタイプ | マネージド |
+| 名前 | `prooflink-compute-env` |
+
+**インスタンス設定:**
+
+| 項目 | 開発環境 | 本番環境 |
+|------|---------|---------|
+| プロビジョニングモデル | Fargate | Fargate |
+| 最大vCPU | 4 | 16 |
+
+**ネットワーク設定:**
+
+| 項目 | 値 |
+|------|-----|
+| VPC | `prooflink-dev-vpc` または `prooflink-prod-vpc` |
+| サブネット | **パブリックサブネット**を選択(2つとも) |
+| セキュリティグループ | `prooflink-batch-sg` |
+
+> **重要**: Batchジョブもパブリックサブネット+パブリックIP付きで実行します。これによりNATゲートウェイ不要でECRからイメージをプルできます。
+
+2. 「**作成**」をクリック
+
+#### 12-8. ジョブキューの作成
+
+1. 「**AWS Batch**」→「**ジョブキュー**」→「**作成**」
+
+| 項目 | 値 |
+|------|-----|
+| 名前 | `prooflink-job-queue` |
+| 優先度 | 1 |
+| 接続されたコンピューティング環境 | `prooflink-compute-env` を選択 |
+| 順序 | 1 |
+
+2. 「**作成**」をクリック
+
+#### 12-9. ジョブ定義の作成
+
+1. 「**AWS Batch**」→「**ジョブ定義**」→「**作成**」
+
+**基本設定:**
+
+| 項目 | 開発環境 | 本番環境 |
+|------|---------|---------|
+| オーケストレーションタイプ | Fargate | Fargate |
+| 名前 | `prooflink-dev-user-import` | `prooflink-prod-user-import` |
+| 実行タイムアウト | 3600秒(1時間) | 7200秒(2時間) |
+
+**コンテナ設定:**
+
+| 項目 | 開発環境 | 本番環境 |
+|------|---------|---------|
+| イメージ | `{アカウントID}.dkr.ecr.ap-northeast-1.amazonaws.com/prooflink-dev-batch:latest` | `{アカウントID}.dkr.ecr.ap-northeast-1.amazonaws.com/prooflink-prod-batch:latest` |
+| コマンド | `node,dist/batch/user-import.js` | `node,dist/batch/user-import.js` |
+| vCPU | 0.5 | 1 |
+| メモリ | 1 GB | 2 GB |
+| ジョブロール | `prooflink-batch-task-role` | `prooflink-batch-task-role` |
+| 実行ロール | `prooflink-batch-execution-role` | `prooflink-batch-execution-role` |
+
+**環境変数:**
+
+| キー | 値 |
+|------|-----|
+| NODE_ENV | `production` |
+| DATABASE_URL | RDSの接続文字列 |
+| AWS_REGION | `ap-northeast-1` |
+| AWS_S3_BUCKET_NAME | S3バケット名 |
+
+**ログ設定:**
+
+| 項目 | 値 |
+|------|-----|
+| ログドライバー | awslogs |
+| awslogs-group | `/aws/batch/prooflink-dev` または `/aws/batch/prooflink-prod` |
+| awslogs-region | `ap-northeast-1` |
+| awslogs-stream-prefix | `batch` |
+
+2. 「**作成**」をクリック
+
+#### 12-10. バッチジョブの実行テスト
+
+バッチイメージをビルドしてECRにプッシュした後、手動でジョブを実行してテストします。
+
+1. 「**AWS Batch**」→「**ジョブ**」→「**新しいジョブを送信**」
+
+| 項目 | 値 |
+|------|-----|
+| 名前 | `test-user-import-{日付}` |
+| ジョブ定義 | `prooflink-dev-user-import:1` |
+| ジョブキュー | `prooflink-job-queue` |
+
+**ジョブのオーバーライド(オプション):**
+
+| キー | 値 |
+|------|-----|
+| IMPORT_FILE_KEY | `imports/users-20260123.csv` |
+
+2. 「**送信**」をクリック
+
+3. ジョブのステータスを確認:
+   - SUBMITTED: キューに追加済み
+   - RUNNABLE: 実行可能
+   - STARTING: 起動中
+   - RUNNING: 実行中
+   - SUCCEEDED: 成功
+   - FAILED: 失敗
+
+4. ログを確認:
+   - ジョブをクリック
+   - 「**ログストリーム名**」のリンクをクリック
+   - CloudWatch Logsでログを確認
+
+---
+
 ## 5. コスト最適化設定(開発環境)
 
 ### 5.1 開発環境の月額コスト目安
@@ -786,10 +1074,11 @@ HTTPS リスナーの追加設定:
 | **ECS Fargate** | 0.5vCPU, 1GB, 24時間稼働 | **¥1,800** |
 | **ALB** | 最小構成 | **¥2,500** |
 | **S3** | 10GB, 少量リクエスト | **¥100** |
-| **ECR** | 10GB | **¥100** |
+| **ECR** | 10GB (アプリ) + 5GB (バッチ) | **¥150** |
 | **CloudWatch Logs** | 3日保持, 1GB/月 | **¥100** |
 | **データ転送** | 1GB/月 | **¥10** |
-| **合計** | | **約¥6,110/月** |
+| **AWS Batch** | 月1回実行, 0.5vCPU, 1GB, 30分 | **¥5** |
+| **合計** | | **約¥6,165/月** |
 
 > **NATゲートウェイなしの効果**: 従来構成では月額約3,000〜5,000円追加でしたが、パブリックサブネット構成により削減できます。
 
@@ -940,6 +1229,69 @@ ECSタスクのログで外部APIへの接続エラーを確認
 - ECSタスクが複数起動している → サービスの希望タスク数を1に設定
 - RDSがMulti-AZになっている → 開発環境ではSingle-AZに変更
 - データ転送量が多い → CloudFront導入を検討
+
+### 6.5 AWS Batchジョブが起動しない
+
+**確認方法:**
+1. 「**AWS Batch**」→「**ジョブ**」で該当ジョブを選択
+2. ステータスとログを確認
+
+**よくある原因と解決策:**
+
+#### ジョブがRUNNABLE状態で停止
+
+**原因:** コンピューティング環境のリソース不足
+
+**解決策:**
+- コンピューティング環境の最大vCPUを増やす
+- 他のジョブが完了するまで待つ
+
+#### ジョブがFAILED状態
+
+**エラー例:**
+```
+CannotPullContainerError: pull image manifest has been retried
+```
+
+**解決策:**
+- ECRにバッチイメージが存在するか確認
+- `prooflink-batch-execution-role` に `AmazonECSTaskExecutionRolePolicy` がアタッチされているか確認
+- イメージURIが正しいか確認
+
+#### データベース接続エラー
+
+**エラー例:**
+```
+Error: connect ETIMEDOUT
+```
+
+**解決策:**
+- RDSセキュリティグループに `prooflink-batch-sg` からのポート5432が許可されているか確認
+- `DATABASE_URL` 環境変数が正しいか確認
+- バッチジョブがパブリックサブネット+パブリックIP付きで実行されているか確認
+
+#### S3アクセスエラー
+
+**エラー例:**
+```
+AccessDenied: Access Denied
+```
+
+**解決策:**
+- `prooflink-batch-task-role` に適切なS3アクセス権限があるか確認
+- S3バケット名が正しいか確認
+- ジョブ定義でタスクロールが設定されているか確認
+
+### 6.6 AWS Batchジョブのログが見れない
+
+**確認方法:**
+1. ジョブの詳細画面で「ログストリーム名」のリンクを確認
+2. リンクが無効な場合はログ設定に問題あり
+
+**解決策:**
+- CloudWatch Logsグループ `/aws/batch/prooflink-dev` が作成されているか確認
+- ジョブ定義のログ設定が正しいか確認
+- `prooflink-batch-execution-role` にCloudWatch Logs書き込み権限があるか確認
 
 ---
 
