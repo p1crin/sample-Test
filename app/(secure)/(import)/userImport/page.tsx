@@ -9,17 +9,38 @@ import { FileInfo } from '@/utils/fileUtils';
 export default function UserImportPage() {
   const router = useRouter();
   const [files, setFiles] = useState<FileInfo[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleFileChange = (e: { target: { name: string; value: FileInfo[] } }) => {
     setFiles(e.target.value);
   };
 
-  const handleSubmit = () => {
-    if (files.length > 0) {
-      console.log('ユーザインポート実行:', files);
-      router.push('/importResult');
-    } else {
-      console.log('ファイルが選択されていません');
+  const handleSubmit = async () => {
+    if (files.length === 0) {
+      alert('ファイルを選択してください');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/batch/user-import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          s3Key: files[0].key,
+        }),
+      });
+
+      if (response.ok) {
+        router.push('/importResult');
+      } else {
+        const data = await response.json();
+        alert(data.error || 'インポートに失敗しました');
+      }
+    } catch {
+      alert('インポートに失敗しました');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -29,8 +50,9 @@ export default function UserImportPage() {
 
   const buttons = [
     {
-      label: 'インポート',
+      label: isLoading ? '処理中...' : 'インポート',
       onClick: handleSubmit,
+      disabled: isLoading,
     },
     {
       label: '戻る',
