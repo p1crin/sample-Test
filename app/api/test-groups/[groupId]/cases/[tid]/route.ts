@@ -458,8 +458,8 @@ export async function DELETE(
     // 紐づいているファイルの削除（制御仕様書、データフロー、エビデンス）
     // S3/ローカルの両方に対応
     await Promise.all([
-      deleteDirectory(`/uploads/test-cases/${groupId}/${tid}`),  // 制御仕様書・データフロー
-      deleteDirectory(`/evidences/${groupId}/${tid}`),           // エビデンス
+      deleteDirectory(`/uploads/test-cases/${groupId}/${tid}`, user.id),  // 制御仕様書・データフロー
+      deleteDirectory(`/evidences/${groupId}/${tid}`, user.id),           // エビデンス
     ]);
 
     const deleteTimer = new QueryTimer();

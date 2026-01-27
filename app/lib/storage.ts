@@ -131,9 +131,13 @@ export async function deleteFile(filePath: string): Promise<void> {
  * ストレージからディレクトリ（プレフィックス）を削除
  * S3の場合はプレフィックスに一致するすべてのオブジェクトを削除
  * 環境に応じてローカルディスクまたはS3から削除
+ * @param directoryPath 削除するディレクトリパス
+ * @param userId ログに含めるユーザーID（オプション）
  */
-export async function deleteDirectory(directoryPath: string): Promise<void> {
+export async function deleteDirectory(directoryPath: string, userId?: number): Promise<void> {
   if (!directoryPath) return;
+
+  const logger = userId ? clientLogger.withUserId(userId) : clientLogger;
 
   if (useS3 && s3Client) {
     // 本番環境: S3からプレフィックスに一致するオブジェクトをすべて削除
@@ -170,9 +174,9 @@ export async function deleteDirectory(directoryPath: string): Promise<void> {
         continuationToken = listResponse.NextContinuationToken;
       } while (continuationToken);
 
-      clientLogger.info('deleteDirectory', `S3ディレクトリ削除成功: ${normalizedPrefix}`);
+      logger.info('deleteDirectory', `S3ディレクトリ削除成功: ${normalizedPrefix}`);
     } catch (error) {
-      clientLogger.error('deleteDirectory', `S3ディレクトリ削除失敗: ${normalizedPrefix}`, { error });
+      logger.error('deleteDirectory', `S3ディレクトリ削除失敗: ${normalizedPrefix}`, { error });
     }
   } else {
     // 開発環境: ローカルディスクからディレクトリを削除
@@ -181,7 +185,7 @@ export async function deleteDirectory(directoryPath: string): Promise<void> {
     try {
       await rm(localPath, { recursive: true, force: true });
     } catch (error) {
-      clientLogger.error('deleteDirectory', `ローカルディレクトリ削除失敗: ${localPath}`, { error });
+      logger.error('deleteDirectory', `ローカルディレクトリ削除失敗: ${localPath}`, { error });
     }
   }
 }

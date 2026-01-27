@@ -420,8 +420,8 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
     // 紐づいているファイルの削除（制御仕様書、データフロー、エビデンス）
     // S3/ローカルの両方に対応
     await Promise.all([
-      deleteDirectory(`/uploads/test-cases/${groupId}`),  // 制御仕様書・データフロー
-      deleteDirectory(`/evidences/${groupId}`),            // エビデンス
+      deleteDirectory(`/uploads/test-cases/${groupId}`, user.id),  // 制御仕様書・データフロー
+      deleteDirectory(`/evidences/${groupId}`, user.id),            // エビデンス
     ]);
 
     const deleteTimer = new QueryTimer();
