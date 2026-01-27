@@ -22,46 +22,57 @@ rectangle "AWS Cloud (ap-northeast-1)" <<aws>> {
   }
 
   rectangle "ACM" {
-    [SSL証明書] as ACM
+    [SSL証明書]
+  }
+
+  rectangle "WAF" <<security>> {
+    [IP制限ルール]
+    note right: 許可IPのみアクセス可
   }
 
   rectangle "VPC (10.0.0.0/16)" {
 
+    [Internet Gateway] as IGW
+
     rectangle "Public Subnet 1\n(10.0.1.0/24 / AZ-a)" as PubSub1 {
       [ALB] as ALB
-      [ECS Task 1] as ECS1
+      [NAT Gateway 1] as NAT1
     }
 
     rectangle "Public Subnet 2\n(10.0.2.0/24 / AZ-c)" as PubSub2 {
-      [ECS Task 2] as ECS2
+      [NAT Gateway 2] as NAT2
     }
 
     rectangle "Private Subnet 1\n(10.0.11.0/24 / AZ-a)" as PriSub1 {
+      [ECS Task 1\n(prooflink-app)] as ECS1
+      [Batch Job 1] as BatchJob1
       database "RDS Primary" as RDSPrimary
     }
 
     rectangle "Private Subnet 2\n(10.0.12.0/24 / AZ-c)" as PriSub2 {
+      [ECS Task 2\n(prooflink-app)] as ECS2
+      [Batch Job 2] as BatchJob2
       database "RDS Standby" as RDSStandby
     }
 
-    [Internet Gateway] as IGW
-  }
-
-  rectangle "ECS Fargate Cluster" <<app>> {
-    [prooflink-app\n(Next.js + Prisma)]
-    note right: パブリックIP付き\nポート3000
+    [S3 VPCエンドポイント] as S3Endpoint
+    [Secrets Manager\nVPCエンドポイント] as SecretsEndpoint
+    [ECR VPCエンドポイント] as ECREndpoint
   }
 
   rectangle "AWS Batch" {
-    [Job Queue]
-    [Fargate Job\n(ユーザインポート)]
-    [Fargate Job\n(テストケースインポート)]
-    note right: インポート処理\n・ユーザCSV\n・テストケースZIP
+    [Job Queue] as JobQueue
+    [Job Definition\n(prooflink-batch)] as JobDef
   }
 
   rectangle "ECR" {
     [prooflink-prod-app]
     [prooflink-batch]
+  }
+
+  rectangle "Secrets Manager" <<security>> {
+    [prooflink/rds-credentials]
+    note right: RDS接続情報\n(ユーザー/パスワード)
   }
 
   storage "S3" as S3 {
@@ -73,9 +84,8 @@ rectangle "AWS Cloud (ap-northeast-1)" <<aws>> {
   }
 
   rectangle "CloudWatch" {
-    [Logs\n(/ecs/prooflink-prod-app)]
-    [Alarms\n(CPU/Memory)]
-    [Container Insights]
+    [Logs]
+    [Alarms]
   }
 
   rectangle "IAM" <<security>> {
@@ -91,54 +101,76 @@ TestManager --> Internet
 GeneralUser --> Internet
 
 Internet --> DNS : HTTPS
-DNS --> ALB : Route 53エイリアス
-ALB --> ACM : 証明書参照
-ALB --> IGW
+DNS --> [IP制限ルール] : Route 53エイリアス
+[IP制限ルール] --> IGW : 許可IPのみ
+IGW --> ALB : HTTPS:443
+ACM ..> ALB : 証明書提供
 
-' --- ネットワーク通信 ---
-IGW --> ECS1 : HTTP:3000
-IGW --> ECS2 : HTTP:3000
+' --- ネットワーク通信（ALB→ECS）---
+ALB --> ECS1 : HTTP:3000
+ALB --> ECS2 : HTTP:3000
 
+' --- NAT Gateway（外部通信用）---
+ECS1 --> NAT1 : 外部API
+ECS2 --> NAT2 : 外部API
+BatchJob1 --> NAT1
+BatchJob2 --> NAT2
+NAT1 --> IGW
+NAT2 --> IGW
+
+' --- RDS接続 ---
 ECS1 --> RDSPrimary : PostgreSQL:5432
 ECS2 --> RDSPrimary : PostgreSQL:5432
+BatchJob1 --> RDSPrimary : PostgreSQL:5432
+BatchJob2 --> RDSPrimary : PostgreSQL:5432
 RDSPrimary <..> RDSStandby : 同期レプリケーション\n(Multi-AZ)
 
-' --- アプリケーション通信 ---
-ECS1 --> S3 : ファイル操作\n(VPCエンドポイント経由)
-ECS2 --> S3 : ファイル操作\n(VPCエンドポイント経由)
+' --- Secrets Manager ---
+ECS1 --> SecretsEndpoint
+ECS2 --> SecretsEndpoint
+SecretsEndpoint --> [prooflink/rds-credentials] : DB認証情報取得
 
-ECS1 --> [Job Queue] : ジョブ起動
-[Job Queue] --> [Fargate Job\n(ユーザインポート)]
-[Job Queue] --> [Fargate Job\n(テストケースインポート)]
-[Fargate Job\n(ユーザインポート)] --> S3 : CSV読込
-[Fargate Job\n(ユーザインポート)] --> RDSPrimary : 書込
-[Fargate Job\n(テストケースインポート)] --> S3 : ZIP読込/ファイル保存
-[Fargate Job\n(テストケースインポート)] --> RDSPrimary : 書込
+' --- S3通信 ---
+ECS1 --> S3Endpoint
+ECS2 --> S3Endpoint
+BatchJob1 --> S3Endpoint
+BatchJob2 --> S3Endpoint
+S3Endpoint --> S3 : ファイル操作
+
+' --- ECR通信 ---
+ECS1 --> ECREndpoint
+ECS2 --> ECREndpoint
+ECREndpoint --> [prooflink-prod-app] : イメージプル
+
+' --- AWS Batch ---
+ECS1 --> JobQueue : ジョブ起動
+JobQueue --> JobDef
+JobDef --> BatchJob1 : タスク実行
+JobDef --> BatchJob2 : タスク実行
 
 ' --- ログ・監視 ---
-ECS1 --> [Logs\n(/ecs/prooflink-prod-app)]
-ECS2 --> [Logs\n(/ecs/prooflink-prod-app)]
-[Fargate Job\n(ユーザインポート)] --> [Logs\n(/ecs/prooflink-prod-app)]
-[Fargate Job\n(テストケースインポート)] --> [Logs\n(/ecs/prooflink-prod-app)]
+ECS1 --> [Logs]
+ECS2 --> [Logs]
+BatchJob1 --> [Logs]
+BatchJob2 --> [Logs]
 
 ' --- IAMロール ---
-[ECS Fargate Cluster] ..> [prooflink-ecs-task-role] : S3/CloudWatch
-[ECS Fargate Cluster] ..> [prooflink-ecs-task-execution-role] : ECRプル/ログ
-[AWS Batch] ..> [prooflink-batch-role] : S3/RDS/CloudWatch
-
-' --- イメージ取得 ---
-ECS1 ..> [prooflink-prod-app] : イメージプル
-ECS2 ..> [prooflink-prod-app] : イメージプル
-[Fargate Job\n(ユーザインポート)] ..> [prooflink-batch] : イメージプル
-[Fargate Job\n(テストケースインポート)] ..> [prooflink-batch] : イメージプル
+ECS1 ..> [prooflink-ecs-task-role] : S3/CloudWatch/SecretsManager
+ECS2 ..> [prooflink-ecs-task-role]
+ECS1 ..> [prooflink-ecs-task-execution-role] : ECRプル/ログ/SecretsManager
+ECS2 ..> [prooflink-ecs-task-execution-role]
+BatchJob1 ..> [prooflink-batch-role] : S3/RDS/SecretsManager
+BatchJob2 ..> [prooflink-batch-role]
 
 legend right
   |= コンポーネント |= 設定 |
+  | WAF | IP制限（許可リスト方式） |
   | ALB | Internet-facing, HTTPS終端 |
-  | ECS Fargate | 1vCPU, 2GB, パブリックIP |
+  | ECS Fargate | プライベートサブネット配置 |
+  | NAT Gateway | 各AZに1台（冗長構成） |
   | RDS PostgreSQL | db.t4g.medium, Multi-AZ |
-  | S3 | VPCエンドポイント経由 |
-  | NATゲートウェイ | 不要(コスト削減) |
+  | Secrets Manager | RDS認証情報管理 |
+  | VPCエンドポイント | S3, ECR, Secrets Manager |
 endlegend
 
 @enduml
