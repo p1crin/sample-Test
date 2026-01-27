@@ -1,15 +1,16 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useParams } from 'next/navigation';
 import { FileUploadField } from '@/components/ui/FileUploadField';
 import ButtonGroup from '@/components/ui/buttonGroup';
 import { FileInfo } from '@/utils/fileUtils';
 
 export default function TestImportPage() {
   const router = useRouter();
+  const params = useParams();
+  const groupId = params.groupId as string;
   const [files, setFiles] = useState<FileInfo[]>([]);
-  const [testGroupId, setTestGroupId] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const handleFileChange = (e: { target: { name: string; value: FileInfo[] } }) => {
@@ -21,10 +22,6 @@ export default function TestImportPage() {
       alert('ファイルを選択してください');
       return;
     }
-    if (!testGroupId) {
-      alert('テストグループIDを入力してください');
-      return;
-    }
 
     setIsLoading(true);
     try {
@@ -33,7 +30,7 @@ export default function TestImportPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           s3Key: files[0].key,
-          testGroupId,
+          testGroupId: groupId,
         }),
       });
 
@@ -70,19 +67,7 @@ export default function TestImportPage() {
   return (
     <>
       <h1 className="text-2xl font-bold mt-4 pb-3">テストインポート</h1>
-      <div className="flex mt-4 pb-3 flex-col justify-start">
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            テストグループID
-          </label>
-          <input
-            type="text"
-            value={testGroupId}
-            onChange={(e) => setTestGroupId(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md"
-            placeholder="テストグループIDを入力"
-          />
-        </div>
+      <div className="w-4/5">
         <FileUploadField
           label="テストファイル（zip形式）"
           name="testFile"

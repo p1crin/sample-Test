@@ -64,7 +64,7 @@ export default function UserImportPage() {
   return (
     <>
       <h1 className="text-2xl font-bold mt-4 pb-3">ユーザインポート</h1>
-      <div className="flex mt-4 pb-3 flex-col justify-start">
+      <div className="w-4/5">
         <FileUploadField
           label="ユーザファイル（csv形式）"
           name="userFile"

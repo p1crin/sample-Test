@@ -30,11 +30,6 @@ export const menuConfig: MenuGroup[] = [
     label: 'インポート管理',
     items: [
       {
-        id: 'testImport',
-        label: 'テストインポート',
-        path: '/testImport',
-      },
-      {
         id: 'userImport',
         label: 'ユーザインポート',
         path: '/userImport',
