@@ -1,12 +1,11 @@
 import { canEditTestCases, canViewTestGroup, requireAuth } from '@/app/lib/auth';
 import { prisma } from '@/app/lib/prisma';
+import { deleteDirectory } from '@/app/lib/storage';
 import { ERROR_MESSAGES } from '@/constants/errorMessages';
 import { STATUS_CODES } from '@/constants/statusCodes';
 import { logAPIEndpoint, logDatabaseQuery, QueryTimer } from '@/utils/database-logger';
 import { handleError } from '@/utils/errorHandler';
-import { rm } from 'fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
-import { join } from 'path';
 
 // GET /api/test-groups/[groupId]/cases/[tid] - テストケース詳細を取得
 export async function GET(
@@ -456,8 +455,12 @@ export async function DELETE(
         `/api/test-groups/${groupIdParam}/cases/${tid}`
       );
     }
-    const deleteDir = join(process.cwd(), 'public', 'uploads', 'test-cases', String(groupId), tid);
-    await rm(deleteDir, { recursive: true, force: true })
+    // 紐づいているファイルの削除（制御仕様書、データフロー、エビデンス）
+    // S3/ローカルの両方に対応
+    await Promise.all([
+      deleteDirectory(`/uploads/test-cases/${groupId}/${tid}`),  // 制御仕様書・データフロー
+      deleteDirectory(`/evidences/${groupId}/${tid}`),           // エビデンス
+    ]);
 
     const deleteTimer = new QueryTimer();
     // Prisma トランザクション内でテストケースを削除

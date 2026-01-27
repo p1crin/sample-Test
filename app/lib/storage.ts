@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { mkdir, rm, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
@@ -123,6 +123,65 @@ export async function deleteFile(filePath: string): Promise<void> {
       await rm(localPath, { force: true });
     } catch (error) {
       clientLogger.error('deleteFile', `ローカルファイル削除失敗 local file: ${localPath}`, { error });
+    }
+  }
+}
+
+/**
+ * ストレージからディレクトリ（プレフィックス）を削除
+ * S3の場合はプレフィックスに一致するすべてのオブジェクトを削除
+ * 環境に応じてローカルディスクまたはS3から削除
+ */
+export async function deleteDirectory(directoryPath: string): Promise<void> {
+  if (!directoryPath) return;
+
+  if (useS3 && s3Client) {
+    // 本番環境: S3からプレフィックスに一致するオブジェクトをすべて削除
+    const prefix = directoryPath.startsWith('/') ? directoryPath.substring(1) : directoryPath;
+    // プレフィックスの末尾に/を付ける（ディレクトリとして扱う）
+    const normalizedPrefix = prefix.endsWith('/') ? prefix : `${prefix}/`;
+
+    try {
+      // プレフィックスに一致するオブジェクトを列挙
+      let continuationToken: string | undefined;
+      do {
+        const listCommand = new ListObjectsV2Command({
+          Bucket: process.env.AWS_S3_BUCKET_NAME!,
+          Prefix: normalizedPrefix,
+          ContinuationToken: continuationToken,
+        });
+
+        const listResponse = await s3Client.send(listCommand);
+        const objects = listResponse.Contents;
+
+        if (objects && objects.length > 0) {
+          // オブジェクトを一括削除（最大1000件ずつ）
+          const deleteCommand = new DeleteObjectsCommand({
+            Bucket: process.env.AWS_S3_BUCKET_NAME!,
+            Delete: {
+              Objects: objects.map(obj => ({ Key: obj.Key! })),
+              Quiet: true,
+            },
+          });
+
+          await s3Client.send(deleteCommand);
+        }
+
+        continuationToken = listResponse.NextContinuationToken;
+      } while (continuationToken);
+
+      clientLogger.info('deleteDirectory', `S3ディレクトリ削除成功: ${normalizedPrefix}`);
+    } catch (error) {
+      clientLogger.error('deleteDirectory', `S3ディレクトリ削除失敗: ${normalizedPrefix}`, { error });
+    }
+  } else {
+    // 開発環境: ローカルディスクからディレクトリを削除
+    const localPath = join(process.cwd(), 'public', directoryPath);
+
+    try {
+      await rm(localPath, { recursive: true, force: true });
+    } catch (error) {
+      clientLogger.error('deleteDirectory', `ローカルディレクトリ削除失敗: ${localPath}`, { error });
     }
   }
 }
