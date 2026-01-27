@@ -29,7 +29,11 @@ export const menuConfig: MenuGroup[] = [
     id: 'importmanager',
     label: 'インポート管理',
     items: [
-
+      {
+        id: 'userImport',
+        label: 'ユーザインポート',
+        path: '/userImport',
+      },
       {
         id: 'importResult',
         label: 'インポート結果一覧',

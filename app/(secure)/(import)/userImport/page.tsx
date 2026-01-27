@@ -1,0 +1,81 @@
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { FileUploadField } from '@/components/ui/FileUploadField';
+import ButtonGroup from '@/components/ui/buttonGroup';
+import { FileInfo } from '@/utils/fileUtils';
+
+export default function UserImportPage() {
+  const router = useRouter();
+  const [files, setFiles] = useState<FileInfo[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleFileChange = (e: { target: { name: string; value: FileInfo[] } }) => {
+    setFiles(e.target.value);
+  };
+
+  const handleSubmit = async () => {
+    if (files.length === 0) {
+      alert('ファイルを選択してください');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/batch/user-import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          s3Key: files[0].key,
+        }),
+      });
+
+      if (response.ok) {
+        router.push('/importResult');
+      } else {
+        const data = await response.json();
+        alert(data.error || 'インポートに失敗しました');
+      }
+    } catch {
+      alert('インポートに失敗しました');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCancel = () => {
+    history.back();
+  };
+
+  const buttons = [
+    {
+      label: isLoading ? '処理中...' : 'インポート',
+      onClick: handleSubmit,
+      disabled: isLoading,
+    },
+    {
+      label: '戻る',
+      onClick: handleCancel,
+      isCancel: true,
+    },
+  ];
+
+  return (
+    <>
+      <h1 className="text-2xl font-bold mt-4 pb-3">ユーザインポート</h1>
+      <div className="w-4/5">
+        <FileUploadField
+          label="ユーザファイル（csv形式）"
+          name="userFile"
+          value={files}
+          onChange={handleFileChange}
+          isCopyable={false}
+        />
+        <div className="mt-4">
+          <ButtonGroup buttons={buttons} />
+        </div>
+      </div>
+    </>
+  );
+}
