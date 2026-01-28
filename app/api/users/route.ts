@@ -1,17 +1,16 @@
-import { isAdmin, requireAdmin, requireAuth } from "@/app/lib/auth";
+import { withAdmin } from "@/app/lib/auth";
 import { prisma } from '@/app/lib/prisma';
 import { ERROR_MESSAGES } from "@/constants/errorMessages";
 import { STATUS_CODES } from "@/constants/statusCodes";
 import { hashPassword } from "@/utils/cryptroUtils";
 import { logAPIEndpoint, logDatabaseQuery, QueryTimer } from "@/utils/database-logger";
 import { handleError } from "@/utils/errorHandler";
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 // GET /api/users - ユーザ一覧情報を取得
-export async function GET(req: NextRequest) {
+export const GET = withAdmin(async (req, user) => {
   const apiTimer = new QueryTimer();
   try {
-    const user = await requireAdmin(req);
 
     // クエリ文字列から検索パラメータを取得
     const { searchParams } = new URL(req.url);
@@ -245,33 +244,13 @@ export async function GET(req: NextRequest) {
       '/api/users',
     )
   }
-}
+});
 
 // POST /api/users - 新しいユーザ情報を作成
-export async function POST(req: NextRequest) {
+export const POST = withAdmin(async (req, user) => {
   const apiTimer = new QueryTimer();
 
   try {
-    const user = await requireAuth(req);
-
-    // ユーザが管理者か確認
-    if (!isAdmin(user)) {
-      logAPIEndpoint({
-        method: 'POST',
-        endpoint: '/api/users',
-        userId: user.id,
-        statusCode: STATUS_CODES.FORBIDDEN,
-        executionTime: apiTimer.elapsed(),
-        error: ERROR_MESSAGES.PERMISSION_DENIED
-      });
-      return handleError(
-        new Error(ERROR_MESSAGES.PERMISSION_DENIED),
-        STATUS_CODES.FORBIDDEN,
-        apiTimer,
-        'POST',
-        '/api/users'
-      );
-    }
 
     const body = await req.json();
     const {
@@ -524,4 +503,4 @@ export async function POST(req: NextRequest) {
       '/api/users'
     );
   }
-}
+});
