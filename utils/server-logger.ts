@@ -1,79 +1,91 @@
-import { formatDateTimeForLogs } from "./date-formatter";
-import { getCurrentUserId, getCurrentRequestId } from "./request-context";
-
-type LogLevel = 'debug' | 'info' | 'warn' | 'error';
-
-interface LogEntry {
-  level: LogLevel;
-  message: string;
-  timestamp: string;
-  userId?: number | string;
-  requestId?: string;
-  optionalParams?: any[];
-}
+import pino from 'pino';
+import pinoCloudwatch from 'pino-cloudwatch';
 
 class ServerLogger {
-  private level: LogLevel;
+  private logger: pino.Logger;
 
   constructor() {
-    this.level = process.env.NODE_ENV === 'production' ? 'info' : 'debug';
-  }
+    const isDevelopment = process.env.NODE_ENV !== 'production';
+    const logLevel = process.env.NODE_ENV === 'production' ? 'info' : 'debug';
+    const isCloudWatchEnabled = process.env.ENABLE_CLOUDWATCH_LOGS === 'true';
 
-  private shouldLog(level: LogLevel): boolean {
-    const levels: LogLevel[] = ['debug', 'info', 'warn', 'error'];
-    return levels.indexOf(level) >= levels.indexOf(this.level);
-  }
+    // 本番環境でCloudWatchが有効な場合は直接CloudWatchに送信
+    const shouldUseCloudWatch = !isDevelopment && isCloudWatchEnabled;
 
-  private formatLog(level: LogLevel, message: string, ...optionalParams: any[]): LogEntry {
-    const userId = getCurrentUserId();
-    const requestId = getCurrentRequestId();
-    return {
-      level,
-      message,
-      timestamp: formatDateTimeForLogs(new Date()),
-      ...(userId !== undefined && { userId }),
-      ...(requestId !== undefined && { requestId }),
-      optionalParams,
-    };
-  }
+    let stream;
+    if (shouldUseCloudWatch) {
+      const logGroupName = process.env.CLOUDWATCH_SERVER_LOG_GROUP || '/ecs/prooflink-prod-app-server';
+      const logStreamName = `server-${new Date().toISOString().split('T')[0]}-${process.env.HOSTNAME || 'unknown'}`;
 
-  private output(entry: LogEntry): void {
-    const logFn = console[entry.level] || console.log;
-    if (process.env.NODE_ENV === 'production') {
-      // 本番環境ではJSON形式で出力
-      logFn(JSON.stringify(entry));
-    } else {
-      // 開発環境では読みやすい形式で出力
-      const userInfo = entry.userId !== undefined ? ` [user:${entry.userId}]` : '';
-      const requestInfo = entry.requestId !== undefined ? ` [req:${entry.requestId}]` : '';
-      const dataStr = entry.optionalParams?.length
-        ? ` ${JSON.stringify(entry.optionalParams, null, 2)}`
-        : '';
-      logFn(`[${entry.timestamp}]${userInfo}${requestInfo} ${entry.level.toUpperCase()}: ${entry.message}${dataStr}`);
+      stream = pinoCloudwatch({
+        logGroupName,
+        logStreamName,
+        awsRegion: process.env.AWS_REGION || 'ap-northeast-1',
+        awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+        interval: 1000, // 1秒ごとにバッチ送信
+      });
     }
+
+    this.logger = pino(
+      {
+        level: logLevel,
+        // 本番環境では構造化JSON、開発環境では読みやすい形式
+        transport: isDevelopment
+          ? {
+              target: 'pino-pretty',
+              options: {
+                colorize: true,
+                translateTime: 'SYS:yyyy-mm-dd HH:MM:ss',
+                ignore: 'pid,hostname',
+              },
+            }
+          : undefined,
+        // 本番環境用の設定
+        formatters: {
+          level: (label) => {
+            return { level: label };
+          },
+        },
+        timestamp: pino.stdTimeFunctions.isoTime,
+        base: {
+          env: process.env.NODE_ENV,
+          logSource: 'server',
+        },
+      },
+      stream || undefined
+    );
   }
 
   debug(message: string, ...optionalParams: any[]): void {
-    if (this.shouldLog('debug')) {
-      this.output(this.formatLog('debug', message, optionalParams));
+    if (optionalParams.length > 0) {
+      this.logger.debug({ data: optionalParams }, message);
+    } else {
+      this.logger.debug(message);
     }
   }
 
   info(message: string, ...optionalParams: any[]): void {
-    if (this.shouldLog('info')) {
-      this.output(this.formatLog('info', message, optionalParams));
+    if (optionalParams.length > 0) {
+      this.logger.info({ data: optionalParams }, message);
+    } else {
+      this.logger.info(message);
     }
   }
 
   warn(message: string, ...optionalParams: any[]): void {
-    if (this.shouldLog('warn')) {
-      this.output(this.formatLog('warn', message, optionalParams));
+    if (optionalParams.length > 0) {
+      this.logger.warn({ data: optionalParams }, message);
+    } else {
+      this.logger.warn(message);
     }
   }
 
   error(message: string, ...optionalParams: any[]): void {
-    if (this.shouldLog('error')) {
-      this.output(this.formatLog('error', message, optionalParams));
+    if (optionalParams.length > 0) {
+      this.logger.error({ data: optionalParams }, message);
+    } else {
+      this.logger.error(message);
     }
   }
 }

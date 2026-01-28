@@ -698,14 +698,31 @@ prooflink-dev-files-xxxxx/
 
 #### 10-2. CloudWatch Logsグループの作成
 
+アプリケーションログを**サーバーログ**と**クライアントログ**で分離して管理します。
+
+**サーバーログ用ロググループ（APIエラー、DB接続エラーなど）:**
+
 1. 「**CloudWatch**」→「**ロググループ**」→「**ロググループを作成**」
 
 | 項目 | 開発環境 | 本番環境 |
 |------|---------|---------|
-| ロググループ名 | `/ecs/prooflink-dev-app` | `/ecs/prooflink-prod-app` |
-| ログの保持期間 | 3日 | 30日 |
+| ロググループ名 | `/ecs/prooflink-dev-app-server` | `/ecs/prooflink-prod-app-server` |
+| ログの保持期間 | 7日 | 30日 |
 
 2. 「**作成**」をクリック
+
+**クライアントログ用ロググループ（ブラウザエラー、UI操作ログなど）:**
+
+1. 「**CloudWatch**」→「**ロググループ**」→「**ロググループを作成**」
+
+| 項目 | 開発環境 | 本番環境 |
+|------|---------|---------|
+| ロググループ名 | `/ecs/prooflink-dev-app-client` | `/ecs/prooflink-prod-app-client` |
+| ログの保持期間 | 3日 | 7日 |
+
+2. 「**作成**」をクリック
+
+> **注意**: クライアントログは量が多くなる傾向があるため、保持期間を短めに設定してコストを削減します。
 
 #### 10-3. タスク定義の作成
 
@@ -739,6 +756,12 @@ prooflink-dev-files-xxxxx/
 | NEXTAUTH_URL | Value | `https://prooflink.example.com` | アプリケーションURL |
 | AWS_REGION | Value | `ap-northeast-1` | AWSリージョン |
 | AWS_S3_BUCKET_NAME | Value | `prooflink-dev-files-xxxxx` | S3バケット名 |
+| ENABLE_CLOUDWATCH_LOGS | Value | `true` | CloudWatch Logs直接送信の有効化 |
+| CLOUDWATCH_SERVER_LOG_GROUP | Value | `/ecs/prooflink-prod-app-server` | サーバーログ用ロググループ名 |
+| CLOUDWATCH_CLIENT_LOG_GROUP | Value | `/ecs/prooflink-prod-app-client` | クライアントログ用ロググループ名 |
+| NEXT_PUBLIC_CLIENT_LOG_SEND_LEVEL | Value | `warn` | クライアントログ送信レベル |
+| NEXT_PUBLIC_CLIENT_LOG_BATCH_SIZE | Value | `10` | クライアントログバッチサイズ |
+| NEXT_PUBLIC_CLIENT_LOG_BATCH_INTERVAL | Value | `30000` | クライアントログバッチ送信間隔(ms) |
 
 **シークレットから取得する環境変数（Secrets Manager経由）:**
 
@@ -1063,6 +1086,50 @@ Web ACL作成画面で:
 6. SNSトピックを設定(通知先メールアドレス)
 7. アラーム名: `prooflink-ecs-cpu-high`
 8. 「**アラームの作成**」をクリック
+
+#### 15-2. CloudWatch Logs Insightsクエリ例
+
+ログを効率的に検索・分析するためのクエリ例です。
+
+**サーバーエラーのみ抽出:**
+```
+fields @timestamp, message, data
+| filter logSource = "server" and level = "error"
+| sort @timestamp desc
+| limit 100
+```
+
+**クライアントエラーを画面別に集計:**
+```
+fields @timestamp, screenName, message, userId, url
+| filter logSource = "client" and level = "error"
+| stats count() by screenName
+| sort count desc
+```
+
+**特定ユーザーのクライアントログ:**
+```
+fields @timestamp, screenName, message, url
+| filter logSource = "client" and userId = 123
+| sort @timestamp desc
+| limit 50
+```
+
+**API エラーレート（5分間隔）:**
+```
+fields @timestamp, message
+| filter logSource = "server" and level = "error"
+| stats count() as errorCount by bin(5m)
+| sort @timestamp desc
+```
+
+**クライアントログ量の監視:**
+```
+fields @timestamp
+| filter logSource = "client"
+| stats count() as logCount by bin(1h)
+| sort @timestamp desc
+```
 
 ---
 
