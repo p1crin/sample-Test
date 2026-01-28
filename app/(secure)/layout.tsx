@@ -4,6 +4,7 @@ import { SidebarContainer } from '@/components/sidebar/SidebarContainer';
 import Breadcrumb from '@/components/ui/breadcrumb';
 import Loading from '@/components/ui/loading';
 import type { RootState } from '@/stores/store';
+import clientLogger from '@/utils/client-logger';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { ReactNode, useEffect, useState } from 'react';
@@ -23,6 +24,16 @@ export default function Layout({ children }: { children: ReactNode }) {
       router.push('/login');
     }
   }, [status, router]);
+
+  // クライアントロガーにユーザーIDを設定
+  useEffect(() => {
+    if (session?.user?.id) {
+      clientLogger.setUserId(session.user.id);
+    }
+    return () => {
+      clientLogger.clearUserId();
+    };
+  }, [session?.user?.id]);
 
   // セッション読み込み中の表示
   if (status === 'loading') {

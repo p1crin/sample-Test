@@ -1,4 +1,5 @@
 import { formatDateTimeForLogs } from "./date-formatter";
+import { getCurrentUserId, getCurrentRequestId } from "./request-context";
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -6,6 +7,8 @@ interface LogEntry {
   level: LogLevel;
   message: string;
   timestamp: string;
+  userId?: number | string;
+  requestId?: string;
   optionalParams?: any[];
 }
 
@@ -22,10 +25,14 @@ class ServerLogger {
   }
 
   private formatLog(level: LogLevel, message: string, ...optionalParams: any[]): LogEntry {
+    const userId = getCurrentUserId();
+    const requestId = getCurrentRequestId();
     return {
       level,
       message,
       timestamp: formatDateTimeForLogs(new Date()),
+      ...(userId !== undefined && { userId }),
+      ...(requestId !== undefined && { requestId }),
       optionalParams,
     };
   }
@@ -37,10 +44,12 @@ class ServerLogger {
       logFn(JSON.stringify(entry));
     } else {
       // 開発環境では読みやすい形式で出力
-      const dataStr = entry.optionalParams
+      const userInfo = entry.userId !== undefined ? ` [user:${entry.userId}]` : '';
+      const requestInfo = entry.requestId !== undefined ? ` [req:${entry.requestId}]` : '';
+      const dataStr = entry.optionalParams?.length
         ? ` ${JSON.stringify(entry.optionalParams, null, 2)}`
         : '';
-      logFn(`[${entry.timestamp}] ${entry.level.toUpperCase()}: ${entry.message}${dataStr}`);
+      logFn(`[${entry.timestamp}]${userInfo}${requestInfo} ${entry.level.toUpperCase()}: ${entry.message}${dataStr}`);
     }
   }
 
