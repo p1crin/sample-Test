@@ -13,11 +13,48 @@ export function parseCsvBase(csvContent: string): Record<string, string>[] {
       bom: true, // BOM対応
     }) as Record<string, string>[];
 
-    return records;
+    // 空の列（すべての行で値が空の列）を除去
+    return removeEmptyColumns(records);
   } catch (error) {
     console.error('CSVパースエラー:', error);
     throw new Error(`CSVのパースに失敗しました: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+/**
+ * すべての行で値が空の列を除去する
+ * （ヘッダーのみ存在し、データがすべて空の列を無視）
+ */
+export function removeEmptyColumns(records: Record<string, string>[]): Record<string, string>[] {
+  if (records.length === 0) {
+    return records;
+  }
+
+  // 全カラム名を取得
+  const allColumns = Object.keys(records[0]);
+
+  // すべての行で値が空の列を特定
+  const emptyColumns = allColumns.filter(column =>
+    records.every(record => !record[column] || record[column].trim() === '')
+  );
+
+  // 空の列がない場合はそのまま返す
+  if (emptyColumns.length === 0) {
+    return records;
+  }
+
+  console.log(`空の列を無視します: ${emptyColumns.join(', ')}`);
+
+  // 空の列を除去した新しいレコード配列を返す
+  return records.map(record => {
+    const newRecord: Record<string, string> = {};
+    for (const [key, value] of Object.entries(record)) {
+      if (!emptyColumns.includes(key)) {
+        newRecord[key] = value;
+      }
+    }
+    return newRecord;
+  });
 }
 
 /**
