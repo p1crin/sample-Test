@@ -1,12 +1,13 @@
 import { canModifyTestGroup, canViewTestGroup, requireAdminOrTestManager, requireAuth } from '@/app/lib/auth';
 import { prisma } from '@/app/lib/prisma';
+import { deleteDirectory } from '@/app/lib/storage';
 import { ERROR_MESSAGES } from '@/constants/errorMessages';
 import { STATUS_CODES } from '@/constants/statusCodes';
 import { logAPIEndpoint, logDatabaseQuery, QueryTimer } from '@/utils/database-logger';
 import { handleError } from '@/utils/errorHandler';
 import serverLogger from '@/utils/server-logger';
 import { existsSync } from 'fs';
-import { mkdir, rm } from 'fs/promises';
+import { mkdir } from 'fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
 import { join } from 'path';
 
@@ -416,9 +417,12 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
         `/api/test-groups/${groupId}`,
       );
     }
-    // 紐づいているファイルの削除 TODO:AWS S3上のディレクトリを削除
-    const deleteDir = join(process.cwd(), 'public', 'uploads', 'test-cases', String(groupId));
-    await rm(deleteDir, { recursive: true, force: true })
+    // 紐づいているファイルの削除（制御仕様書、データフロー、エビデンス）
+    // S3/ローカルの両方に対応
+    await Promise.all([
+      deleteDirectory(`/uploads/test-cases/${groupId}`, user.id),  // 制御仕様書・データフロー
+      deleteDirectory(`/evidences/${groupId}`, user.id),            // エビデンス
+    ]);
 
     const deleteTimer = new QueryTimer();
     // Prisma トランザクション内でテストグループを削除
