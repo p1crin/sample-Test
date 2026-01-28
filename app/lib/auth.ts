@@ -124,6 +124,31 @@ export function withAdmin<T = NextResponse>(handler: ApiHandler<T>) {
   };
 }
 
+/**
+ * 管理者またはテスト管理者認証付きAPIハンドラーラッパー
+ * ユーザーIDがリクエストコンテキストに自動設定され、すべてのログに含まれる
+ */
+export function withAdminOrTestManager<T = NextResponse>(handler: ApiHandler<T>) {
+  return async (
+    req: NextRequest,
+    context?: { params: Promise<Record<string, string>> }
+  ): Promise<T | NextResponse> => {
+    const user = await getAuthUser(req);
+
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    if (!isAdmin(user) && !isTestManager(user)) {
+      return NextResponse.json({ error: 'Forbidden: Admin or Test Manager access required' }, { status: 403 });
+    }
+
+    return runWithContextAsync({ userId: user.id }, () =>
+      handler(req, user, context)
+    );
+  };
+}
+
 // 管理者ロールまたはテスト管理者ロールが必要
 export async function requireAdminOrTestManager(req: NextRequest): Promise<SessionUser> {
   const user = await requireAuth(req);

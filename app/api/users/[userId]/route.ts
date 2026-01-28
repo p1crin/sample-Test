@@ -1,33 +1,18 @@
-import { isAdmin, requireAuth } from "@/app/lib/auth";
+import { withAdmin } from "@/app/lib/auth";
 import { prisma } from "@/app/lib/prisma";
 import { ERROR_MESSAGES } from "@/constants/errorMessages";
 import { STATUS_CODES } from "@/constants/statusCodes";
 import { hashPassword } from "@/utils/cryptroUtils";
 import { logAPIEndpoint, logDatabaseQuery, QueryTimer } from "@/utils/database-logger";
 import { handleError } from "@/utils/errorHandler";
-import { NextRequest, NextResponse } from "next/server";
-
-interface RouteParams {
-  params: Promise<{ userId: string }>
-}
+import { NextResponse } from "next/server";
 
 // GET /api/users/[userId] - ユーザー詳細取得
-export async function GET(req: NextRequest, { params }: RouteParams) {
+export const GET = withAdmin(async (req, user, context) => {
   const apiTimer = new QueryTimer();
-  const { userId } = await params;
+  const { userId } = await context!.params;
 
   try {
-    const user = await requireAuth(req);
-
-    if (!isAdmin(user)) {
-      return handleError(
-        new Error(ERROR_MESSAGES.PERMISSION_DENIED),
-        STATUS_CODES.FORBIDDEN,
-        apiTimer,
-        'GET',
-        `/api/users/${userId}`
-      );
-    }
 
     const queryTimer = new QueryTimer();
     const userData = await prisma.mt_users.findUnique({
@@ -121,12 +106,12 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
       `/api/users/${userId}`
     );
   }
-}
+});
 
 // PUT /api/users/[userId] - ユーザ更新
-export async function PUT(req: NextRequest, { params }: RouteParams) {
+export const PUT = withAdmin(async (req, user, context) => {
   const apiTimer = new QueryTimer();
-  const { userId } = await params;
+  const { userId } = await context!.params;
 
   if (isNaN(parseInt(userId, 10))) {
     return handleError(
@@ -139,26 +124,6 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
   }
 
   try {
-    const user = await requireAuth(req);
-
-    // ユーザが管理者か確認   
-    if (!isAdmin(user)) {
-      logAPIEndpoint({
-        method: 'PUT',
-        endpoint: `/api/users/${userId}`,
-        userId: user.id,
-        statusCode: STATUS_CODES.FORBIDDEN,
-        executionTime: apiTimer.elapsed(),
-        error: ERROR_MESSAGES.PERMISSION_DENIED
-      });
-      return handleError(
-        new Error(ERROR_MESSAGES.PERMISSION_DENIED),
-        STATUS_CODES.FORBIDDEN,
-        apiTimer,
-        'PUT',
-        `/api/users/${userId}`
-      );
-    }
 
     const body = await req.json();
     const {
@@ -491,12 +456,12 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       `/api/users/${userId}`
     );
   }
-}
+});
 
 // DELETE /api/users/[userId] - ユーザー削除
-export async function DELETE(req: NextRequest, { params }: RouteParams) {
+export const DELETE = withAdmin(async (req, user, context) => {
   const apiTimer = new QueryTimer();
-  const { userId } = await params;
+  const { userId } = await context!.params;
 
   if (isNaN(parseInt(userId, 10))) {
     return handleError(
@@ -509,27 +474,6 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
   }
 
   try {
-    const user = await requireAuth(req);
-
-    // ユーザが管理者か確認   
-    if (!isAdmin(user)) {
-      logAPIEndpoint({
-        method: 'DELETE',
-        endpoint: `/api/users/${userId}`,
-        userId: user.id,
-        statusCode: STATUS_CODES.FORBIDDEN,
-        executionTime: apiTimer.elapsed(),
-        error: ERROR_MESSAGES.PERMISSION_DENIED
-      });
-      return handleError(
-        new Error(ERROR_MESSAGES.PERMISSION_DENIED),
-        STATUS_CODES.FORBIDDEN,
-        apiTimer,
-        'DELETE',
-        `/api/users/${userId}`
-      );
-
-    }
 
     const deleteTimer = new QueryTimer();
     // ユーザIDに一致するレコードを削除扱い
@@ -575,4 +519,4 @@ export async function DELETE(req: NextRequest, { params }: RouteParams) {
       `/api/users/${userId}`
     );
   }
-}
+});

@@ -1,14 +1,13 @@
-import { requireAdmin } from '@/app/lib/auth';
+import { withAdmin } from '@/app/lib/auth';
 import { prisma } from '@/app/lib/prisma';
 import { STATUS_CODES } from '@/constants/statusCodes';
 import { logAPIEndpoint, logDatabaseQuery, QueryTimer } from "@/utils/database-logger";
 import { handleError } from '@/utils/errorHandler';
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 
 // GET /api/users/export - ユーザエクスポート
-export async function GET(req: NextRequest) {
+export const GET = withAdmin(async (req, user) => {
   const apiTimer = new QueryTimer();
-  const user = await requireAdmin(req);
   try {
     const queryTimer = new QueryTimer();
 
@@ -86,18 +85,15 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (error) {
-    const statusCode = error instanceof Error && error.message === 'Unauthorized' ? STATUS_CODES.UNAUTHORIZED :
-      error instanceof Error && error.message === 'Forbidden' ? STATUS_CODES.FORBIDDEN :
-        STATUS_CODES.INTERNAL_SERVER_ERROR;
-    handleError(
+    return handleError(
       error as Error,
-      statusCode,
+      STATUS_CODES.INTERNAL_SERVER_ERROR,
       apiTimer,
       'GET',
       '/api/users/export'
     );
   }
-}
+});
 
 /**
  * CSVフィールドをエスケープ（カンマ、引用符、改行を処理）
