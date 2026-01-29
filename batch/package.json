@@ -17,6 +17,9 @@
     "bcrypt": "^6.0.0",
     "csv-parse": "^5.5.0",
     "dotenv": "^16.3.1",
+    "pino": "^10.3.0",
+    "pino-cloudwatch": "^0.7.0",
+    "pino-pretty": "^13.0.1",
     "utils": "^0.3.1"
   },
   "devDependencies": {

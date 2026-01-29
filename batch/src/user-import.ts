@@ -1,4 +1,6 @@
 import dotenv from 'dotenv';
+dotenv.config();
+
 import { PrismaClient } from '@prisma/client';
 import {
   readCsvFromS3,
@@ -11,9 +13,10 @@ import {
 import { parseCsv, validateAllRows, parseStatus } from './utils/csv-parser';
 import { hashPassword } from './utils/password-hash';
 import { UserCsvRow, UserImportResult, ImportSummary } from './types/user-import.types';
+import { createBatchLogger } from './utils/logger';
 import * as path from 'path';
 
-dotenv.config();
+const logger = createBatchLogger('user-import');
 
 const prisma = new PrismaClient();
 
@@ -243,7 +246,7 @@ async function importUserInTransaction(
  */
 async function main(): Promise<void> {
   const startTime = new Date();
-  console.log('ユーザインポートバッチを開始します...');
+  logger.startBatch('ユーザインポートバッチを開始します');
 
   let importResultId: number | null = null;
 
@@ -270,8 +273,7 @@ async function main(): Promise<void> {
       outputLocation = outputDirPath;
     }
 
-    console.log(`ストレージモード: ${storageMode}`);
-    console.log(`入力: ${inputSource}`);
+    logger.info('バッチ設定', { storageMode, inputSource, outputLocation });
 
     // 実行開始をDBに記録（import_status=0: 実施中）
     const fileName = storageMode === 's3'
@@ -289,10 +291,10 @@ async function main(): Promise<void> {
       },
     });
     importResultId = importRecord.id;
-    console.log(`インポート実行ID: ${importResultId}`);
+    logger.info('インポート実行レコードを作成', { importResultId });
 
     // CSVファイルを読み込み
-    console.log('CSVファイルを読み込み中...');
+    logger.info('CSVファイルを読み込み中');
     let csvContent: string;
     if (storageMode === 's3') {
       const inputBucket = process.env.INPUT_S3_BUCKET!;
@@ -304,20 +306,19 @@ async function main(): Promise<void> {
     }
 
     // CSVをパース
-    console.log('CSVをパース中...');
+    logger.info('CSVをパース中');
     const rows = parseCsv(csvContent);
-    console.log(`${rows.length}件のユーザデータを検出しました`);
+    logger.info('ユーザデータを検出', { count: rows.length });
 
     if (rows.length === 0) {
       throw new Error('CSVにデータが含まれていません');
     }
 
     // 事前バリデーション
-    console.log('全行のバリデーションを実行中...');
+    logger.info('全行のバリデーションを実行中');
     const validation = validateAllRows(rows);
     if (!validation.valid) {
-      console.error('バリデーションエラー:');
-      validation.errors.forEach(err => console.error(`  - ${err}`));
+      logger.error('バリデーションエラー', null, { errors: validation.errors });
 
       // エラー詳細をメッセージに含める
       const errorMessage = `バリデーションエラーが${validation.errors.length}件発生したため実行されませんでした:\n${validation.errors.join('\n')}`;
@@ -339,19 +340,19 @@ async function main(): Promise<void> {
         const outputBucket = process.env.OUTPUT_S3_BUCKET!;
         const resultJsonKey = `user-import-results/result-${timestamp}.json`;
         await writeResultToS3(outputBucket, resultJsonKey, resultContent);
-        console.error(`\n結果ファイル: s3://${outputBucket}/${resultJsonKey}`);
+        logger.error('バリデーションエラーにより終了', null, { resultFile: `s3://${outputBucket}/${resultJsonKey}` });
       } else {
         const outputDirPath = process.env.OUTPUT_DIR_PATH!;
         const resultJsonPath = path.join(outputDirPath, `result-${timestamp}.json`);
         await writeResultToLocal(resultJsonPath, resultContent);
-        console.error(`\n結果ファイル: ${resultJsonPath}`);
+        logger.error('バリデーションエラーにより終了', null, { resultFile: resultJsonPath });
       }
 
       process.exit(1);
     }
 
     // トランザクション内で全ユーザをインポート
-    console.log('ユーザデータをインポート中...');
+    logger.info('ユーザデータをインポート中');
     const results: UserImportResult[] = [];
     let createdCount = 0;
     let updatedCount = 0;
@@ -361,7 +362,7 @@ async function main(): Promise<void> {
         const row = rows[i];
         const rowNumber = i + 2; // ヘッダー行を考慮
 
-        console.log(`[${i + 1}/${rows.length}] ${row.email} を処理中...`);
+        logger.progress(i + 1, rows.length, `${row.email} を処理中`, { email: row.email });
 
         try {
           const result = await importUserInTransaction(tx, row, rowNumber);
@@ -375,7 +376,7 @@ async function main(): Promise<void> {
         } catch (error) {
           // エラーが発生したらトランザクション全体をロールバック
           const errorMessage = error instanceof Error ? error.message : String(error);
-          console.error(`  エラー: ${errorMessage}`);
+          logger.error('行処理中にエラー発生', error, { rowNumber, email: row.email });
 
           // エラー結果を記録
           results.push({
@@ -411,7 +412,7 @@ async function main(): Promise<void> {
     // 結果を書き込み
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 
-    console.log('結果を書き込み中...');
+    logger.info('結果を書き込み中');
     if (storageMode === 's3') {
       const outputBucket = process.env.OUTPUT_S3_BUCKET!;
       const resultJsonKey = `user-import-results/result-${timestamp}.json`;
@@ -420,12 +421,15 @@ async function main(): Promise<void> {
       await writeResultToS3(outputBucket, resultJsonKey, JSON.stringify(summary, null, 2));
       await writeImportResultCsv(outputBucket, resultCsvKey, results);
 
-      // 結果を表示
-      console.log('\n=== インポート完了 ===');
-      console.log(successMessage);
-      console.log(`\n結果ファイル:`);
-      console.log(`  JSON: s3://${outputBucket}/${resultJsonKey}`);
-      console.log(`  CSV: s3://${outputBucket}/${resultCsvKey}`);
+      logger.endBatch('インポート完了', {
+        successCount,
+        createdCount,
+        updatedCount,
+        resultFiles: {
+          json: `s3://${outputBucket}/${resultJsonKey}`,
+          csv: `s3://${outputBucket}/${resultCsvKey}`,
+        },
+      });
     } else {
       const outputDirPath = process.env.OUTPUT_DIR_PATH!;
       const resultJsonPath = path.join(outputDirPath, `result-${timestamp}.json`);
@@ -434,12 +438,15 @@ async function main(): Promise<void> {
       await writeResultToLocal(resultJsonPath, JSON.stringify(summary, null, 2));
       await writeImportResultCsvToLocal(resultCsvPath, results);
 
-      // 結果を表示
-      console.log('\n=== インポート完了 ===');
-      console.log(successMessage);
-      console.log(`\n結果ファイル:`);
-      console.log(`  JSON: ${resultJsonPath}`);
-      console.log(`  CSV: ${resultCsvPath}`);
+      logger.endBatch('インポート完了', {
+        successCount,
+        createdCount,
+        updatedCount,
+        resultFiles: {
+          json: resultJsonPath,
+          csv: resultCsvPath,
+        },
+      });
     }
 
     // DBレコードを更新（import_status=1: 成功）
@@ -453,7 +460,7 @@ async function main(): Promise<void> {
       },
     });
   } catch (error) {
-    console.error('ユーザインポートバッチでエラーが発生しました:', error);
+    logger.error('ユーザインポートバッチでエラーが発生しました', error);
     const errorMessage = error instanceof Error ? error.message : String(error);
 
     // DBレコードを更新（import_status=2: エラー）
@@ -486,7 +493,7 @@ async function main(): Promise<void> {
         });
       }
     } catch (dbError) {
-      console.error('エラー記録の保存に失敗しました:', dbError);
+      logger.error('エラー記録の保存に失敗しました', dbError);
     }
 
     process.exit(1);
