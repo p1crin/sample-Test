@@ -1,6 +1,12 @@
 import pino from 'pino';
-import pinoCloudwatch from 'pino-cloudwatch';
 
+/**
+ * バッチ処理用ロガー
+ *
+ * AWS ECS/Fargateで動作する場合、awslogsドライバーがstdoutを
+ * 自動的にCloudWatch Logsに送信するため、pinoはJSON形式で
+ * stdoutに出力するだけでOK
+ */
 class BatchLogger {
   private logger: pino.Logger;
   private batchName: string;
@@ -9,25 +15,6 @@ class BatchLogger {
     this.batchName = batchName;
     const isDevelopment = process.env.NODE_ENV !== 'production';
     const logLevel = process.env.LOG_LEVEL || (isDevelopment ? 'debug' : 'info');
-    const isCloudWatchEnabled = process.env.ENABLE_CLOUDWATCH_LOGS === 'true';
-
-    // 本番環境でCloudWatchが有効な場合は直接CloudWatchに送信
-    const shouldUseCloudWatch = !isDevelopment && isCloudWatchEnabled;
-
-    let stream;
-    if (shouldUseCloudWatch) {
-      const logGroupName = process.env.CLOUDWATCH_BATCH_LOG_GROUP || '/ecs/prooflink-prod-batch';
-      const logStreamName = `${batchName}-${new Date().toISOString().split('T')[0]}-${process.env.HOSTNAME || 'unknown'}`;
-
-      stream = pinoCloudwatch({
-        logGroupName,
-        logStreamName,
-        awsRegion: process.env.AWS_REGION || 'ap-northeast-1',
-        awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-        interval: 1000, // 1秒ごとにバッチ送信
-      });
-    }
 
     this.logger = pino(
       {
@@ -55,8 +42,7 @@ class BatchLogger {
           logSource: 'batch',
           batchName: this.batchName,
         },
-      },
-      stream || undefined
+      }
     );
   }
 
