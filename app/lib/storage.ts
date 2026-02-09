@@ -1,6 +1,6 @@
-import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand, CopyObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { mkdir, rm, writeFile } from 'fs/promises';
+import { copyFile as fsCopyFile, mkdir, rm, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import clientLogger from '@/utils/client-logger';
@@ -160,5 +160,63 @@ export async function getFileUrl(filePath: string, expiresIn: number = 3600): Pr
   } else {
     // 開発環境: ローカルパスをそのまま返す
     return filePath;
+  }
+}
+
+/**
+ * ストレージ内でファイルをコピー
+ * 環境に応じてローカルディスクまたはS3内でコピー
+ * @param sourcePath コピー元のファイルパス
+ * @param destDirectory コピー先ディレクトリ（例: test-cases/newGroupId/tid）
+ * @param destFileName コピー先ファイル名
+ * @returns コピー先のファイルパス
+ */
+export async function copyStorageFile(
+  sourcePath: string,
+  destDirectory: string,
+  destFileName: string
+): Promise<string> {
+  if (!sourcePath) return '';
+
+  if (useS3 && s3Client) {
+    // 本番環境: S3内でコピー
+    const sourceKey = sourcePath.startsWith('/') ? sourcePath.substring(1) : sourcePath;
+    const destKey = `${destDirectory}/${destFileName}`;
+    const bucketName = process.env.AWS_S3_BUCKET_NAME!;
+
+    const copyCommand = new CopyObjectCommand({
+      Bucket: bucketName,
+      CopySource: `${bucketName}/${sourceKey}`,
+      Key: destKey,
+    });
+
+    try {
+      await s3Client.send(copyCommand);
+      return destKey;
+    } catch (error) {
+      clientLogger.error('copyStorageFile', `S3ファイルコピー失敗 source: ${sourceKey}, dest: ${destKey}`, { error });
+      throw new Error('File copy in S3 failed');
+    }
+  } else {
+    // 開発環境: ローカルディスク内でコピー
+    const sourceLocalPath = join(process.cwd(), 'public', sourcePath);
+    const destDir = join(process.cwd(), 'public', 'uploads', destDirectory);
+
+    if (!existsSync(destDir)) {
+      await mkdir(destDir, { recursive: true });
+    }
+
+    const destLocalPath = join(destDir, destFileName);
+
+    try {
+      if (existsSync(sourceLocalPath)) {
+        await fsCopyFile(sourceLocalPath, destLocalPath);
+      }
+    } catch (error) {
+      clientLogger.error('copyStorageFile', `ローカルファイルコピー失敗 source: ${sourceLocalPath}, dest: ${destLocalPath}`, { error });
+      throw new Error('File copy in local storage failed');
+    }
+
+    return `/uploads/${destDirectory}/${destFileName}`;
   }
 }
