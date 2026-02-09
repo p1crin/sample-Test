@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/button';
 import ButtonGroup from '@/components/ui/buttonGroup';
 import { Modal } from '@/components/ui/modal';
 import { VerticalForm } from '@/components/ui/verticalForm';
-import { apiGet, apiPost } from '@/utils/apiClient';
+import { apiGet, apiFetch } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -106,21 +106,26 @@ export function TestGroupCopyForm({
       }
 
       // API呼び出し
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const response = await apiPost<any>(`/api/test-groups/${groupId}`, {
-        oem: formData.oem,
-        model: formData.model,
-        event: formData.event,
-        variation: formData.variation,
-        destination: formData.destination,
-        specs: formData.specs,
-        test_startdate: formData.test_startdate,
-        test_enddate: formData.test_enddate,
-        ng_plan_count: formData.ngPlanCount ? parseInt(formData.ngPlanCount) : 0,
-        tag_names: tag_names.length > 0 ? tag_names : undefined,
+      const fetchResponse = await apiFetch(`/api/test-groups/${groupId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          oem: formData.oem,
+          model: formData.model,
+          event: formData.event,
+          variation: formData.variation,
+          destination: formData.destination,
+          specs: formData.specs,
+          test_startdate: formData.test_startdate,
+          test_enddate: formData.test_enddate,
+          ng_plan_count: formData.ngPlanCount ? parseInt(formData.ngPlanCount) : 0,
+          tag_names: tag_names.length > 0 ? tag_names : undefined,
+        }),
       });
 
-      if (response.success) {
+      const response = await fetchResponse.json();
+
+      if (fetchResponse.ok && response.success) {
         clientLogger.info('テストグループ複製画面', 'テストグループ複製成功', { groupId: response.data.id });
         setModalMessage('テストグループを複製しました');
         setCopyIsModalOpen(true);
@@ -129,7 +134,7 @@ export function TestGroupCopyForm({
         }, 1500);
       } else {
         clientLogger.error('テストグループ複製画面', 'テストグループ複製失敗', { error: response.error });
-        setModalMessage('テストグループの複製に失敗しました');
+        setModalMessage(response.error || 'テストグループの複製に失敗しました');
         setCopyIsModalOpen(true);
       }
     } catch (error) {
