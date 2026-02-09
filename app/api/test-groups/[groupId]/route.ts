@@ -5,10 +5,10 @@ import { STATUS_CODES } from '@/constants/statusCodes';
 import { logAPIEndpoint, logDatabaseQuery, QueryTimer } from '@/utils/database-logger';
 import { handleError } from '@/utils/errorHandler';
 import serverLogger from '@/utils/server-logger';
-import { existsSync } from 'fs';
-import { mkdir, rm } from 'fs/promises';
+import { rm } from 'fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
 import { join } from 'path';
+import { copyStorageFile } from '@/app/lib/storage';
 
 interface RouteParams {
   params: Promise<{ groupId: string }>;
@@ -759,18 +759,14 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       });
 
       for (const file of testCasesfilesCopy) {
-        // ファイル保存処理
-        const uploadDir = join(process.cwd(), 'public', 'uploads', 'test-cases', String(newTestGroup.id), file.tid);
-
-        // ディレクトリが存在しない場合は作成
-        if (!existsSync(uploadDir)) {
-          await mkdir(uploadDir, { recursive: true });
-        }
-
-        // ファイル名生成
+        // ファイル名を取得
         const filePath = file.file_path;
         const splitPath = filePath?.split('/');
-        const newFilePath = splitPath?.pop();
+        const fileName = splitPath?.pop() || '';
+
+        // ストレージ内でファイルをコピー（S3/ローカル対応）
+        const destDirectory = `test-cases/${newTestGroup.id}/${file.tid}`;
+        const newFilePath = await copyStorageFile(filePath, destDirectory, fileName);
 
         // コピー元のcreated_at, updated_atの除去
         const { created_at, updated_at, ...filteredFile } = file;
@@ -779,7 +775,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
           data: {
             ...filteredFile,
             test_group_id: newTestGroup.id,
-            file_path: `/uploads/test-cases/${newTestGroup.id}/${file.tid}/${newFilePath}`
+            file_path: newFilePath
           }
         });
       }
@@ -800,80 +796,6 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
           data: {
             ...filteredContent,
             test_group_id: newTestGroup.id,
-          }
-        });
-      }
-
-      // 複製したテストグループに紐づくテスト結果をコピー
-      const testResultsCopy = await tx.tt_test_results.findMany({
-        where: {
-          test_group_id: testGroupId,
-          is_deleted: false
-        }
-      });
-
-      for (const result of testResultsCopy) {
-        // コピー元のcreated_at, updated_atの除去
-        const { created_at, updated_at, ...filteredResult } = result;
-
-        await tx.tt_test_results.create({
-          data: {
-            ...filteredResult,
-            test_group_id: newTestGroup.id,
-          }
-        });
-      }
-
-      // 複製したテストグループに紐づくテスト結果履歴をコピー
-      const testResultsHistoryCopy = await tx.tt_test_results_history.findMany({
-        where: {
-          test_group_id: testGroupId,
-          is_deleted: false
-        }
-      });
-
-      for (const resultHistory of testResultsHistoryCopy) {
-        // コピー元のcreated_at, updated_atの除去
-        const { created_at, updated_at, ...filteredResultHistory } = resultHistory;
-
-        await tx.tt_test_results_history.create({
-          data: {
-            ...filteredResultHistory,
-            test_group_id: newTestGroup.id,
-          }
-        });
-      }
-
-      // 複製したテストグループに紐づくテストエビデンスをコピー
-      const testEvidencesCopy = await tx.tt_test_evidences.findMany({
-        where: {
-          test_group_id: testGroupId,
-          is_deleted: false
-        }
-      });
-
-      for (const evidences of testEvidencesCopy) {
-        // ファイル保存処理
-        const uploadDir = join(process.cwd(), 'public', 'evidences', String(newTestGroup.id), evidences.tid);
-
-        // ディレクトリが存在しない場合は作成
-        if (!existsSync(uploadDir)) {
-          await mkdir(uploadDir, { recursive: true });
-        }
-
-        // パス名生成
-        const evidencesPath = evidences.evidence_path;
-        const splitPath = evidencesPath?.split('/');
-        const newEvidencesPath = splitPath?.pop();
-
-        // コピー元のcreated_at, updated_atの除去
-        const { created_at, updated_at, ...filteredEvidences } = evidences;
-
-        await tx.tt_test_evidences.create({
-          data: {
-            ...filteredEvidences,
-            test_group_id: newTestGroup.id,
-            evidence_path: `/evidences/${newTestGroup.id}/${evidences.tid}/${newEvidencesPath}`
           }
         });
       }
