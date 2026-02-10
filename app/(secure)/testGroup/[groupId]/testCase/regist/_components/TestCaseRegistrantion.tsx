@@ -81,6 +81,18 @@ const TestCaseRegistrantion: React.FC = () => {
     }
   };
 
+  // TID重複チェック（共通関数）
+  const checkTidDuplicate = async (tid: string): Promise<boolean> => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await apiGet<any>(`/api/test-cases/check-tid?groupId=${groupId}&tid=${encodeURIComponent(tid)}`);
+      return result.success && result.isDuplicate;
+    } catch (error) {
+      clientLogger.error('テストケース新規登録画面', 'TID重複チェックエラー', { error });
+      return false;
+    }
+  };
+
   // BlurでTID重複チェック
   const handleTidBlur = async () => {
     if (!formData.tid.trim()) {
@@ -89,9 +101,8 @@ const TestCaseRegistrantion: React.FC = () => {
     setIsTidChecking(true);
     clientLogger.info('テストケース新規登録画面', 'TID重複チェック開始', { tid: formData.tid });
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const result = await apiGet<any>(`/api/test-cases/check-tid?groupId=${groupId}&tid=${encodeURIComponent(formData.tid)}`);
-      if (result.success && result.isDuplicate) {
+      const isDuplicate = await checkTidDuplicate(formData.tid);
+      if (isDuplicate) {
         setErrors(prev => ({
           ...prev,
           tid: `TID「${formData.tid}」は既に登録されています`,
@@ -106,8 +117,6 @@ const TestCaseRegistrantion: React.FC = () => {
         });
         clientLogger.info('テストケース新規登録画面', 'TID重複なし', { tid: formData.tid });
       }
-    } catch (error) {
-      clientLogger.error('テストケース新規登録画面', 'TID重複チェックエラー', { error });
     } finally {
       setIsTidChecking(false);
     }
@@ -247,9 +256,16 @@ const TestCaseRegistrantion: React.FC = () => {
       return;
     }
 
-    // TID重複エラーが存在する場合
-    if (errors.tid) {
-      clientLogger.warn('テストケース新規登録画面', 'TID重複エラー', { errors });
+    // TID重複チェック（ブラーをスキップして直接登録ボタンを押した場合に対応）
+    clientLogger.info('テストケース新規登録画面', '登録時TID重複チェック開始', { tid: formData.tid });
+    const isDuplicate = await checkTidDuplicate(formData.tid);
+    if (isDuplicate) {
+      setErrors(prev => ({
+        ...prev,
+        tid: `TID「${formData.tid}」は既に登録されています`,
+      }));
+      window.scroll({ top: 0, behavior: "smooth" });
+      clientLogger.warn('テストケース新規登録画面', 'TID重複エラー', { tid: formData.tid });
       return;
     }
 

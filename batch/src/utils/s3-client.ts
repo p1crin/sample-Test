@@ -1,6 +1,7 @@
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { readFileSync, writeFileSync } from 'fs';
 import { Readable } from 'stream';
+import logger from './logger';
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION || 'ap-northeast-1',
@@ -33,7 +34,7 @@ export async function readCsvFromS3(bucket: string, key: string): Promise<string
 
     return Buffer.concat(chunks).toString('utf-8');
   } catch (error) {
-    console.error('S3からのCSV読み込みエラー:', error);
+    logger.error('S3からのCSV読み込みエラー', error, { bucket, key });
     throw new Error(`S3からのCSV読み込みに失敗しました: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
@@ -56,9 +57,9 @@ export async function writeResultToS3(
     });
 
     await s3Client.send(command);
-    console.log(`結果ファイルをS3に書き込みました: s3://${bucket}/${key}`);
+    logger.debug('結果ファイルをS3に書き込みました', { path: `s3://${bucket}/${key}` });
   } catch (error) {
-    console.error('S3への結果書き込みエラー:', error);
+    logger.error('S3への結果書き込みエラー', error, { bucket, key });
     throw new Error(`S3への結果書き込みに失敗しました: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
@@ -105,7 +106,7 @@ export async function readCsvFromLocal(filePath: string): Promise<string> {
     const content = readFileSync(filePath, 'utf-8');
     return content;
   } catch (error) {
-    console.error('ローカルファイルからのCSV読み込みエラー:', error);
+    logger.error('ローカルファイルからのCSV読み込みエラー', error, { filePath });
     throw new Error(`ローカルファイルからのCSV読み込みに失敗しました: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
@@ -120,9 +121,9 @@ export async function writeResultToLocal(
 ): Promise<void> {
   try {
     writeFileSync(filePath, content, { encoding: 'utf-8' });
-    console.log(`結果ファイルをローカルに書き込みました: ${filePath}`);
+    logger.debug('結果ファイルをローカルに書き込みました', { path: filePath });
   } catch (error) {
-    console.error('ローカルファイルへの結果書き込みエラー:', error);
+    logger.error('ローカルファイルへの結果書き込みエラー', error, { filePath });
     throw new Error(`ローカルファイルへの結果書き込みに失敗しました: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
@@ -186,7 +187,7 @@ export async function readZipFromS3(bucket: string, key: string): Promise<Buffer
 
     return Buffer.concat(chunks);
   } catch (error) {
-    console.error('S3からのZIP読み込みエラー:', error);
+    logger.error('S3からのZIP読み込みエラー', error, { bucket, key });
     throw new Error(`S3からのZIP読み込みに失敗しました: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
@@ -209,9 +210,9 @@ export async function uploadFileToS3(
     });
 
     await s3Client.send(command);
-    console.log(`ファイルをS3にアップロードしました: s3://${bucket}/${key}`);
+    logger.debug('ファイルをS3にアップロードしました', { path: `s3://${bucket}/${key}` });
   } catch (error) {
-    console.error('S3へのファイルアップロードエラー:', error);
+    logger.error('S3へのファイルアップロードエラー', error, { bucket, key });
     throw new Error(`S3へのファイルアップロードに失敗しました: ${error instanceof Error ? error.message : String(error)}`);
   }
 }

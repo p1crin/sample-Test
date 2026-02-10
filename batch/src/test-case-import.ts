@@ -1,4 +1,6 @@
 import dotenv from 'dotenv';
+dotenv.config();
+
 import { PrismaClient } from '@prisma/client';
 import { readZipFromS3, writeResultToS3, uploadFileToS3, writeTestCaseImportResultCsv } from './utils/s3-client';
 import { parseCsv, validateAllRows, groupByTid } from './utils/test-case-csv-parser';
@@ -10,10 +12,11 @@ import {
   ZipFileEntry,
   FileType,
 } from './types/test-case-import.types';
+import { createBatchLogger } from './utils/logger';
 import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 
-dotenv.config();
+const logger = createBatchLogger('test-case-import');
 
 const prisma = new PrismaClient();
 
@@ -316,7 +319,7 @@ async function importTestCaseInTransaction(
  */
 async function main(): Promise<void> {
   const startTime = new Date();
-  console.log('テストケースインポートバッチを開始します...');
+  logger.startBatch('テストケースインポートバッチを開始します');
 
   let importResultId: number | null = null;
 
@@ -330,8 +333,11 @@ async function main(): Promise<void> {
     const executorName = process.env.EXECUTOR_NAME || 'system';
     const testGroupId = parseInt(process.env.TEST_GROUP_ID!, 10);
 
-    console.log(`入力: s3://${inputBucket}/${inputKey}`);
-    console.log(`テストグループID: ${testGroupId}`);
+    logger.info('バッチ設定', {
+      input: `s3://${inputBucket}/${inputKey}`,
+      testGroupId,
+      outputBucket,
+    });
 
     // テストグループの存在確認
     const testGroup = await prisma.tt_test_groups.findUnique({
@@ -354,32 +360,31 @@ async function main(): Promise<void> {
       },
     });
     importResultId = importRecord.id;
-    console.log(`インポート実行ID: ${importResultId}`);
+    logger.info('インポート実行レコードを作成', { importResultId });
 
     // S3からZIPファイルを読み込み
-    console.log('ZIPファイルを読み込み中...');
+    logger.info('ZIPファイルを読み込み中');
     const zipBuffer = await readZipFromS3(inputBucket, inputKey);
 
     // ZIPファイルを解凍
-    console.log('ZIPファイルを解凍中...');
+    logger.info('ZIPファイルを解凍中');
     const { csvContent, files } = extractZip(zipBuffer);
-    console.log(`ZIPから${files.size}個のファイルを抽出しました`);
+    logger.info('ZIPからファイルを抽出', { fileCount: files.size });
 
     // CSVをパース
-    console.log('CSVをパース中...');
+    logger.info('CSVをパース中');
     const rows = parseCsv(csvContent);
-    console.log(`${rows.length}件のテストデータを検出しました`);
+    logger.info('テストデータを検出', { count: rows.length });
 
     if (rows.length === 0) {
       throw new Error('CSVにデータが含まれていません');
     }
 
     // 事前バリデーション（CSV構造）
-    console.log('全行のバリデーションを実行中...');
+    logger.info('全行のバリデーションを実行中');
     const validation = validateAllRows(rows);
     if (!validation.valid) {
-      console.error('バリデーションエラー:');
-      validation.errors.forEach(err => console.error(`  - ${err}`));
+      logger.error('バリデーションエラー', null, { errors: validation.errors });
 
       const errorMessage = `バリデーションエラーが${validation.errors.length}件発生したため実行されませんでした:\n${validation.errors.join('\n')}`;
 
@@ -401,17 +406,17 @@ async function main(): Promise<void> {
         JSON.stringify({ error: errorMessage, errors: validation.errors }, null, 2)
       );
 
-      console.error(`\n結果ファイル: s3://${outputBucket}/${resultJsonKey}`);
+      logger.error('バリデーションエラーにより終了', null, { resultFile: `s3://${outputBucket}/${resultJsonKey}` });
       process.exit(1);
     }
 
     // TIDごとにグループ化
-    console.log('テストケースをグループ化中...');
+    logger.info('テストケースをグループ化中');
     const groupedTestCases = groupByTid(rows);
-    console.log(`${groupedTestCases.length}個のテストケース（TID）を検出しました`);
+    logger.info('テストケース（TID）を検出', { count: groupedTestCases.length });
 
     // ファイル存在確認
-    console.log('参照ファイルの存在確認中...');
+    logger.info('参照ファイルの存在確認中');
     const allFilePaths: string[] = [];
     groupedTestCases.forEach(group => {
       allFilePaths.push(...group.control_spec_paths);
@@ -423,8 +428,7 @@ async function main(): Promise<void> {
 
     const fileValidation = validateAllFilesExist(allFilePaths, files);
     if (!fileValidation.valid) {
-      console.error('ファイル存在エラー:');
-      fileValidation.errors.forEach(err => console.error(`  - ${err}`));
+      logger.error('ファイル存在エラー', null, { errors: fileValidation.errors });
 
       const errorMessage = `ファイル存在エラーが${fileValidation.errors.length}件発生したため実行されませんでした:\n${fileValidation.errors.join('\n')}`;
 
@@ -444,12 +448,12 @@ async function main(): Promise<void> {
         JSON.stringify({ error: errorMessage, errors: fileValidation.errors }, null, 2)
       );
 
-      console.error(`\n結果ファイル: s3://${outputBucket}/${resultJsonKey}`);
+      logger.error('ファイル存在エラーにより終了', null, { resultFile: `s3://${outputBucket}/${resultJsonKey}` });
       process.exit(1);
     }
 
     // トランザクション内で全テストケースをインポート
-    console.log('テストケースをインポート中...');
+    logger.info('テストケースをインポート中');
     const results: TestCaseImportResult[] = [];
     let createdCount = 0;
     let totalContents = 0;
@@ -461,7 +465,7 @@ async function main(): Promise<void> {
           const group = groupedTestCases[i];
           const rowNumber = i + 2; // ヘッダー行を考慮
 
-          console.log(`[${i + 1}/${groupedTestCases.length}] TID: ${group.tid} を処理中...`);
+          logger.progress(i + 1, groupedTestCases.length, `TID: ${group.tid} を処理中`, { tid: group.tid });
 
           try {
             const result = await importTestCaseInTransaction(
@@ -484,7 +488,7 @@ async function main(): Promise<void> {
           } catch (error) {
             // エラーが発生したらトランザクション全体をロールバック
             const errorMessage = error instanceof Error ? error.message : String(error);
-            console.error(`  エラー: ${errorMessage}`);
+            logger.error('TID処理中にエラー発生', error, { rowNumber, tid: group.tid });
 
             // エラー結果を記録
             results.push({
@@ -528,7 +532,7 @@ async function main(): Promise<void> {
     const resultJsonKey = `test-case-import-results/result-${timestamp}.json`;
     const resultCsvKey = `test-case-import-results/result-${timestamp}.csv`;
 
-    console.log('結果をS3に書き込み中...');
+    logger.info('結果をS3に書き込み中');
     await writeResultToS3(outputBucket, resultJsonKey, JSON.stringify(summary, null, 2));
     await writeTestCaseImportResultCsv(outputBucket, resultCsvKey, results);
 
@@ -543,14 +547,17 @@ async function main(): Promise<void> {
       },
     });
 
-    // 結果を表示
-    console.log('\n=== インポート完了 ===');
-    console.log(successMessage);
-    console.log(`\n結果ファイル:`);
-    console.log(`  JSON: s3://${outputBucket}/${resultJsonKey}`);
-    console.log(`  CSV: s3://${outputBucket}/${resultCsvKey}`);
+    logger.endBatch('インポート完了', {
+      createdCount,
+      totalContents,
+      uploadedFiles,
+      resultFiles: {
+        json: `s3://${outputBucket}/${resultJsonKey}`,
+        csv: `s3://${outputBucket}/${resultCsvKey}`,
+      },
+    });
   } catch (error) {
-    console.error('テストケースインポートバッチでエラーが発生しました:', error);
+    logger.error('テストケースインポートバッチでエラーが発生しました', error);
     const errorMessage = error instanceof Error ? error.message : String(error);
 
     // DBレコードを更新（import_status=2: エラー）
@@ -578,7 +585,7 @@ async function main(): Promise<void> {
         });
       }
     } catch (dbError) {
-      console.error('エラー記録の保存に失敗しました:', dbError);
+      logger.error('エラー記録の保存に失敗しました', dbError);
     }
 
     process.exit(1);
