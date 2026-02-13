@@ -16,6 +16,7 @@ interface TestTableProps {
   setData: React.Dispatch<React.SetStateAction<TestCaseResultRow[]>>;
   userName?: string;
   executorsList?: Array<{ id: number; name: string; }>;
+  executorsPerRow?: Record<number, Array<{ id: number; name: string }>>;
 }
 
 // 行が編集不可かどうかを判定するヘルパー関数
@@ -23,7 +24,7 @@ const isRowDisabled = (row: TestCaseResultRow): boolean => {
   return row.judgment === JUDGMENT_OPTIONS.EXCLUDED || row.is_target === false;
 };
 
-const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, userName = '', executorsList = [] }) => {
+const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, userName = '', executorsList = [], executorsPerRow = {} as Record<number, Array<{ id: number; name: string }>> }) => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [currentColumn, setCurrentColumn] = useState<string | null>(null);
   const [sortConfig, setSortConfig] = useState<SortConfig<TestCaseResultRow>>(null);
@@ -447,6 +448,14 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
       render: (value: string, row: TestCaseResultRow) => {
         const rowIndex = getRowIndex(row);
         const isReadOnly = isRowDisabled(row);
+        // executorsList（API由来）と行ごとの過去実施者をマージして重複排除
+        const rowPastExecutors = executorsPerRow[row.test_case_no] || [];
+        const mergedExecutors: Array<{ id: number; name: string }> = [...(executorsList as Array<{ id: number; name: string }>)];
+        rowPastExecutors.forEach((pe: { id: number; name: string }) => {
+          if (!mergedExecutors.some(e => e.name === pe.name)) {
+            mergedExecutors.push(pe);
+          }
+        });
         return (
           <div className={`flex items-center ${isReadOnly ? 'bg-gray-200' : ''}`}>
             <select
@@ -456,7 +465,7 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
               disabled={isReadOnly}
             >
               <option value=""></option>
-              {executorsList.map((executor) => (
+              {mergedExecutors.map((executor) => (
                 <option key={executor.id} value={executor.name}>
                   {executor.name}
                 </option>
