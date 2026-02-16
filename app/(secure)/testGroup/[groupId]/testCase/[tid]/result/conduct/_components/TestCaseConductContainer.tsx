@@ -82,7 +82,7 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
   const [executorsList, setExecutorsList] = useState<Array<{ id: number; name: string; }>>([]);
-  const [executorsPerRow, setExecutorsPerRow] = useState<Record<number, Array<{ id: number; name: string }>>>({});
+  const [executorsPerRow, setExecutorsPerRow] = useState<Record<string, Array<{ id: number; name: string }>>>({});
 
   // 登録成功フラグ（タブクローズ時のクリーンアップ用）
   const isRegistrationSuccessful = useRef(false);
@@ -229,23 +229,26 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
         setButtonDisabled(allHistoryCountsZero);
         setInitialTestCaseData(initialDataWithHistoryCount);
 
-        // 行ごと（test_case_noごと）に過去の実施者を抽出する
-        const perRowExecutors: Record<number, Array<{ id: number; name: string }>> = {};
+        // 行（test_case_no）×履歴回数（historyCount）ごとに過去の実施者を抽出する
+        const perRowExecutors: Record<string, Array<{ id: number; name: string }>> = {};
         Object.entries(resultsData).forEach(([testCaseNoStr, result]) => {
           const testCaseNo = Number(testCaseNoStr);
-          const rowExecutors: Array<{ id: number; name: string }> = result.allHistory
-            .map(histItem => ({
+          result.allHistory.forEach(histItem => {
+            const executorName = (histItem.executor ?? '') as string;
+            if (!executorName) return;
+            const key = `${testCaseNo}_${histItem.history_count}`;
+            const executor: { id: number; name: string } = {
               id: (histItem.executor_id ?? -Date.now() - Math.floor(Math.random() * 1000)) as number,
-              name: (histItem.executor ?? '') as string
-            }))
-            .filter(e => e.name !== '');
-          // 名前で重複排除
-          const uniqueRowExecutors = rowExecutors.filter((executor, index, self) =>
-            index === self.findIndex((e) => e.name === executor.name)
-          );
-          if (uniqueRowExecutors.length > 0) {
-            perRowExecutors[testCaseNo] = uniqueRowExecutors;
-          }
+              name: executorName,
+            };
+            if (!perRowExecutors[key]) {
+              perRowExecutors[key] = [];
+            }
+            // 名前で重複排除
+            if (!perRowExecutors[key].some(e => e.name === executor.name)) {
+              perRowExecutors[key].push(executor);
+            }
+          });
         });
         setExecutorsPerRow(perRowExecutors);
 
