@@ -69,12 +69,38 @@ export const authOptions: NextAuthOptions = {
         token.company = user.company;
         token.iat = now;
         token.exp = now + 30 * 24 * 60 * 60; // 30日
-      } else if (token) {
-        // トークンのリフレッシュ - トークンの更新が必要か確認
+      } else if (token?.sub) {
+        // 既存セッション - DBから最新のユーザ情報を取得して権限変更を即座に反映
+        const currentUser = await prisma.mt_users.findUnique({
+          where: {
+            id: parseInt(token.sub),
+            is_deleted: false,
+          },
+          select: {
+            user_role: true,
+            name: true,
+            email: true,
+            department: true,
+            company: true,
+          },
+        });
+
+        // ユーザが削除された場合、トークンを無効化
+        if (!currentUser) {
+          return {};
+        }
+
+        // 最新の権限情報をトークンに反映
+        token.user_role = currentUser.user_role;
+        token.name = currentUser.name;
+        token.email = currentUser.email;
+        token.department = currentUser.department;
+        token.company = currentUser.company;
+
+        // トークンの有効期限リフレッシュ
         const exp = token.exp as number;
         const timeRemaining = exp - now;
 
-        // 残り時間が1日未満の場合、トークンをリフレッシュ
         if (timeRemaining < 24 * 60 * 60) {
           token.iat = now;
           token.exp = now + 30 * 24 * 60 * 60; // 30日
@@ -83,8 +109,8 @@ export const authOptions: NextAuthOptions = {
       return token;
     },
     async session({ session, token }) {
-      if (token && session.user) {
-        session.user.id = parseInt(token.sub!);
+      if (token?.sub && session.user) {
+        session.user.id = parseInt(token.sub);
         session.user.email = token.email!;
         session.user.name = token.name!;
         session.user.user_role = token.user_role;
