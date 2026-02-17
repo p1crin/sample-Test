@@ -71,31 +71,36 @@ export const authOptions: NextAuthOptions = {
         token.exp = now + 30 * 24 * 60 * 60; // 30日
       } else if (token?.sub) {
         // 既存セッション - DBから最新のユーザ情報を取得して権限変更を即座に反映
-        const currentUser = await prisma.mt_users.findUnique({
-          where: {
-            id: parseInt(token.sub),
-            is_deleted: false,
-          },
-          select: {
-            user_role: true,
-            name: true,
-            email: true,
-            department: true,
-            company: true,
-          },
-        });
+        try {
+          const currentUser = await prisma.mt_users.findUnique({
+            where: {
+              id: parseInt(token.sub),
+              is_deleted: false,
+            },
+            select: {
+              user_role: true,
+              name: true,
+              email: true,
+              department: true,
+              company: true,
+            },
+          });
 
-        // ユーザが削除された場合、トークンを無効化
-        if (!currentUser) {
-          return {};
+          // ユーザが削除された場合、トークンを無効化
+          if (!currentUser) {
+            return {};
+          }
+
+          // 最新の権限情報をトークンに反映
+          token.user_role = currentUser.user_role;
+          token.name = currentUser.name;
+          token.email = currentUser.email;
+          token.department = currentUser.department;
+          token.company = currentUser.company;
+        } catch {
+          // DB接続エラー時はキャッシュされたトークンをそのまま使用する
+          // APIハンドラ側のDB操作で500エラーとして返される
         }
-
-        // 最新の権限情報をトークンに反映
-        token.user_role = currentUser.user_role;
-        token.name = currentUser.name;
-        token.email = currentUser.email;
-        token.department = currentUser.department;
-        token.company = currentUser.company;
 
         // トークンの有効期限リフレッシュ
         const exp = token.exp as number;
