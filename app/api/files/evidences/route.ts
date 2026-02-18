@@ -21,9 +21,8 @@ export async function POST(req: NextRequest) {
     const testGroupId = formData.get('testGroupId') as string;
     const tid = formData.get('tid') as string;
     const testCaseNo = formData.get('testCaseNo') as string;
-    const historyCount = formData.get('historyCount') as string;
 
-    if (!file || !testGroupId || !tid || !testCaseNo || !historyCount) {
+    if (!file || !testGroupId || !tid || !testCaseNo) {
       return handleError(
         new Error(ERROR_MESSAGES.BAD_REQUEST),
         STATUS_CODES.BAD_REQUEST,
@@ -35,9 +34,8 @@ export async function POST(req: NextRequest) {
 
     const parsedTestGroupId = parseInt(testGroupId, 10);
     const parsedTestCaseNo = parseInt(testCaseNo, 10);
-    const parsedHistoryCount = parseInt(historyCount, 10);
 
-    if (isNaN(parsedTestGroupId) || isNaN(parsedTestCaseNo) || isNaN(parsedHistoryCount)) {
+    if (isNaN(parsedTestGroupId) || isNaN(parsedTestCaseNo)) {
       return handleError(
         new Error(ERROR_MESSAGES.BAD_REQUEST),
         STATUS_CODES.BAD_REQUEST,
@@ -77,7 +75,7 @@ export async function POST(req: NextRequest) {
     const newfileNo = (maxEvidence?.evidence_no ?? 0) + 1;
 
     // ファイル名生成
-    const fileName = `evidence_${testCaseNo}_${historyCount}_${formatDateTimeToTimestamp(new Date().toISOString())}_${file.name}`;
+    const fileName = `evidence_${testCaseNo}_${formatDateTimeToTimestamp(new Date().toISOString())}_${file.name}`;
 
     // ストレージにアップロード（環境に応じてローカルまたはS3）
     const uploadResult = await uploadFile(
@@ -89,18 +87,17 @@ export async function POST(req: NextRequest) {
         testGroupId: testGroupId,
         tid: tid,
         testCaseNo: testCaseNo,
-        historyCount: historyCount,
       }
     );
 
-    // エビデンスをデータベースに記録
+    // エビデンスをデータベースに記録（history_count は保存後にUPDATEで設定）
     const evidenceRecord = await prisma.tt_test_evidences.create({
       data: {
         test_group_id: parsedTestGroupId,
         tid: tid,
         test_case_no: parsedTestCaseNo,
-        history_count: parsedHistoryCount,
         evidence_no: newfileNo,
+        history_count: null,
         evidence_name: file.name,
         evidence_path: uploadResult.filePath,
       },
@@ -124,7 +121,6 @@ export async function POST(req: NextRequest) {
           evidenceName: file.name,
           evidencePath: uploadResult.filePath,
           testCaseNo: parsedTestCaseNo,
-          historyCount: parsedHistoryCount,
         },
       },
       { status: STATUS_CODES.CREATED }
@@ -149,9 +145,9 @@ export async function DELETE(req: NextRequest) {
 
     // リクエストボディから削除対象のエビデンス情報を取得
     const body = await req.json();
-    const { testGroupId, tid, testCaseNo, historyCount, fileNo } = body;
+    const { testGroupId, tid, testCaseNo, fileNo } = body;
 
-    if (!testGroupId || !tid || testCaseNo === undefined || historyCount === undefined || fileNo === undefined) {
+    if (!testGroupId || !tid || testCaseNo === undefined || fileNo === undefined) {
       return handleError(
         new Error(ERROR_MESSAGES.BAD_REQUEST),
         STATUS_CODES.BAD_REQUEST,
@@ -167,7 +163,6 @@ export async function DELETE(req: NextRequest) {
         test_group_id: parseInt(testGroupId, 10),
         tid: tid,
         test_case_no: parseInt(testCaseNo, 10),
-        history_count: parseInt(historyCount, 10),
         evidence_no: parseInt(fileNo, 10),
       },
     });
@@ -193,7 +188,6 @@ export async function DELETE(req: NextRequest) {
         test_group_id: parseInt(testGroupId, 10),
         tid: tid,
         test_case_no: parseInt(testCaseNo, 10),
-        history_count: parseInt(historyCount, 10),
         evidence_no: parseInt(fileNo, 10),
       },
     });
