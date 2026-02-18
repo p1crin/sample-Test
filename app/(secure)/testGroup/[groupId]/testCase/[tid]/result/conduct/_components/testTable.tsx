@@ -145,9 +145,11 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
         });
 
         // アップロード成功時、pathとfileNoを含むFileInfoを返す
+        // evidenceUrl: S3の場合は署名付きURL、ローカルの場合はパス（サムネイル表示用）
+        // evidencePath: S3キーまたはローカルパス（DB保存・削除用）
         return {
           ...file,
-          path: response.data.evidencePath,
+          path: response.data.evidenceUrl || response.data.evidencePath,
           fileNo: response.data.fileNo,
         };
       } else {

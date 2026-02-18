@@ -3,7 +3,6 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { mkdir, rm, writeFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import clientLogger from '@/utils/client-logger';
 
 /**
  * ストレージタイプの判定
@@ -54,13 +53,21 @@ export async function uploadFile(
     // 本番環境: S3にアップロード
     const s3Key = `${directory}/${fileName}`;
 
+    // S3 MetadataはASCII文字のみ許可されるため、値をURIエンコードして安全にする
+    const safeMetadata = metadata
+      ? Object.fromEntries(
+          Object.entries(metadata).map(([k, v]) => [k, encodeURIComponent(v)])
+        )
+      : undefined;
+
     const uploadCommand = new PutObjectCommand({
       Bucket: process.env.AWS_S3_BUCKET_NAME!,
       Key: s3Key,
       Body: buffer,
-      ContentType: file.type,
+      // file.typeが空の場合はデフォルトのMIMEタイプを使用（空文字ではS3が拒否する）
+      ContentType: file.type || 'application/octet-stream',
       ContentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
-      Metadata: metadata,
+      Metadata: safeMetadata,
     });
 
     try {
@@ -72,7 +79,7 @@ export async function uploadFile(
         fileName: fileName,
       };
     } catch (error) {
-      clientLogger.error('uploadFile', 'S3ファイルアップロード失敗', { error });
+      console.error('[storage] S3ファイルアップロード失敗', error);
       throw new Error('File upload to S3 failed');
     }
   } else {
@@ -113,7 +120,7 @@ export async function deleteFile(filePath: string): Promise<void> {
     try {
       await s3Client.send(deleteCommand);
     } catch (error) {
-      clientLogger.error('deleteFile', `S3ファイル削除失敗 S3: ${s3Key}`, { error });
+      console.error(`[storage] S3ファイル削除失敗 key=${s3Key}`, error);
     }
   } else {
     // 開発環境: ローカルディスクから削除
@@ -122,7 +129,7 @@ export async function deleteFile(filePath: string): Promise<void> {
     try {
       await rm(localPath, { force: true });
     } catch (error) {
-      clientLogger.error('deleteFile', `ローカルファイル削除失敗 local file: ${localPath}`, { error });
+      console.error(`[storage] ローカルファイル削除失敗 path=${localPath}`, error);
     }
   }
 }
@@ -154,7 +161,7 @@ export async function getFileUrl(filePath: string, expiresIn: number = 3600): Pr
       const signedUrl = await getSignedUrl(s3Client, command, { expiresIn });
       return signedUrl;
     } catch (error) {
-      clientLogger.error('getFileUrl', `署名付きURL生成失敗`, { error });
+      console.error('[storage] 署名付きURL生成失敗', error);
       return '';
     }
   } else {

@@ -1,6 +1,6 @@
 import { requireAuth } from '@/app/lib/auth';
 import { prisma } from '@/app/lib/prisma';
-import { uploadFile, deleteFile } from '@/app/lib/storage';
+import { uploadFile, deleteFile, getFileUrl } from '@/app/lib/storage';
 import { ERROR_MESSAGES } from '@/constants/errorMessages';
 import { STATUS_CODES } from '@/constants/statusCodes';
 import { logAPIEndpoint, QueryTimer } from '@/utils/database-logger';
@@ -103,6 +103,9 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    // サムネイル表示用のURLを生成（S3: 署名付きURL、ローカル: そのままのパス）
+    const evidenceUrl = await getFileUrl(uploadResult.filePath);
+
     logAPIEndpoint({
       method: 'POST',
       endpoint: '/api/files/evidences',
@@ -120,6 +123,7 @@ export async function POST(req: NextRequest) {
           fileNo: newfileNo,
           evidenceName: file.name,
           evidencePath: uploadResult.filePath,
+          evidenceUrl: evidenceUrl,
           testCaseNo: parsedTestCaseNo,
         },
       },
