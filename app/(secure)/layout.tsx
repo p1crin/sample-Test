@@ -13,7 +13,7 @@ import { useSelector } from 'react-redux';
 export default function Layout({ children }: { children: ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const user = useSelector((state: RootState) => state.auth.user);
-  const { data: session, status } = useSession();
+  const { data: session, status, update } = useSession();
   const router = useRouter();
   const handleToggleSidebar = () => {
     setSidebarOpen(!sidebarOpen);
@@ -24,6 +24,27 @@ export default function Layout({ children }: { children: ReactNode }) {
       router.push('/login');
     }
   }, [status, router]);
+
+  // セッションの有効期限が切れる24時間前に update() を呼び出してCookieを更新する。
+  // NextAuth v4 では GET /api/auth/session はCookieを書き換えないため、
+  // POST /api/auth/session を発行する update() が唯一の更新手段。
+  useEffect(() => {
+    if (status !== 'authenticated' || !session?.expires) return;
+
+    const expiresAt = new Date(session.expires).getTime();
+    const now = Date.now();
+    const timeUntilExpiry = expiresAt - now;
+    const oneDayMs = 24 * 60 * 60 * 1000;
+
+    // 既に24時間以内なら即時更新、それ以外はタイマーで更新
+    const refreshIn = Math.max(0, timeUntilExpiry - oneDayMs);
+
+    const timer = setTimeout(() => {
+      update();
+    }, refreshIn);
+
+    return () => clearTimeout(timer);
+  }, [session?.expires, status, update]);
 
   // クライアントロガーにユーザーIDを設定
   useEffect(() => {
