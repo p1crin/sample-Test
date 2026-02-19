@@ -314,6 +314,11 @@ export function TestCaseListContainer() {
     router.push(`${pathName}/regist`);
   };
 
+  const handleAutoGenerate = () => {
+    clientLogger.info('テストケース一覧画面', 'テストケース自動生成ボタン押下');
+    router.push(`${pathName}/auto-generate`);
+  };
+
   // ユーザインポート実施画面遷移
   const toTestImportPage = () => {
     clientLogger.info('テストケース一覧画面', 'インポートボタン押下');
@@ -333,6 +338,9 @@ export function TestCaseListContainer() {
           <SeachForm fields={fields} values={formValues} onClick={handleSearch} onFormDataChange={handleFormDataChange} /><div className="text-right space-x-2 pb-2">
             <Button onClick={handleAddTestCase} disabled={!canEdit}>
               テストケース新規登録
+            </Button>
+            <Button onClick={handleAutoGenerate} disabled={!canEdit}>
+              テストケース自動生成
             </Button>
             <Button
               onClick={() => toTestImportPage()}
