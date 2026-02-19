@@ -83,8 +83,6 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
         clientLogger.error('テストケース結果確認画面', 'テストケース詳細取得失敗', { error: errorMessage });
         setLoadError('テストケース詳細の取得に失敗しました');
         setApiError(err instanceof Error ? err : new Error(String(err)));
-      } finally {
-        setIsLoading(false);
       }
     };
 
@@ -108,13 +106,14 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
         clientLogger.error('テストケース結果確認画面', 'テスト結果取得失敗', { error: errorMessage });
         setLoadError('テスト結果の取得に失敗しました');
         setApiError(err instanceof Error ? err : new Error(String(err)));
-      } finally {
-        setIsLoading(false);
       }
     };
 
-    fetchTestCaseDetail();
-    fetchTestResults();
+    // 両方のフェッチが完了してからローディングを解除する
+    // （各関数は内部でcatchしているためPromise.allはrejectしない）
+    Promise.all([fetchTestCaseDetail(), fetchTestResults()]).finally(() => {
+      setIsLoading(false);
+    });
   }, [groupId, tid]);
 
   const handleCancel = () => {
