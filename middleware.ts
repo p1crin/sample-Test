@@ -1,37 +1,21 @@
+import { getToken } from 'next-auth/jwt';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
-import type { User } from '@/types';
 
 // 認証済みユーザーをリダイレクトするパス（ログインページなど）
 const authRedirectPath = '/login';
 // 認証が必要なパス
 const protectedPaths = ['/admin'];
 
-// トークンからユーザー情報を取得する型安全な関数
-function getUserFromToken(token: string): Pick<User, 'email'> | null {
-  try {
-    const decodedData = atob(token);
-    const [email, timestamp] = decodedData.split(':');
-    const tokenTime = parseInt(timestamp, 10);
-    const now = Date.now();
-
-    // トークンの形式チェックと有効期限チェック（24時間）
-    if (!!email && !!tokenTime && now - tokenTime < 24 * 60 * 60 * 1000) {
-      return { email };
-    }
-    return null;
-  } catch (_) {
-    return null;
-  }
-}
-
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // セッショントークンの取得と検証
-  const token = request.cookies.get('auth-token')?.value;
-  const user = token ? getUserFromToken(token) : null;
-  const isAuthenticated = !!user;
+  // NextAuthのJWTトークンを取得して認証状態を確認
+  const token = await getToken({
+    req: request,
+    secret: process.env.NEXTAUTH_SECRET,
+  });
+  const isAuthenticated = !!token;
 
   // 認証が必要なパスへのアクセスチェック
   if (protectedPaths.some((path) => pathname.startsWith(path))) {
@@ -47,7 +31,7 @@ export function middleware(request: NextRequest) {
   if (pathname.startsWith(authRedirectPath)) {
     if (isAuthenticated) {
       // 認証済みの場合、メニュー1ページへリダイレクト
-      return NextResponse.redirect(new URL('testGroup', request.url));
+      return NextResponse.redirect(new URL('/testGroup', request.url));
     }
   }
 

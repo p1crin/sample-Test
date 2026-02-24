@@ -57,28 +57,15 @@ export const authOptions: NextAuthOptions = {
   },
   callbacks: {
     async jwt({ token, user }) {
-      const now = Math.floor(Date.now() / 1000);
-
       if (user) {
-        // 新しいログイン - トークンを初期化
+        // 新しいログイン - ユーザー情報をトークンに設定
+        // ※ exp/iat は NextAuth の encode() が maxAge を元に自動設定するため手動設定不要
         token.sub = user.id.toString();
         token.email = user.email;
         token.name = user.name;
         token.user_role = user.user_role;
         token.department = user.department;
         token.company = user.company;
-        token.iat = now;
-        token.exp = now + 30 * 24 * 60 * 60; // 30日
-      } else if (token) {
-        // トークンのリフレッシュ - トークンの更新が必要か確認
-        const exp = token.exp as number;
-        const timeRemaining = exp - now;
-
-        // 残り時間が1日未満の場合、トークンをリフレッシュ
-        if (timeRemaining < 24 * 60 * 60) {
-          token.iat = now;
-          token.exp = now + 30 * 24 * 60 * 60; // 30日
-        }
       }
       return token;
     },
