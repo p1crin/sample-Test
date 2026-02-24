@@ -186,7 +186,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ grou
     // 認証チェック
     const user = await requireAuth(req);
     // 権限チェック
-    const canEdit = canEditTestCases(user, testGroupId);
+    const canEdit = await canEditTestCases(user, testGroupId);
 
     if (!canEdit) {
       return handleError(
