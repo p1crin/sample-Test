@@ -14,7 +14,7 @@ const labels = {
   created_at: { name: "インポート日時", type: "text" as 'text' },
   import_status: { name: "インポート状況", type: "text" as 'text' },
   executor_name: { name: "実施者", type: "text" as 'text' },
-  message: { name: "エラー詳細", type: "text" as 'text' },
+  message: { name: "詳細", type: "text" as 'text' },
 };
 
 type ImportInfoContainerProps = {
@@ -52,10 +52,9 @@ export function ImportInfoContainer({ id }: ImportInfoContainerProps) {
         };
         setData(formattedImportInfo);
         setLabelData(labels);
-        clientLogger.info('インポート内容確認画面', 'データ取得成功', { data: importInfoData.data.id });
+        clientLogger.info('インポート内容確認画面', 'データ取得成功', { importId: formattedImportInfo.id });
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        clientLogger.error('インポート内容確認画面', 'データ取得失敗', { error: errorMessage });
+        clientLogger.error('インポート内容確認画面', 'データ取得失敗', { error: err instanceof Error ? err.message : String(err) });
         setApiError(err instanceof Error ? err : new Error(String(err)));
       } finally {
         setImportInfoLoading(false);
@@ -65,7 +64,6 @@ export function ImportInfoContainer({ id }: ImportInfoContainerProps) {
   }, [id]);
 
   return (
-
     <div className='space-y-4'>
       <Loading
         isLoading={importInfoLoading}

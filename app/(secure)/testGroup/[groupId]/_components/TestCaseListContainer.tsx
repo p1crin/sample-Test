@@ -14,6 +14,7 @@ import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigat
 import { useEffect, useState } from 'react';
 import { TestCaseList } from './TestCaseList';
 import { TestCaseListRow } from './types/testCase-list-row';
+
 export function TestCaseListContainer() {
   const [menuItems, setMenuItems] = useState<TestCaseListRow[]>([]);
   const [page, setPage] = useState(1);
@@ -32,6 +33,8 @@ export function TestCaseListContainer() {
   const [isDelModalOpen, setIsDelModalOpen] = useState(false);
   const [delLoading, setDelLoading] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
+  const [apiError, setApiError] = useState<Error | null>(null);
+  if (apiError) throw apiError;
 
   const pageSize = 10;
   const router = useRouter();
@@ -113,18 +116,11 @@ export function TestCaseListContainer() {
           const latestId = Math.max(...result.data.map((item: { tid: number }) => item.tid));
           setNewid(latestId + 1);
         }
-        clientLogger.debug('テストケース一覧画面', 'テストケースリスト取得成功', {
-          page,
-          count: result.data.length,
-        });
-      } catch (err: unknown) {
+        clientLogger.debug('テストケース一覧画面', 'テストケースリスト取得成功', { page, count: result.data.length, result: result.data });
+      } catch (err) {
         if (!ignore) setMenuItems([]);
-        if (err instanceof Error) {
-          clientLogger.error('テストケース一覧画面', 'テストケースリスト取得失敗', {
-            page,
-            error: err.message,
-          });
-        }
+        clientLogger.error('テストケース一覧画面', 'テストケースリスト取得失敗', { page, error: err instanceof Error ? err.message : String(err) });
+        setApiError(err instanceof Error ? err : new Error(String(err)));
       } finally {
         if (!ignore) {
           setTestCaseLoading(false);
@@ -164,9 +160,9 @@ export function TestCaseListContainer() {
     { key: 'updated_at', header: '更新日' },
   ];
 
-  const toTestCaseEditPage = (id: string) => {
-    clientLogger.info('テストケース一覧画面', '編集ボタン押下');
-    router.push(`${pathName}/${id}/edit`);
+  const toTestCaseEditPage = (tid: string) => {
+    clientLogger.info('テストケース一覧画面', '編集ボタン押下', { testGroupId: testGroupId, tid: tid });
+    router.push(`${pathName}/${tid}/edit`);
   };
 
   const testCaseDelete = async () => {
@@ -174,13 +170,13 @@ export function TestCaseListContainer() {
       throw new Error('tid is null');
     }
 
-    clientLogger.info('テストケース一覧画面', '削除ボタン押下', selectedTestCase.tid);
+    clientLogger.info('テストケース一覧画面', '削除ボタン押下', { testGroupId: testGroupId, tid: selectedTestCase.tid });
     try {
       setDelLoading(true);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await apiDelete<any>(`/api/test-groups/${testGroupId}/cases/${selectedTestCase.tid}`);
       if (result.success) {
-        clientLogger.info('テストケース一覧画面', 'テストケース削除成功', { tid: selectedTestCase.tid });
+        clientLogger.info('テストケース一覧画面', 'テストケース削除成功', { testGroupId: testGroupId, tid: selectedTestCase.tid });
         // テストケース一覧再描画
         const queryString = buildQueryString(searchParams, page, pageSize);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -200,12 +196,12 @@ export function TestCaseListContainer() {
         setModalMessage('テストケースを削除しました');
         setIsDelModalOpen(true);
       } else {
-        clientLogger.error('テストケース一覧画面', 'テストケース削除失敗', { error: result.error });
+        clientLogger.error('テストケース一覧画面', 'テストケース削除失敗', { error: result.error instanceof Error ? result.error.message : String(result.error) });
         setModalMessage('テストケースの削除に失敗しました');
         setIsDelModalOpen(true);
       }
-    } catch (error) {
-      clientLogger.error('テストケース一覧画面', 'テストケース削除エラー', { error });
+    } catch (err) {
+      clientLogger.error('テストケース一覧画面', 'テストケース削除エラー', { error: err instanceof Error ? err.message : String(err) });
       setModalMessage('テストケースの削除に失敗しました');
       setIsDelModalOpen(true);
     } finally {
@@ -253,7 +249,8 @@ export function TestCaseListContainer() {
       name: 'tid',
       value: '',
       onChange: () => { },
-      placeholder: 'TID'
+      placeholder: 'TID',
+      maxLength: 255
     },
     {
       label: '第1層',
@@ -261,7 +258,8 @@ export function TestCaseListContainer() {
       name: 'first_layer',
       value: '',
       onChange: () => { },
-      placeholder: '第1層'
+      placeholder: '第1層',
+      maxLength: 255
     },
     {
       label: '第2層',
@@ -269,7 +267,8 @@ export function TestCaseListContainer() {
       name: 'second_layer',
       value: '',
       onChange: () => { },
-      placeholder: '第2層'
+      placeholder: '第2層',
+      maxLength: 255
     },
     {
       label: '第3層',
@@ -277,7 +276,8 @@ export function TestCaseListContainer() {
       name: 'third_layer',
       value: '',
       onChange: () => { },
-      placeholder: '第3層'
+      placeholder: '第3層',
+      maxLength: 255
     },
     {
       label: '第4層',
@@ -285,7 +285,8 @@ export function TestCaseListContainer() {
       name: 'fourth_layer',
       value: '',
       onChange: () => { },
-      placeholder: '第4層'
+      placeholder: '第4層',
+      maxLength: 255
     }
   ];
 
@@ -336,6 +337,7 @@ export function TestCaseListContainer() {
             </Button>
             <Button
               onClick={() => toTestImportPage()}
+              disabled={!canEdit}
             >
               インポート
             </Button>

@@ -24,6 +24,8 @@ export interface FileUploadFieldProps {
   isCopyable?: boolean;
   /** エラーメッセージ (オプション) */
   error?: string;
+  /** 複数指定可能（オプション) */
+  isMultiple?: boolean;
 }
 
 const LABLE_STYLE = "flex items-center text-sm";
@@ -40,7 +42,8 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
   onFileUpload,
   placeholder,
   isCopyable = true,
-  error
+  error,
+  isMultiple = true
 }) => {
   const [files, setFiles] = useState<FileInfo[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -74,8 +77,8 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               const data = await apiPost<any>('/api/files/url', { filePath: file.path });
               newFileUrls[file.path] = data.data.url;
-            } catch (error) {
-              clientLogger.error('FileUploadField', 'ファイルの取得に失敗しました。', { error })
+            } catch (err) {
+              clientLogger.error('FileUploadField', 'ファイルの取得に失敗しました。', { ererror: err instanceof Error ? err.message : String(err) })
             }
           }
         }
@@ -97,7 +100,12 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
     const items = pasteEvent.clipboardData.items;
     if (items.length === 0 || items[0].kind !== 'file') return;
 
-    const newFiles = await processClipboardItems(items);
+    let newFiles = await processClipboardItems(items);
+
+    // isMultipleがfalseの場合、最初のファイルのみを処理する
+    if (!isMultiple && newFiles.length > 0) {
+      newFiles = [newFiles[0]];
+    }
 
     // アップロード処理が設定されている場合は各ファイルをアップロード
     // 注: 順次アップロードすることで、file_noの競合（race condition）を防ぐ
@@ -110,13 +118,15 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
           const uploadedFile = await onFileUpload(file);
           processedFiles.push(uploadedFile);
         }
-      } catch (error) {
+      } catch (err) {
         setUploading(false);
-        clientLogger.error('FileUploadField', 'ファイルのアップロードに失敗しました', { error });
+        clientLogger.error('FileUploadField', 'ファイルのアップロードに失敗しました', { error: err instanceof Error ? err.message : String(err) });
       }
       setUploading(false);
     }
-    const uniqueFiles = getUniqueFileNames([...files, ...processedFiles]);
+
+    const finalFiles = isMultiple ? [...files, ...processedFiles] : processedFiles;
+    const uniqueFiles = getUniqueFileNames(finalFiles);
 
     setFiles(uniqueFiles);
     onChange({ target: { name, value: uniqueFiles } });
@@ -129,7 +139,12 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
     const fileList = e.target.files;
     if (!fileList || fileList.length === 0) return;
 
-    const newFiles = await processFileList(fileList);
+    let newFiles = await processFileList(fileList);
+
+    // isMultipleがfalseの場合、最初のファイルのみを処理する
+    if (!isMultiple && newFiles.length > 0) {
+      newFiles = [newFiles[0]];
+    }
 
     // アップロード処理が設定されている場合は各ファイルをアップロード
     // 注: 順次アップロードすることで、file_noの競合（race condition）を防ぐ
@@ -142,14 +157,15 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
           const uploadedFile = await onFileUpload(file);
           processedFiles.push(uploadedFile);
         }
-      } catch (error) {
+      } catch (err) {
         setUploading(false);
-        clientLogger.error('FileUploadField', 'ファイルのアップロードに失敗しました', { error });
+        clientLogger.error('FileUploadField', 'ファイルのアップロードに失敗しました', { error: err instanceof Error ? err.message : String(err) });
       }
       setUploading(false);
     }
 
-    const uniqueFiles = getUniqueFileNames([...files, ...processedFiles]);
+    const finalFiles = isMultiple ? [...files, ...processedFiles] : processedFiles;
+    const uniqueFiles = getUniqueFileNames(finalFiles);
 
     setFiles(uniqueFiles);
     onChange({ target: { name, value: uniqueFiles } });
@@ -200,7 +216,7 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
             </Button>
             <input
               type="file"
-              multiple
+              multiple={isMultiple}
               ref={fileInputRef}
               onChange={handleFileChange}
               style={{ display: 'none' }}

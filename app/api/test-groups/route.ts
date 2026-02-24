@@ -403,9 +403,13 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, data: testGroup }, { status: STATUS_CODES.CREATED });
   } catch (error) {
+    let code = STATUS_CODES.INTERNAL_SERVER_ERROR;
+    if (error instanceof Error && error.message === 'Unauthorized') {
+      code = STATUS_CODES.UNAUTHORIZED;
+    }
     return handleError(
       error as Error,
-      STATUS_CODES.INTERNAL_SERVER_ERROR,
+      code,
       apiTimer,
       'POST',
       '/api/test-groups'

@@ -11,9 +11,8 @@ import { TestCaseEditForm } from './TestCaseEditForm';
 
 export function TestCaseEditFormContainer() {
   const [editLoading, setEditLoading] = useState(true);
-  const params = useParams();
-  const groupId = parseInt(params.groupId as string, 10);
-  const tid = params.tid;
+  const [testContents, setTestContents] = useState<[] | TestCase[]>([]);
+  const [apiError, setApiError] = useState<Error | null>(null);
   const [form, setForm] = useState<UpdateTestCaseListRow>({
     tid: '',
     first_layer: '',
@@ -27,7 +26,11 @@ export function TestCaseEditFormContainer() {
     controlSpecFile: [],
     dataFlowFile: [],
   });
-  const [testContents, setTestContents] = useState<[] | TestCase[]>([]);
+
+  const params = useParams();
+  const groupId = parseInt(params.groupId as string, 10);
+  const tid = params.tid;
+  if (apiError) throw apiError;
 
   useEffect(() => {
     const getTestCaseDataFunc = async () => {
@@ -42,7 +45,7 @@ export function TestCaseEditFormContainer() {
 
         const editData = testCaseEditData.data[0];
         // 制御仕様書のフォーマット
-        let change_key_control_spec = [];
+        const change_key_control_spec = [];
         for (const file of testCaseEditData.data[0].control_spec) {
           change_key_control_spec.push({
             name: file.file_name,
@@ -53,7 +56,7 @@ export function TestCaseEditFormContainer() {
           })
         }
         // データフローのフォーマット
-        let change_key_data_flow = [];
+        const change_key_data_flow = [];
         for (const file of testCaseEditData.data[0].data_flow) {
           change_key_data_flow.push({
             name: file.file_name,
@@ -75,11 +78,12 @@ export function TestCaseEditFormContainer() {
         setTestContents(editData.contents);
         setEditLoading(false);
 
-        clientLogger.info('TestCaseEditFormContainer', 'データ取得成功', { tid: editData.tid });
+        clientLogger.info('テストケース編集画面', 'データ取得成功', { testGroupId: groupId, tid: editData.tid });
       } catch (err) {
-        clientLogger.error('TestCaseEditFormContainer', 'データ取得失敗', {
+        clientLogger.error('テストケース編集画面', 'データ取得失敗', {
           error: err instanceof Error ? err.message : String(err),
         });
+        setApiError(err instanceof Error ? err : new Error(String(err)));
       } finally {
         setEditLoading(false);
       }

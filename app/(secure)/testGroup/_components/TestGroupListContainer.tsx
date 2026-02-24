@@ -19,8 +19,6 @@ import { TestGroupList } from './TestGroupList';
 export function TestGroupListContainer() {
   const router = useRouter();
   const searchParamsQuery = useSearchParams();
-  const { data: session } = useSession();
-
   const [menuItems, setMenuItems] = useState<TestGroupListRow[]>([]);
   const [page, setPage] = useState(1);
   const [pageCount, setPageCount] = useState(0);
@@ -31,9 +29,6 @@ export function TestGroupListContainer() {
     direction: 'asc' | 'desc';
   } | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
-  const pageSize = 10;
-  const pagepath = '/testGroup';
-
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isdelModalOpen, setIsDelModalOpen] = useState(false);
   const [delLoading, setDelLoading] = useState(false);
@@ -42,6 +37,10 @@ export function TestGroupListContainer() {
   const [newid, setNewid] = useState<number | null>(null);
   const [modalContent, setModalContent] = useState<'initial' | 'confirm'>('initial');
   const [testGroupLoading, setTestGroupLoading] = useState(false);
+
+  const pageSize = 10;
+  const pagepath = '/testGroup';
+  const { data: session } = useSession();
 
   // 権限チェック: テスト管理者(1)または管理者(0)のみが新規作成・複製可能
   const canCreate = session?.user?.user_role !== undefined && session.user.user_role <= 1;
@@ -76,7 +75,12 @@ export function TestGroupListContainer() {
       destination: searchParamsQuery.get('destination') || '',
     };
 
-    const pageNum = parseInt(searchParamsQuery.get('page') || '1', 10);
+    let pageNum = parseInt(searchParamsQuery.get('page') || '1', 10);
+    // もし結果が数値でない (NaN) なら、1を代入する
+    if (isNaN(pageNum)) {
+      pageNum = 1;
+    }
+
     const hasPageInUrl = searchParamsQuery.get('page') !== null;
 
     setFormValues(params);
@@ -120,20 +124,11 @@ export function TestGroupListContainer() {
           const latestId = Math.max(...result.data.map((item: { id: number }) => item.id));
           setNewid(latestId + 1);
         }
-        clientLogger.debug('テストグループ一覧画面', 'テストグループリスト取得成功', {
-          page,
-          count: result.data?.length,
-          result: result.data
-        });
-      } catch (err: unknown) {
+        clientLogger.debug('テストグループ一覧画面', 'テストグループリスト取得成功', { page, count: result.data?.length, result: result.data });
+      } catch (err) {
         if (!ignore) setMenuItems([]);
-        if (err instanceof Error) {
-          clientLogger.error('テストグループ一覧画面', 'テストグループリスト取得失敗', {
-            page,
-            error: err.message,
-          });
-          setApiError(err instanceof Error ? err : new Error(String(err)));
-        }
+        clientLogger.error('テストグループ一覧画面', 'テストグループリスト取得失敗', { page, error: err instanceof Error ? err.message : String(err) });
+        setApiError(err instanceof Error ? err : new Error(String(err)));
       } finally {
         if (!ignore) {
           setTestGroupLoading(false);
@@ -154,13 +149,18 @@ export function TestGroupListContainer() {
       return { key, direction: 'asc' };
     });
   };
-
+  const toTestCasePage = (id: number) => {
+    clientLogger.info('テストグループ一覧画面', 'IDリンク押下', { testGroupId: id })
+  }
   const columns: Column<TestGroupListRow>[] = [
     {
       key: 'id',
       header: 'ID',
       render: (value: number) => (
-        <Link href={`/testGroup/${value}/testCase`} style={{ color: 'blue', textDecoration: 'underline' }}>
+        <Link
+          href={`/testGroup/${value}/testCase`}
+          style={{ color: 'blue', textDecoration: 'underline' }}
+          onClick={() => toTestCasePage(value)}>
           {value}
         </Link>
       ),
@@ -176,19 +176,19 @@ export function TestGroupListContainer() {
 
   const toTestGroupEditPage = (id: number) => {
     // テストグループ編集画面への遷移処理
-    clientLogger.info('テストグループ一覧画面', '編集ボタン押下', { id });
+    clientLogger.info('テストグループ一覧画面', '編集ボタン押下', { testGroupId: id });
     router.push(`/testGroup/${id}/edit`);
   };
 
   const toTestSummaryResultPage = (id: number) => {
     // テストグループ集計画面への遷移処理
-    clientLogger.info('テストグループ一覧画面', '集計ボタン押下', { id });
+    clientLogger.info('テストグループ一覧画面', '集計ボタン押下', { testGroupId: id });
     router.push(`/testGroup/${id}/testSummaryResult`);
   };
 
   const toTestGroupCopyPage = (id: number) => {
     // テストグループ複製画面への遷移処理
-    clientLogger.info('テストグループ一覧画面', '複製ボタン押下', { id });
+    clientLogger.info('テストグループ一覧画面', '複製ボタン押下', { testGroupId: id });
     router.push(`/testGroup/${id}/copy`);
   }
 
@@ -243,7 +243,8 @@ export function TestGroupListContainer() {
       name: 'oem',
       value: formValues.oem,
       onChange: () => { },
-      placeholder: 'OEM'
+      placeholder: 'OEM',
+      maxLength: 255
     },
     {
       label: '機種',
@@ -251,7 +252,8 @@ export function TestGroupListContainer() {
       name: 'model',
       value: formValues.model,
       onChange: () => { },
-      placeholder: '機種'
+      placeholder: '機種',
+      maxLength: 255
     },
     {
       label: 'イベント',
@@ -259,7 +261,8 @@ export function TestGroupListContainer() {
       name: 'event',
       value: formValues.event,
       onChange: () => { },
-      placeholder: 'イベント'
+      placeholder: 'イベント',
+      maxLength: 255
     },
     {
       label: 'バリエーション',
@@ -267,7 +270,8 @@ export function TestGroupListContainer() {
       name: 'variation',
       value: formValues.variation,
       onChange: () => { },
-      placeholder: 'バリエーション'
+      placeholder: 'バリエーション',
+      maxLength: 255
     },
     {
       label: '仕向',
@@ -275,13 +279,14 @@ export function TestGroupListContainer() {
       name: 'destination',
       value: formValues.destination,
       onChange: () => { },
-      placeholder: '仕向'
+      placeholder: '仕向',
+      maxLength: 255
     },
   ];
 
   const getTotalTestCase = async (id: number) => {
 
-    clientLogger.info('テストグループ一覧画面', '削除ボタン押下', { id: id });
+    clientLogger.info('テストグループ一覧画面', '削除ボタン押下', { testGroupId: id });
 
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -289,9 +294,9 @@ export function TestGroupListContainer() {
       setTotalTestCase(result.totalCount);
       setIsModalOpen(true);
       setModalContent('initial');
-    } catch (error) {
-      clientLogger.error('テストグループ一覧画面', '関連テストグループケース件数取得エラー', { error });
-      setApiError(error instanceof Error ? error : new Error(String(error)));
+    } catch (err) {
+      clientLogger.error('テストグループ一覧画面', '関連テストグループケース件数取得エラー', { error: err instanceof Error ? err.message : String(err) });
+      setApiError(err instanceof Error ? err : new Error(String(err)));
     }
   }
 
@@ -330,7 +335,7 @@ export function TestGroupListContainer() {
       const result = await apiDelete<any>(`/api/test-groups/${selectedTestGroup.id}`);
 
       if (result.success) {
-        clientLogger.info('テストグループ一覧画面', 'テストグループ削除成功', { groupId: selectedTestGroup.id });
+        clientLogger.info('テストグループ一覧画面', 'テストグループ削除成功', { testGroupId: selectedTestGroup.id });
         //テストグループ一覧再描画
         const queryString = buildQueryString(searchParams, page, pageSize);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -350,12 +355,12 @@ export function TestGroupListContainer() {
         setModalMessage('テストグループを削除しました');
         setIsDelModalOpen(true);
       } else {
-        clientLogger.error('テストグループ一覧画面', 'テストグループ削除失敗', { error: result.error });
+        clientLogger.error('テストグループ一覧画面', 'テストグループ削除失敗', { error: result.error instanceof Error ? result.error.message : String(result.error) });
         setModalMessage('テストグループの削除に失敗しました');
         setIsDelModalOpen(true);
       }
-    } catch (error) {
-      clientLogger.error('テストグループ一覧画面', 'テストグループ削除エラー', { error });
+    } catch (err) {
+      clientLogger.error('テストグループ一覧画面', 'テストグループ削除エラー', { error: err instanceof Error ? err.message : String(err) });
       setModalMessage('テストグループの削除に失敗しました');
       setIsDelModalOpen(true);
     } finally {
@@ -396,7 +401,7 @@ export function TestGroupListContainer() {
           }
           <Modal open={isModalOpen} onClose={() => setIsModalOpen(false)}>
             <p className="mb-8 text-red-600 font-bold text-center">
-              {modalContent === 'initial'
+              {modalContent === 'initial' && totalTestCase > 0
                 ? (
                   <>
                     本当にこのテストグループを削除しますか？<br />
@@ -412,7 +417,7 @@ export function TestGroupListContainer() {
             )}
             <div className="flex justify-center space-x-10">
               <Button className="w-24 bg-red-600 text-white" onClick={() => {
-                if (modalContent === 'initial') {
+                if (modalContent === 'initial' && totalTestCase > 0) {
                   setModalContent('confirm');
                 } else {
                   setIsModalOpen(false);

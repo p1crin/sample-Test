@@ -11,7 +11,6 @@ import { TestGroupCopyForm } from './TestGroupCopyForm';
 
 export function TestGroupCopyFormContainer() {
   const [copyLoading, setCopyLoading] = useState(true);
-  const [apiError, setApiError] = useState<Error | null>(null);
   const [form, setForm] = useState<TestGroupCopyFormState>({
     oem: '',
     model: '',
@@ -26,9 +25,11 @@ export function TestGroupCopyFormContainer() {
     executerTag: [] as string[],
     viewerTag: [] as string[],
   });
+  const [apiError, setApiError] = useState<Error | null>(null);
+  if (apiError) throw apiError;
+
   const params = useParams();
   const groupId = params.groupId;
-  if (apiError) throw apiError;
 
   useEffect(() => {
     const getTestGroupCopyDataFunc = async () => {
@@ -66,7 +67,12 @@ export function TestGroupCopyFormContainer() {
         }
 
         const formatCopy: TestGroupCopyFormState = {
-          ...getCopyData,
+          oem: getCopyData.oem,
+          model: getCopyData.model,
+          event: getCopyData.event,
+          variation: getCopyData.variation,
+          destination: getCopyData.destination,
+          specs: getCopyData.specs,
           test_startdate: formatDateWithHyphen(getCopyData.test_startdate),
           test_enddate: formatDateWithHyphen(getCopyData.test_enddate),
           ngPlanCount: getCopyData.ng_plan_count.toString(),
@@ -76,11 +82,9 @@ export function TestGroupCopyFormContainer() {
         }
         setForm(formatCopy);
 
-        clientLogger.info('テストグループ複製画面', 'データ取得成功', { data: testGroupCopyData.data.testGroupId });
+        clientLogger.info('テストグループ複製画面', 'データ取得成功', { testGroupId: getCopyData.id });
       } catch (err) {
-        clientLogger.error('テストグループ複製画面', 'データ取得失敗', {
-          error: err instanceof Error ? err.message : String(err),
-        });
+        clientLogger.error('テストグループ複製画面', 'データ取得失敗', { error: err instanceof Error ? err.message : String(err) });
         setApiError(err instanceof Error ? err : new Error(String(err)));
       } finally {
         setCopyLoading(false);

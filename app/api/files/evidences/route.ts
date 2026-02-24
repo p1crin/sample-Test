@@ -85,7 +85,6 @@ export async function POST(req: NextRequest) {
       `evidences/${testGroupId}/${tid}`,
       fileName,
       {
-        originalName: file.name,
         testGroupId: testGroupId,
         tid: tid,
         testCaseNo: testCaseNo,

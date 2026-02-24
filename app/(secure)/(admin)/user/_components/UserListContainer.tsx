@@ -116,7 +116,7 @@ export function UserListContainer() {
           }));
           setMenuItems(formattedUsers);
         }
-        clientLogger.debug('ユーザ一覧画面', 'ユーザリスト取得成功', {
+        clientLogger.info('ユーザ一覧画面', 'ユーザリスト取得成功', {
           page,
           count: userData.data?.length,
           result: userData.data,
@@ -124,13 +124,11 @@ export function UserListContainer() {
         setUserLoading(false);
       } catch (err) {
         if (!ignore) setMenuItems([]);
-        if (err instanceof Error) {
-          clientLogger.error('ユーザ一覧画面', 'データ取得失敗', {
-            page,
-            error: err.message,
-          });
-          setApiError(err instanceof Error ? err : new Error(String(err)));
-        }
+        clientLogger.error('ユーザ一覧画面', 'データ取得失敗', {
+          page,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        setApiError(err instanceof Error ? err : new Error(String(err)));
       } finally {
         if (!ignore) {
           setUserLoading(false);
@@ -160,9 +158,9 @@ export function UserListContainer() {
         } else {
           setTagError('タグの取得に失敗しました');
         }
-      } catch (error) {
-        clientLogger.error('ユーザ一覧画面', 'タグ取得エラー', { error });
-        setTagError(error instanceof Error ? error.message : 'タグの取得に失敗しました');
+      } catch (err) {
+        clientLogger.error('ユーザ一覧画面', 'タグ取得エラー', { error: err instanceof Error ? err.message : String(err) });
+        setTagError(err instanceof Error ? err.message : 'タグの取得に失敗しました');
       } finally {
         setTagLoading(false);
       }
@@ -198,11 +196,13 @@ export function UserListContainer() {
 
   // ユーザ新規登録画面遷移
   const toUserRegistPage = () => {
+    clientLogger.info('ユーザ一覧画面', 'ユーザ登録ボタン押下');
     router.push('/user/regist');
   };
 
   // ユーザ編集画面遷移
   const toUserEditPage = (id: number) => {
+    clientLogger.info('ユーザ一覧画面', '編集ボタン押下', { userId: id });
     router.push(`/user/${id}/edit`);
   };
   // ユーザインポート実施画面遷移
@@ -212,10 +212,10 @@ export function UserListContainer() {
   };
 
   const userDelete = async () => {
-    clientLogger.info('ユーザ一覧画面', '削除ボタン押下');
     if (!selectedUser) {
       throw new Error('削除対象ユーザが見つかりません')
     }
+    clientLogger.info('ユーザ一覧画面', '削除ボタン押下', { userId: selectedUser.id });
 
     try {
       setDelLoading(true);
@@ -244,12 +244,12 @@ export function UserListContainer() {
         setModalMessage(result.message);
         setIsDelModalOpen(true);
       } else {
-        clientLogger.info('ユーザ一覧画面', 'ユーザ削除失敗', { error: result.error });
+        clientLogger.error('ユーザ一覧画面', 'ユーザ削除失敗', { error: result.error instanceof Error ? result.error.message : String(result.error) });
         setModalMessage('ユーザの削除に失敗しました');
         setIsDelModalOpen(true);
       }
-    } catch (error) {
-      clientLogger.error('ユーザ一覧画面', 'ユーザ一削除エラー', { error });
+    } catch (err) {
+      clientLogger.error('ユーザ一覧画面', 'ユーザ一削除エラー', { error: err instanceof Error ? err.message : String(err) });
       setModalMessage('ユーザの削除に失敗しました');
       setIsDelModalOpen(true);
     } finally {
@@ -313,7 +313,8 @@ export function UserListContainer() {
       name: 'email',
       value: formValues.email,
       onChange: () => { },
-      placeholder: 'ID (メールアドレス)'
+      placeholder: 'ID (メールアドレス)',
+      maxLength: 255
     },
     {
       label: '氏名',
@@ -321,7 +322,8 @@ export function UserListContainer() {
       name: 'name',
       value: formValues.name,
       onChange: () => { },
-      placeholder: '氏名'
+      placeholder: '氏名',
+      maxLength: 255
     },
     {
       label: '部署',
@@ -329,7 +331,8 @@ export function UserListContainer() {
       name: 'department',
       value: formValues.department,
       onChange: () => { },
-      placeholder: '部署'
+      placeholder: '部署',
+      maxLength: 255
     },
     {
       label: '会社名',
@@ -337,7 +340,8 @@ export function UserListContainer() {
       name: 'company',
       value: formValues.company,
       onChange: () => { },
-      placeholder: '会社名'
+      placeholder: '会社名',
+      maxLength: 255
     },
     {
       label: '権限',
@@ -393,6 +397,13 @@ export function UserListContainer() {
     updateUrlParams(router, searchParams, pagePath, pageNum);
   };
 
+  // UserListContainer.tsxでの呼び出しイメージ
+  const handleExportError = (error: Error) => {
+    clientLogger.error('ユーザ一覧画面', 'エクスポート失敗', { error: error.message });
+    setModalMessage('エクスポートに失敗しました。');
+    setIsDelModalOpen(true);
+  };
+
   return (
     <div>
       {/* タグ読み込みエラー表示 */}
@@ -415,7 +426,7 @@ export function UserListContainer() {
             >
               ユーザ登録
             </Button>
-            <ExportButton />
+            <ExportButton onError={handleExportError} />
             <Button
               onClick={() => toUserImportPage()}
             >

@@ -5,6 +5,8 @@ import { QueryTimer, logAPIEndpoint, logDatabaseQuery } from '@/utils/database-l
 import { STATUS_CODES } from '@/constants/statusCodes';
 import { ERROR_MESSAGES } from '@/constants/errorMessages';
 import { Prisma } from '@/generated/prisma/client';
+import { handleError } from '@/utils/errorHandler';
+import { group } from 'console';
 
 type AggregatedData = {
   first_layer: string;
@@ -27,11 +29,11 @@ export async function GET(
 ) {
   const apiTimer = new QueryTimer();
   let statusCode = STATUS_CODES.OK;
+  const { groupId: groupIdParam } = await params;
+  const groupId = parseInt(groupIdParam, 10);
 
   try {
     const user = await requireAuth(req);
-    const { groupId: groupIdParam } = await params;
-    const groupId = parseInt(groupIdParam, 10);
 
     if (isNaN(groupId)) {
       statusCode = STATUS_CODES.BAD_REQUEST;
@@ -131,7 +133,7 @@ export async function GET(
 
     logDatabaseQuery({
       operation: 'SELECT',
-      table: 'daily_report',
+      table: 'repor_data',
       executionTime: apiTimer.elapsed(),
       rowsReturned: aggregatedData ? aggregatedData.length : 0,
       query: query.strings.join("?"),
@@ -158,22 +160,18 @@ export async function GET(
 
     logAPIEndpoint({
       method: 'GET',
-      endpoint: '/api/test-groups/[groupId]/report-data',
+      endpoint: `/api/test-groups/${groupId}/report-data`,
       statusCode,
       executionTime: apiTimer.elapsed(),
       error: error instanceof Error ? error.message : ERROR_MESSAGES.DEFAULT,
     });
 
-    if (isUnauthorized) {
-      return NextResponse.json(
-        { success: false, error: ERROR_MESSAGES.UNAUTHORIZED },
-        { status: STATUS_CODES.UNAUTHORIZED }
-      );
-    }
-
-    return NextResponse.json(
-      { success: false, error: ERROR_MESSAGES.GET_FALED },
-      { status: STATUS_CODES.INTERNAL_SERVER_ERROR }
-    );
+    return handleError(
+      error as Error,
+      statusCode,
+      apiTimer,
+      'GET',
+      `/api/test-groups/${groupId}/report-data`
+    )
   }
 }

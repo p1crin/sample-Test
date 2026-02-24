@@ -1,10 +1,10 @@
 import Tag from '@/components/ui/tag';
+import clientLogger from '@/utils/client-logger';
+import { FileInfo, isImage } from '@/utils/fileUtils';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Modal } from '../ui/modal';
 import { Column } from './DataGrid';
-import clientLogger from '@/utils/client-logger';
-import { FileInfo, isImage } from '@/utils/fileUtils';
 
 type TableCellContentProps<T> = {
   column: Column<T>;
@@ -19,11 +19,11 @@ const RenderFileLink = ({ file, index }: { file: string | FileInfo | null, index
   const [modalImage, setModalImage] = useState<string | null>(null);
   const [fileUrl, setFileUrl] = useState<string>('');
 
-  // FileInfo型の場合はpathプロパティを使用（Hooksの前に変数定義）
+  // FileInfo型の場合はpathプロパティを使用
   const filePath = file ? (typeof file === 'string' ? file : (file.path || file.name)) : '';
   const fileName = file ? (typeof file === 'string' ? file.split('/').pop() : file.name) : '';
 
-  // S3パスの場合に署名付きURLを取得（すべてのHooksは条件分岐の前に配置）
+  // S3パスの場合に署名付きURLを取得
   useEffect(() => {
     const fetchFileUrl = async () => {
       if (!filePath) return;
@@ -49,8 +49,8 @@ const RenderFileLink = ({ file, index }: { file: string | FileInfo | null, index
             // 失敗した場合は元のパスを使用
             setFileUrl(filePath);
           }
-        } catch (error) {
-          clientLogger.error('TableCellContent', 'ファイルURLの取得失敗', { error });
+        } catch (err) {
+          clientLogger.error('TableCellContent', 'ファイルURLの取得失敗', { error: err instanceof Error ? err.message : String(err) });
           // エラーの場合は元のパスを使用
           setFileUrl(filePath);
         }
@@ -60,7 +60,6 @@ const RenderFileLink = ({ file, index }: { file: string | FileInfo | null, index
     fetchFileUrl();
   }, [filePath]);
 
-  // fileがnullの場合は早期return（Hooksの後に配置）
   if (!file) return null;
 
   const handleClick = (e: { preventDefault: () => void; }) => {
@@ -106,6 +105,15 @@ const renderContent = (value: unknown, isImg?: boolean) => {
     );
   }
 
+  if (typeof value === 'string') {
+    return value.split('\n').map((line, index) => (
+      <span key={index}>
+        {line}
+        <br />
+      </span>
+    ));
+  }
+
   return isImg ? <RenderFileLink file={value as string | FileInfo} index={0} key={0} /> : <span>{value as string}</span>;
 };
 
@@ -134,7 +142,12 @@ const renderPartialLinks = (text: string, pattern: RegExp, linkPrefix: string, i
     <>
       {parts.map((part, index) => {
         if (typeof part === 'string') {
-          return <span key={index}>{part}</span>;
+          return part.split('\n').map((line, lineIndex) => (
+            <span key={`${index}-${lineIndex}`}>
+              {line}
+              <br />
+            </span>
+          ));
         }
         const matchedText = part[0];
         // マッチから数字を抽出（例："#1000"→"1000"）

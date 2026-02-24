@@ -2,10 +2,17 @@ import clientLogger from '@/utils/client-logger';
 import { formatDateTimeToTimestamp } from '@/utils/date-formatter';
 import { Button } from "./button";
 
-export default function ExportButton() {
+interface ExportButtonProps {
+  onError: (error: Error) => void;
+}
+
+export default function ExportButton({ onError }: ExportButtonProps) {
+
   const exportCsv = async () => {
     try {
       clientLogger.debug('ユーザ一覧画面', 'エクスポート処理開始');
+      
+      // response.text();の形でほしいのでfetchを使用する
       const response = await fetch('/api/users/export', {
         method: 'GET',
         headers: {
@@ -29,10 +36,9 @@ export default function ExportButton() {
       document.body.removeChild(link);
 
       clientLogger.debug('ユーザ一覧画面', 'エクスポート処理成功');
-    } catch (error) {
-      if (error instanceof Error) {
-        clientLogger.error('ユーザ一覧画面', 'エクスポート処理失敗', { error: error.message });
-      }
+    } catch (err) {
+      clientLogger.error('ユーザ一覧画面', 'エクスポート処理失敗', { error: err instanceof Error ? err.message : String(err) });
+      onError(err as Error);
     }
   };
 

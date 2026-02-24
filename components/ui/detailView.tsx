@@ -67,8 +67,8 @@ const DetailView: React.FC<DetailViewProps> = ({ labels, values, isFull = false 
               const data = await response.json();
               newImageUrls[path] = data.data.url;
             }
-          } catch (error) {
-            clientLogger.error('detailView', 'ファイルURLの取得失敗', { error });
+          } catch (err) {
+            clientLogger.error('detailView', 'ファイルURLの取得失敗', { error: err instanceof Error ? err.message : String(err) });
           }
         }
       }

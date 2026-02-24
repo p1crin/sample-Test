@@ -1,10 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server';
 import clientLogHandler from '@/utils/client-log-handler';
+import { NextRequest, NextResponse } from 'next/server';
 
 interface ClientLogRequest {
   level: 'debug' | 'info' | 'warn' | 'error';
   screenName: string;
   message: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   params?: any[];
   metadata: {
     timestamp: string;

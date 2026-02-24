@@ -2,6 +2,7 @@
 # Stage 1: Dependencies
 # ==========================================
 FROM node:20-slim AS deps
+
 WORKDIR /app
 
 # Prismaに必要なOpenSSLライブラリをインストール
@@ -12,13 +13,15 @@ RUN apt-get update -y && \
 # package.jsonとpackage-lock.jsonをコピー
 COPY package*.json ./
 
-# 依存関係をインストール
-RUN npm ci
+# COPY .npmrc ./ を削除し、--mount を使って認証情報を安全に渡す
+RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm ci
+
 
 # ==========================================
 # Stage 2: Builder
 # ==========================================
 FROM node:20-slim AS builder
+
 WORKDIR /app
 
 # OpenSSLをインストール
@@ -26,7 +29,7 @@ RUN apt-get update -y && \
     apt-get install -y openssl && \
     rm -rf /var/lib/apt/lists/*
 
-# 依存関係をコピー
+# Stage 1 から依存関係をコピー
 COPY --from=deps /app/node_modules ./node_modules
 
 # アプリケーションコードをコピー
@@ -36,14 +39,15 @@ COPY . .
 RUN npx prisma generate
 
 # Next.jsアプリケーションをビルド
-# 環境変数はビルド時に注入されるため、ARGで受け取る
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
+
 
 # ==========================================
 # Stage 3: Runner (本番環境)
 # ==========================================
 FROM node:20-slim AS runner
+
 WORKDIR /app
 
 # OpenSSLをインストール
@@ -51,7 +55,6 @@ RUN apt-get update -y && \
     apt-get install -y openssl && \
     rm -rf /var/lib/apt/lists/*
 
-# 本番環境であることを明示
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
@@ -61,18 +64,15 @@ RUN addgroup --system --gid 1001 nodejs && \
 
 # 必要なファイルのみコピー
 COPY --from=builder /app/public ./public
-COPY --from=builder /app/package*.json ./
-
-# Next.jsのビルド成果物をコピー
+# Standaloneモードのビルド成果物をコピー
+# これには、実行に必要な最小限のnode_modulesも含まれます
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Prisma生成ファイルをコピー
-COPY --from=builder /app/generated ./generated
-COPY --from=builder /app/prisma ./prisma
-
-# Prisma Clientを再生成(本番環境用)
-RUN npx prisma generate
+# Stage 2 (builder) で生成されたPrisma Clientが .next/standalone に
+# 含まれているため、ここでの再生成は不要かつエラーの原因になるため削除
+# COPY --from=builder /app/prisma ./prisma
+# RUN npx prisma generate
 
 # 権限を設定
 USER nextjs
@@ -80,9 +80,9 @@ USER nextjs
 # ポート3000を公開
 EXPOSE 3000
 
-# 環境変数
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
 # アプリケーション起動
+# .next/standalone 内の server.js を実行する
 CMD ["node", "server.js"]

@@ -5,12 +5,12 @@ import Loading from '@/components/ui/loading';
 import { JUDGMENT_OPTIONS, JudgmentOption, READMINE_URL } from '@/constants/constants';
 import { apiGet } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
+import { formatDateJST } from '@/utils/date-formatter';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { TestCaseResult } from './TestCaseResult';
-import { ResultWithHistory, TestCaseResultRow, TestResultsData } from './types/testCase-result-list-row';
 import { TestCaseDetailRow } from './types/testCase-detail-list-row';
-import { formatDateJST } from '@/utils/date-formatter';
+import { ResultWithHistory, TestCaseResultRow, TestResultsData } from './types/testCase-result-list-row';
 
 // 判定のバリデーションを行うための型ガード
 const isValidJudgment = (value: unknown): value is JudgmentOption => {
@@ -31,17 +31,14 @@ const labels = {
   testProcedure: { name: "テスト手順", type: "text" as 'text' }
 };
 
-
-
 export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid: string }) {
-  const [data, setData] = useState<TestCaseDetailRow | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [labelData, setLabelData] = useState(labels);
   const [resultsWithHistory, setResultsWithHistory] = useState<TestResultsData>({});
   const [expandedSections, setExpandedSections] = useState<Set<number>>(new Set([0]));
-  const [labelData, setLabelData] = useState(labels);
+  const [data, setData] = useState<TestCaseDetailRow | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [apiError, setApiError] = useState<Error | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-
   if (apiError) throw apiError;
 
   const router = useRouter();
@@ -77,20 +74,17 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
         setData(testCase);
         setLabelData(labels);
 
-        clientLogger.info('テストケース結果確認画面', 'テストケース詳細取得成功', { tid });
+        clientLogger.info('テストケース結果確認画面', 'テストケース詳細取得成功', { testGroupId: groupId, tid: testCase.tid });
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        clientLogger.error('テストケース結果確認画面', 'テストケース詳細取得失敗', { error: errorMessage });
+        clientLogger.error('テストケース結果確認画面', 'テストケース詳細取得失敗', { error: err instanceof Error ? err.message : String(err) });
         setLoadError('テストケース詳細の取得に失敗しました');
         setApiError(err instanceof Error ? err : new Error(String(err)));
-      } finally {
-        setIsLoading(false);
       }
     };
 
     const fetchTestResults = async () => {
       try {
-        clientLogger.info('テストケース結果確認画面', 'テスト結果取得開始', { groupId, tid });
+        clientLogger.info('テストケース結果確認画面', 'テスト結果取得開始', { testGroupId: groupId, tid });
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const data = await apiGet<any>(`/api/test-groups/${groupId}/cases/${tid}/results`);
 
@@ -102,28 +96,20 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
         const resultsData = data.results as TestResultsData;
         setResultsWithHistory(resultsData);
 
-        clientLogger.info('テストケース結果確認画面', 'テスト結果取得成功', { tid, count: Object.keys(resultsData).length });
+        clientLogger.info('テストケース結果確認画面', 'テスト結果取得成功', { groupId, tid, count: Object.keys(resultsData).length });
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        clientLogger.error('テストケース結果確認画面', 'テスト結果取得失敗', { error: errorMessage });
+        clientLogger.error('テストケース結果確認画面', 'テスト結果取得失敗', { error: err instanceof Error ? err.message : String(err) });
         setLoadError('テスト結果の取得に失敗しました');
         setApiError(err instanceof Error ? err : new Error(String(err)));
-      } finally {
-        setIsLoading(false);
       }
     };
 
-    fetchTestCaseDetail();
-    fetchTestResults();
+    // 両方のフェッチが完了してからローディングを解除する
+    Promise.all([fetchTestCaseDetail(), fetchTestResults()]).finally(() => {
+      setIsLoading(false);
+    });
+
   }, [groupId, tid]);
-
-  const handleCancel = () => {
-    router.push(`/testGroup/${groupId}/testCase/`);
-  };
-
-  const handleShowTestTable = () => {
-    router.push(`/testGroup/${groupId}/testCase/${tid}/result/conduct`);
-  };
 
   const toggleSection = (historyCount: number) => {
     setExpandedSections((prev) => {
@@ -210,7 +196,9 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
             </div>
           </div>
           <div className="w-full flex items-end justify-end">
-            <Button type="submit" onClick={handleShowTestTable} className="w-24" disabled={Object.entries(resultsWithHistory).length <= 0} >
+            <Button type="submit" className="w-24" disabled={Object.entries(resultsWithHistory).length <= 0} onClick={() => {
+              router.push(`/testGroup/${groupId}/testCase/${tid}/result/conduct`)
+            }}>
               結果登録
             </Button>
           </div>
@@ -309,7 +297,10 @@ export function TestCaseResultContainer({ groupId, tid }: { groupId: number; tid
         </div>
       )}
       <div className="flex justify-center space-x-4">
-        <Button type="button" onClick={handleCancel} className="bg-gray-500 hover:bg-gray-400">戻る</Button>
+        <Button type="button" className="bg-gray-500 hover:bg-gray-400" onClick={() => {
+          clientLogger.info('テストケース結果確認画面', '戻るボタン押下');
+          router.push(`/testGroup/${groupId}/testCase`);
+        }}>戻る</Button>
       </div>
     </div>
   );

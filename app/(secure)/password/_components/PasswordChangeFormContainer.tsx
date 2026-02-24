@@ -10,11 +10,14 @@ import clientLogger from '@/utils/client-logger';
 import { signOut } from 'next-auth/react';
 import { useState } from 'react';
 import { passwordChangeSchema } from './schemas/password-change-schema';
+import { Router } from 'next/router';
+import Loading from '@/components/ui/loading';
 
 export function PasswordChangeFormContainer() {
   const [isLoading, setIsLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
+  const [isApiSuccess, setIsApiSuccess] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formData, setFormData] = useState({
     currentPassword: '',
@@ -73,19 +76,20 @@ export function PasswordChangeFormContainer() {
         throw error;
       }
       if (result.success) {
-        clientLogger.info('パスワード変更画面', 'パスワード変更成功', { id: result.data?.id });
+        clientLogger.info('パスワード変更画面', 'パスワード変更成功', { userId: result.data?.id });
         setModalMessage('パスワードを変更しました');
+        setIsApiSuccess(result.success);
         setIsModalOpen(true);
         setTimeout(() => {
           handleLogout();
         }, 1500);
       } else {
-        clientLogger.error('パスワード変更画面', 'パスワード変更失敗', { error: result.error });
+        clientLogger.error('パスワード変更画面', 'パスワード変更失敗', { error: result.error instanceof Error ? result.error.message : String(result.error) });
         setModalMessage('パスワード変更に失敗しました');
         setIsModalOpen(true);
       }
-    } catch (error) {
-      clientLogger.error('パスワード変更画面', 'パスワード変更失敗', { error });
+    } catch (err) {
+      clientLogger.error('パスワード変更画面', 'パスワード変更失敗', { error: err instanceof Error ? err.message : String(err) });
       setModalMessage('パスワード変更に失敗しました');
       setIsModalOpen(true);
     } finally {
@@ -98,6 +102,14 @@ export function PasswordChangeFormContainer() {
     clearAuthSession();
     signOut({ callbackUrl: '/login' });
   };
+
+  const closeModal = (isApiSuccess: boolean) => {
+    setIsModalOpen(false);
+    // 変更成功時はログイン画面へ遷移する
+    if (isApiSuccess) {
+      handleLogout();
+    }
+  }
 
   const fields = [
     {
@@ -140,10 +152,21 @@ export function PasswordChangeFormContainer() {
     <div>
       <VerticalForm fields={fields} />
       <ButtonGroup buttons={buttons} />
+      <Modal open={isLoading} onClose={() => setIsLoading(false)} isUnclosable={true}>
+        <div className="flex justify-center">
+          <Loading
+            isLoading={true}
+            message="パスワード変更中..."
+            size="md"
+          />
+        </div>
+      </Modal>
       <Modal open={isModalOpen} onClose={() => setIsModalOpen(false)}>
         <p className="mb-8">{modalMessage}</p>
         <div className="flex justify-center">
-          <Button className="w-24" onClick={() => setIsModalOpen(false)}>閉じる</Button>
+          <Button className="w-24" onClick={() => closeModal(isApiSuccess)}>
+            閉じる
+          </Button>
         </div>
       </Modal>
     </div>

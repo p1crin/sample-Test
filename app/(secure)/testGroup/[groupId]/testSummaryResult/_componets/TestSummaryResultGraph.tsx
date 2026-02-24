@@ -16,8 +16,8 @@ import {
   Title,
   Tooltip,
 } from 'chart.js';
+import dynamic from 'next/dynamic';
 import { useEffect, useState } from 'react';
-import { Chart } from 'react-chartjs-2';
 
 // Chart.jsプラグインを登録
 // バーチャート、折れ線グラフ、グリッド等の描画に必要
@@ -32,10 +32,11 @@ ChartJS.register(
   Legend
 );
 
-/**
- * 日別試験実施数レポートのデータ型
- * APIから返される日毎の集計データ
- */
+// Chartコンポーネントを動的インポートし、SSRを無効化
+const Chart = dynamic(() => import('react-chartjs-2').then((mod) => mod.Chart), {
+  ssr: false,
+});
+
 interface DailyReportData {
   execution_date: string; // YYYY-MM-DD形式の実行日付
   daily_defect_count: number; // その日の不具合摘出数
@@ -62,7 +63,6 @@ export default function TestSummaryResultGraph({ groupId }: TestSummaryResultGra
   const [rightStepSize, setRightStepSize] = useState(50);
   const [leftStepSize, setLeftStepSize] = useState(50);
   const [apiError, setApiError] = useState<Error | null>(null);
-
   if (apiError) throw apiError;
 
   /**
@@ -73,9 +73,10 @@ export default function TestSummaryResultGraph({ groupId }: TestSummaryResultGra
     const fetchData = async () => {
       try {
         setLoading(true);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const result = await apiGet<any>(`/api/test-groups/${groupId}/daily-report-data`);
 
-        if (!result.success) {
+        if (!result.success || !result.data) {
           throw new Error(result.error || 'データの取得に失敗しました');
         }
 
@@ -87,28 +88,22 @@ export default function TestSummaryResultGraph({ groupId }: TestSummaryResultGra
 
         setData(sortedData);
 
-        // 最大値を計算
-        const maxPredictedRemainingTests = Math.max(...sortedData.map(d => d.predicted_remaining_tests));
-        const maxActualRemainingTests = Math.max(...sortedData.map(d => d.actual_remaining_tests));
-        const maxPredictedDefects = Math.max(...sortedData.map(d => d.predicted_defects));
-        const maxCumulativeDefectCount = Math.max(...sortedData.map(d => d.cumulative_defect_count));
-
-        const maxLeftValue = Math.max(maxPredictedRemainingTests, maxActualRemainingTests);
-        const maxRightValue = Math.max(maxPredictedDefects, maxCumulativeDefectCount);
+        const maxLeftValue = Math.max(...sortedData.map(d => Math.max(d.predicted_remaining_tests, d.actual_remaining_tests)));
+        const maxRightValue = Math.max(...sortedData.map(d => Math.max(d.predicted_defects, d.cumulative_defect_count)));
 
         // stepSizeを計算
         setLeftStepSize(Math.ceil(maxLeftValue / 10));
         setRightStepSize(Math.ceil(maxRightValue / 10));
 
+        clientLogger.info('テスト集計結果表示画面', '日別試験実施データ取得成功', { testGroupId: groupId });
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        clientLogger.error('テスト集計結果表示画面', '日別試験実施データ取得失敗', { error: errorMessage });
-        setApiError(err instanceof Error ? err : new Error(String(err)));
+        const error = err instanceof Error ? err : new Error(String(err));
+        clientLogger.error('テスト集計結果表示画面', '日別試験実施データ取得失敗', { error: error.message });
+        setApiError(error);
       } finally {
         setLoading(false);
       }
     };
-
     fetchData();
   }, [groupId]);
 
@@ -333,9 +328,6 @@ export default function TestSummaryResultGraph({ groupId }: TestSummaryResultGra
         type: 'linear' as const,
         display: true,
         position: 'left' as const,
-        title: {
-          display: false,
-        },
         grid: {
           display: true,
           color: 'rgba(0, 0, 0, 0.1)',
@@ -354,9 +346,6 @@ export default function TestSummaryResultGraph({ groupId }: TestSummaryResultGra
         type: 'linear' as const,
         display: true,
         position: 'right' as const,
-        title: {
-          display: false,
-        },
         grid: {
           drawOnChartArea: false, // 右Y軸のグリッドラインをチャート背景に描画しない
         },

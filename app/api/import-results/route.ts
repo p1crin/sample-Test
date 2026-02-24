@@ -75,7 +75,7 @@ export async function GET(req: NextRequest) {
     const importResult = await prisma.tt_import_results.findMany({
       where: whereConditions,
       orderBy: {
-        updated_at: 'desc',
+        created_at: 'desc',
       },
       skip: offset,
       take: limit

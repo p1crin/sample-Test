@@ -129,7 +129,7 @@ model tt_test_evidences {
   updated_at              DateTime                @default(now()) @updatedAt @db.Timestamp(6)
   is_deleted              Boolean                 @default(false)
 
-  @@id([test_group_id, tid, test_case_no, history_count, evidence_no])
+  @@id([test_group_id, tid, test_case_no, history_count, evidence_no], map: "tt_test_evidences_pkey")
 }
 
 model tt_test_group_tags {

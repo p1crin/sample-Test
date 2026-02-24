@@ -2,11 +2,11 @@
 import DetailView from '@/components/ui/detailView';
 import { Modal } from "@/components/ui/modal";
 import { apiGet } from '@/utils/apiClient';
+import clientLogger from '@/utils/client-logger';
 import { formatDateJST } from '@/utils/date-formatter';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { TestGroupModalRow } from './types/testGroup-list-row';
-import clientLogger from '@/utils/client-logger';
 
 export default function TestGroupInfoTableModal() {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -23,8 +23,6 @@ export default function TestGroupInfoTableModal() {
     created_at: '',
     updated_at: '',
   });
-  const params = useParams();
-  const groupId = params.groupId;
   const openModal = () => {
     setIsModalOpen(true);
   };
@@ -33,6 +31,9 @@ export default function TestGroupInfoTableModal() {
   };
   const [apiError, setApiError] = useState<Error | null>(null);
   if (apiError) throw apiError;
+
+  const params = useParams();
+  const groupId = params.groupId;
 
   useEffect(() => {
     const getTestGroup = async () => {
@@ -55,11 +56,9 @@ export default function TestGroupInfoTableModal() {
           updated_at: formatDateJST(testGroupVal.updated_at)
         };
         setTestGroupData(viewValues);
-        clientLogger.info('テストグループ情報モーダル', 'データ取得成功', { data: viewValues.id });
+        clientLogger.info('テストグループ情報モーダル', 'データ取得成功', { groupId: viewValues.id });
       } catch (err) {
-        clientLogger.error('テストグループ情報モーダル', 'データ取得失敗', {
-          error: err instanceof Error ? err.message : String(err),
-        });
+        clientLogger.error('テストグループ情報モーダル', 'データ取得失敗', { error: err instanceof Error ? err.message : String(err) });
         setApiError(err instanceof Error ? err : new Error(String(err)));
       }
     };

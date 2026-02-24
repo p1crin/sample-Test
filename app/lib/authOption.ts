@@ -4,6 +4,8 @@ import { compare } from 'bcryptjs';
 import { NextAuthOptions, User as NextAuthUser } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 
+const THIRTY_DAYS_IN_SECONDS = 30 * 24 * 60 * 60;
+
 export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
@@ -16,27 +18,19 @@ export const authOptions: NextAuthOptions = {
         if (!credentials?.email || !credentials?.password) {
           throw new Error(ERROR_MESSAGES.MISSING_CREDENTIALS);
         }
-
-        // メールアドレスでユーザーを検索
         const user = await prisma.mt_users.findUnique({
           where: {
             email: credentials.email,
             is_deleted: false,
           },
         });
-
         if (!user) {
           throw new Error(ERROR_MESSAGES.INVALID_CREDENTIALS);
         }
-
-        // パスワードを検証
         const isPasswordValid = await compare(credentials.password, user.password);
-
         if (!isPasswordValid) {
           throw new Error(ERROR_MESSAGES.INVALID_CREDENTIALS);
         }
-
-        // ユーザーオブジェクトを返す（パスワードは含まない）
         return {
           id: user.id,
           email: user.email,
@@ -50,44 +44,62 @@ export const authOptions: NextAuthOptions = {
   ],
   session: {
     strategy: 'jwt',
-    maxAge: 30 * 24 * 60 * 60, // 30日（セッションの有効期限）
+    // 1. セッションの最大期間を30日に設定
+    maxAge: THIRTY_DAYS_IN_SECONDS,
   },
   jwt: {
-    maxAge: 30 * 24 * 60 * 60, // 30日（アクセストークンの有効期限）
+    maxAge: THIRTY_DAYS_IN_SECONDS,
   },
   callbacks: {
     async jwt({ token, user }) {
-      const now = Math.floor(Date.now() / 1000);
-
+      // ログイン直後 (userオブジェクトが存在する)
       if (user) {
-        // 新しいログイン - トークンを初期化
         token.sub = user.id.toString();
         token.email = user.email;
         token.name = user.name;
         token.user_role = user.user_role;
         token.department = user.department;
         token.company = user.company;
-        token.iat = now;
-        token.exp = now + 30 * 24 * 60 * 60; // 30日
-      } else if (token) {
-        // トークンのリフレッシュ - トークンの更新が必要か確認
-        const exp = token.exp as number;
-        const timeRemaining = exp - now;
+        return token;
+      }
 
-        // 残り時間が1日未満の場合、トークンをリフレッシュ
-        if (timeRemaining < 24 * 60 * 60) {
-          token.iat = now;
-          token.exp = now + 30 * 24 * 60 * 60; // 30日
+      // 既存セッションの更新時
+      // DBから最新のユーザ情報を取得するロジックは素晴らしいので、そのまま維持
+      try {
+        const currentUser = await prisma.mt_users.findUnique({
+          where: {
+            id: parseInt(token.sub!),
+            is_deleted: false,
+          },
+          select: {
+            user_role: true,
+            name: true,
+            email: true,
+            department: true,
+            company: true,
+          },
+        });
+        if (!currentUser) {
+          // ユーザーが存在しない場合、空のオブジェクトを返してセッションを無効化
+          return {};
         }
+        // 最新のユーザー情報をトークンに反映
+        token.user_role = currentUser.user_role;
+        token.name = currentUser.name;
+        token.email = currentUser.email;
+        token.department = currentUser.department;
+        token.company = currentUser.company;
+      } catch {
+        // DBエラー時は何もしない（既存のトークンを返す）
       }
       return token;
     },
     async session({ session, token }) {
-      if (token && session.user) {
-        session.user.id = parseInt(token.sub!);
+      if (token?.sub && session.user) {
+        session.user.id = parseInt(token.sub);
         session.user.email = token.email!;
         session.user.name = token.name!;
-        session.user.user_role = token.user_role;
+        session.user.user_role = token.user_role!;
         session.user.department = token.department;
         session.user.company = token.company;
       }

@@ -18,10 +18,12 @@ const Resist: React.FC = () => {
   const [tagOptions, setTagOptions] = useState<{ value: string, label: string }[]>([]);
   const [tagLoading, setTagLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [isApiSuccess, setIsApiSuccess] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
   const [tagError, setTagError] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [isEmailChecking, setIsEmailChecking] = useState(false);
   const [formData, setFormData] = useState<CreateUserListRow>({
     name: '',
     email: '',
@@ -51,9 +53,9 @@ const Resist: React.FC = () => {
         } else {
           setTagError('タグの取得に失敗しました。');
         }
-      } catch (error) {
-        clientLogger.error(`ユーザ新規登録画面`, 'タグ取得エラー', { error });
-        setTagError(error instanceof Error ? error.message : 'タグの取得に失敗しました');
+      } catch (err) {
+        clientLogger.error(`ユーザ新規登録画面`, 'タグ取得エラー', { error: err instanceof Error ? err.message : String(err) });
+        setTagError(err instanceof Error ? err.message : 'タグの取得に失敗しました');
       } finally {
         setTagLoading(false);
       }
@@ -85,35 +87,44 @@ const Resist: React.FC = () => {
     }));
   };
 
-  const handleBlur = async () => {
+  // メールアドレスの重複チェック
+  const checkEmailDuplication = async (email: string): Promise<boolean> => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await apiGet<any>(`/api/users/check-email?email=${encodeURIComponent(email)}`);
+      return result.success && result.isDuplicate
+    } catch (err) {
+      clientLogger.error('ユーザ新規登録画面', 'ID(メールアドレス)重複チェックエラー', { error: err instanceof Error ? err.message : String(err) });
+      return false;
+    }
+  }
+
+  // Blurでメールアドレス重複チェック
+  const handleEmailBlur = async () => {
     if (!formData.email.trim()) {
       return;
     }
-
+    setIsEmailChecking(true);
     clientLogger.info('ユーザ新規登録画面', 'ID(メールアドレス)重複チェック開始', { email: formData.email });
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const result = await apiGet<any>(`/api/users/check-email?email=${encodeURIComponent(formData.email)}`);
-
-      if (result.success && result.isDuplicate) {
+      const isDuplicate = await checkEmailDuplication(formData.email)
+      if (isDuplicate) {
         setErrors(prev => ({
           ...prev,
           email: ERROR_MESSAGES.VALIDATION_ERROR_DUPLICATION_EMAIL
         }));
-        clientLogger.warn('ユーザ新規登録画面', 'ID(メールアドレス)重複', { email: formData.email });
       } else {
-        // ID(メールアドレス)が重複していない場合、エラークリア
         setErrors(prev => {
-          const newError = { ...prev };
-          delete newError.email;
-          return newError;
+          const newErrors = { ...prev };
+          delete newErrors.email;
+          return newErrors;
         });
         clientLogger.info('ユーザ新規登録画面', 'ID(メールアドレス)重複なし', { email: formData.email });
       }
-    } catch (error) {
-      clientLogger.error('ユーザ新規登録画面', 'ID(メールアドレス)重複チェックエラー', { error });
+    } finally {
+      setIsEmailChecking(false);
     }
-  }
+  };
 
   const fields = [
     {
@@ -122,9 +133,10 @@ const Resist: React.FC = () => {
       name: 'email',
       value: formData.email,
       onChange: handleInputChange,
-      onBlur: handleBlur,
+      onBlur: handleEmailBlur,
       placeholder: 'ID (メールアドレス)',
-      error: errors.email
+      error: errors.email,
+      disabled: isEmailChecking
     },
     {
       label: '氏名',
@@ -201,13 +213,24 @@ const Resist: React.FC = () => {
       return;
     }
 
-    // バリデーション成功時はエラーをクリア
+    // メールアドレス重複チェック(ブラーをスキップして直接登録ボタン押した場合)
+    clientLogger.info('ユーザ新規登録画面', '登録時ID(メールアドレス)重複チェック開始', { email: formData.email })
+    const isDuplicate = await checkEmailDuplication(formData.email);
+    if (isDuplicate) {
+      setErrors(prev => ({
+        ...prev,
+        email: ERROR_MESSAGES.VALIDATION_ERROR_DUPLICATION_EMAIL,
+      }));
+      return;
+    }
+
+    // バリデーション成功時にエラークリア
     setErrors({});
 
     try {
       // API呼び出し
       setIsLoading(true);
-
+      clientLogger.info('ユーザ新規登録画面', 'ユーザ新規登録開始', { formData });
       // 権限の取得
       const roleChange = formData.user_role === ROLE_OPTIONS.SYSTEM_ADMIN ? UserRole.ADMIN :
         formData.user_role === ROLE_OPTIONS.TEST_MANAGER ? UserRole.TEST_MANAGER : UserRole.GENERAL;
@@ -224,19 +247,20 @@ const Resist: React.FC = () => {
       });
 
       if (result.success) {
-        clientLogger.info('ユーザ新規登録画面', 'ユーザ新規登録成功', { id: result.data?.id });
+        clientLogger.info('ユーザ新規登録画面', 'ユーザ新規登録成功', { userId: result.data?.id });
         setModalMessage('ユーザを登録しました');
+        setIsApiSuccess(result.success);
         setIsModalOpen(true);
         setTimeout(() => {
           router.push('/user');
         }, 1500);
       } else {
-        clientLogger.error('ユーザ新規登録画面', 'ユーザ新規登録失敗', { error: result.error });
+        clientLogger.error('ユーザ新規登録画面', 'ユーザ新規登録失敗', { error: result.error instanceof Error ? result.error.message : String(result.error) });
         setModalMessage('ユーザの登録に失敗しました');
         setIsModalOpen(true);
       }
-    } catch (error) {
-      clientLogger.error('ユーザ新規登録画面', '新規登録失敗', { error });
+    } catch (err) {
+      clientLogger.error('ユーザ新規登録画面', 'ユーザ新規登録失敗', { error: err instanceof Error ? err.message : String(err) });
       setModalMessage('ユーザの登録に失敗しました');
       setIsModalOpen(true);
     } finally {
@@ -244,10 +268,13 @@ const Resist: React.FC = () => {
     }
   };
 
-  // キャンセルボタン押下時
-  const handleCancel = () => {
-    router.back();
-  };
+  const closeModal = (isApiSuccess: boolean) => {
+    setIsModalOpen(false);
+    // 登録成功時はユーザ一覧へ遷移する
+    if (isApiSuccess) {
+      router.push('/user');
+    }
+  }
 
   const buttons = [
     {
@@ -260,7 +287,10 @@ const Resist: React.FC = () => {
     },
     {
       label: '戻る',
-      onClick: handleCancel,
+      onClick: () => {
+        clientLogger.info('ユーザ新規登録画面', '戻るボタン押下');
+        router.back();
+      },
       isCancel: true
     }
   ];
@@ -271,7 +301,6 @@ const Resist: React.FC = () => {
       {tagError && (
         <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
           <p className="font-bold">タグの読み込みに失敗しました</p>
-
         </div>
       )}
       {/* タグ読み込み中の表示 */}
@@ -286,11 +315,25 @@ const Resist: React.FC = () => {
           <ButtonGroup buttons={buttons} />
         </>
       )}
+      
+      <Modal open={isLoading} onClose={() => setIsLoading(false)} isUnclosable={true}>
+        <div className="flex justify-center">
+          <Loading
+            isLoading={true}
+            message="データ登録中..."
+            size="md"
+          />
+        </div>
+      </Modal>
+
       {/* 登録結果モーダル */}
       <Modal open={isModalOpen} onClose={() => setIsModalOpen(false)}>
         <p className="mb-8">{modalMessage}</p>
         <div className="flex justify-center">
-          <Button className="w-24" onClick={() => setIsModalOpen(false)}>閉じる</Button>
+          <Button className="w-24" onClick={() => closeModal(isApiSuccess)}
+          >
+            閉じる
+          </Button>
         </div>
       </Modal>
     </div >

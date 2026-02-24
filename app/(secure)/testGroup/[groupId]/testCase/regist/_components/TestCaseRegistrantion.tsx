@@ -10,9 +10,10 @@ import clientLogger from '@/utils/client-logger';
 import { FileInfo } from '@/utils/fileUtils';
 import { useParams, useRouter } from 'next/navigation';
 import React, { useState } from 'react';
-import { CreateTestCaseListRow } from '../../../\_components/types/testCase-list-row';
-import TestCaseForm from '../../\[tid\]/\_components/testCaseForm';
+import { CreateTestCaseListRow } from '../../../_components/types/testCase-list-row';
+import TestCaseForm from '../../[tid]/_components/testCaseForm';
 import { testCaseRegistSchema } from '../schemas/testCase-regist-schema';
+import Loading from '@/components/ui/loading';
 
 // ファイルタイプ定数（API側と統一）
 const FILE_TYPE = {
@@ -51,6 +52,7 @@ const TestCaseRegistrantion: React.FC = () => {
   const [modalMessage, setModalMessage] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isTidChecking, setIsTidChecking] = useState(false);
+  const [isApiSuccess, setIsApiSuccess] = useState(false);
 
   const handleFileChange = (fieldName: string, files: FileInfo[]) => {
     // ファイル選択時はbase64データをstateに保持するのみ
@@ -81,22 +83,32 @@ const TestCaseRegistrantion: React.FC = () => {
     }
   };
 
+  // TID重複チェック（共通関数）
+  const checkTidDuplicate = async (tid: string): Promise<boolean> => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await apiGet<any>(`/api/test-cases/check-tid?groupId=${groupId}&tid=${encodeURIComponent(tid)}`);
+      return result.success && result.isDuplicate;
+    } catch (error) {
+      clientLogger.error('テストケース新規登録画面', 'TID重複チェックエラー', { error: error instanceof Error ? error.message : String(error) });
+      return false;
+    }
+  };
+
   // BlurでTID重複チェック
   const handleTidBlur = async () => {
     if (!formData.tid.trim()) {
       return;
     }
     setIsTidChecking(true);
-    clientLogger.info('テストケース新規登録画面', 'TID重複チェック開始', { tid: formData.tid });
+    clientLogger.info('テストケース新規登録画面', 'TID重複チェック開始', { groupId, tid: formData.tid });
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const result = await apiGet<any>(`/api/test-cases/check-tid?groupId=${groupId}&tid=${encodeURIComponent(formData.tid)}`);
-      if (result.success && result.isDuplicate) {
+      const isDuplicate = await checkTidDuplicate(formData.tid);
+      if (isDuplicate) {
         setErrors(prev => ({
           ...prev,
           tid: `TID「${formData.tid}」は既に登録されています`,
         }));
-        clientLogger.warn('テストケース新規登録画面', 'TID重複', { tid: formData.tid });
       } else {
         // TIDが重複していない場合、tidエラーをクリア
         setErrors(prev => {
@@ -104,10 +116,8 @@ const TestCaseRegistrantion: React.FC = () => {
           delete newErrors.tid;
           return newErrors;
         });
-        clientLogger.info('テストケース新規登録画面', 'TID重複なし', { tid: formData.tid });
+        clientLogger.info('テストケース新規登録画面', 'TID重複なし', { groupId, tid: formData.tid });
       }
-    } catch (error) {
-      clientLogger.error('テストケース新規登録画面', 'TID重複チェックエラー', { error });
     } finally {
       setIsTidChecking(false);
     }
@@ -243,20 +253,28 @@ const TestCaseRegistrantion: React.FC = () => {
         top: 0,
         behavior: "smooth",
       });
-      clientLogger.warn('テストケース新規登録画面', 'バリデーションエラー', { errors: newErrors });
       return;
     }
 
-    // TID重複エラーが存在する場合
-    if (errors.tid) {
-      clientLogger.warn('テストケース新規登録画面', 'TID重複エラー', { errors });
+    // TID重複チェック（ブラーをスキップして直接登録ボタンを押した場合に対応）
+    clientLogger.info('テストケース新規登録画面', '登録時TID重複チェック開始', { groupId, tid: formData.tid });
+    const isDuplicate = await checkTidDuplicate(formData.tid);
+    if (isDuplicate) {
+      setErrors(prev => ({
+        ...prev,
+        tid: `TID「${formData.tid}」は既に登録されています`,
+      }));
+      window.scroll({ top: 0, behavior: "smooth" });
       return;
     }
 
     // バリデーション成功時にエラークリア
     setErrors({});
     setIsLoading(true);
-    clientLogger.info('テストケース新規登録画面', 'テストケース登録開始', { formData, testContents });
+
+    // ログに出力するデータからファイル情報を除外
+    const { controlSpecFile, dataFlowFile, ...formDataForLog } = formData;
+    clientLogger.info('テストケース新規登録画面', 'テストケース登録開始', { formData: formDataForLog, testContents });
 
     // ファイル情報を除いてテストケースを登録
     const payload = {
@@ -276,13 +294,14 @@ const TestCaseRegistrantion: React.FC = () => {
     };
 
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await apiPost<any>(`/api/test-groups/${groupId}/cases`, payload);
 
       if (!result.success) {
         throw new Error(result.error || 'テストケースの作成に失敗しました');
       }
 
-      clientLogger.info('テストケース新規登録画面', 'テストケース作成成功、ファイルアップロード開始', { tid: formData.tid });
+      clientLogger.info('テストケース新規登録画面', 'テストケース作成成功、ファイルアップロード開始', { groupId, tid: formData.tid });
 
       // ファイルアップロード
       const allFiles = [
@@ -320,8 +339,9 @@ const TestCaseRegistrantion: React.FC = () => {
       }
 
       // 全て成功
-      clientLogger.info('テストケース新規登録画面', '全ての処理が成功', { tid: formData.tid });
+      clientLogger.info('テストケース新規登録画面', 'テストケース登録成功', { testGroupId: groupId, tid: formData.tid });
       setModalMessage('テストケースを登録しました');
+      setIsApiSuccess(true);
       setIsModalOpen(true);
       setTimeout(() => {
         router.push(`/testGroup/${groupId}/testCase`);
@@ -329,16 +349,25 @@ const TestCaseRegistrantion: React.FC = () => {
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      clientLogger.error('テストケース新規登録画面', '登録処理中にエラーが発生', { error: errorMessage });
-      setModalMessage(`テストケースの作成に失敗しました。`);
+      clientLogger.error('テストケース新規登録画面', 'テストケース登録エラー', { error: errorMessage });
+      setModalMessage(`テストケースの登録に失敗しました。`);
       setIsModalOpen(true);
     } finally {
       setIsLoading(false);
     }
   };
 
+  const closeModal = (isApiSuccess: boolean) => {
+    setIsModalOpen(false);
+    // 登録成功時テストケース一覧へ遷移する
+    if (isApiSuccess) {
+      router.push(`/testGroup/${groupId}/testCase`);
+    }
+  };
+
   // 戻るボタン押下時処理
   const handleCancel = () => {
+    clientLogger.info('テストケース新規登録画面', '戻るボタン押下');
     router.back();
   };
 
@@ -395,14 +424,23 @@ const TestCaseRegistrantion: React.FC = () => {
         )}
       </div>
       <ButtonGroup buttons={buttons} />
+      <Modal open={isLoading} onClose={() => setIsLoading(false)} isUnclosable={true}>
+        <div className="flex justify-center">
+          <Loading
+            isLoading={true}
+            message="データ登録中..."
+            size="md"
+          />
+        </div>
+      </Modal>
       {/* 登録結果モーダル */}
       <Modal open={isModalOpen} onClose={() => setIsModalOpen(false)}>
         <p className="mb-8">{modalMessage}</p>
         <div className="flex justify-center">
-          <Button className="w-24" onClick={() => setIsModalOpen(false)}>閉じる</Button>
-        </div>
-      </Modal>
-    </div>
+          <Button className="w-24" onClick={() => closeModal(isApiSuccess)}>閉じる</Button>
+        </div >
+      </Modal >
+    </div >
   );
 };
 

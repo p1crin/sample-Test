@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { BatchClient, SubmitJobCommand } from '@aws-sdk/client-batch';
-import { requireAuth } from '@/app/lib/auth';
-import { UserRole } from '@/types/database';
+import { isAdmin, requireAuth } from '@/app/lib/auth';
 import { handleError } from '@/utils/errorHandler';
 import { STATUS_CODES } from '@/constants/statusCodes';
 import { ERROR_MESSAGES } from '@/constants/errorMessages';
@@ -18,7 +17,7 @@ export async function POST(req: NextRequest) {
 
   try {
     // システム管理者のみ許可
-    if (user.user_role !== UserRole.ADMIN) {
+    if (!isAdmin(user)) {
       return handleError(
         new Error(ERROR_MESSAGES.PERMISSION_DENIED),
         STATUS_CODES.FORBIDDEN,
@@ -43,10 +42,10 @@ export async function POST(req: NextRequest) {
     }
 
     // 環境変数チェック
-    const jobDefinition = process.env.AWS_BATCH_USER_IMPORT_JOB_DEFINITION;
+    const jobDefinition = process.env.AWS_BATCH_JOB_DEFINITION;
     const jobQueue = process.env.AWS_BATCH_JOB_QUEUE;
-    const inputBucket = process.env.S3_IMPORT_BUCKET;
-    const outputBucket = process.env.S3_IMPORT_BUCKET; // 同じバケットを使用
+    const inputBucket = process.env.INPUT_S3_BUCKET;
+    const outputBucket = process.env.INPUT_S3_BUCKET;
     const databaseUrl = process.env.DATABASE_URL;
 
     if (!jobDefinition || !jobQueue || !inputBucket || !outputBucket || !databaseUrl) {

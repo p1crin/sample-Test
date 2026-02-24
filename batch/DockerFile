@@ -1,10 +1,11 @@
-# Node.js LTS版を使用
-FROM node:20-slim
-
-# 作業ディレクトリを設定
+# ==========================================
+# Stage 1: Dependencies
+# ==========================================
+# ビルドに必要な全ての依存関係をインストールするステージ
+FROM node:20-slim AS deps
 WORKDIR /app
 
-# Prismaに必要なOpenSSLライブラリをインストール
+# Prismaの実行に必要なOpenSSLライブラリをインストール
 RUN apt-get update -y && \
     apt-get install -y openssl && \
     rm -rf /var/lib/apt/lists/*
@@ -12,23 +13,67 @@ RUN apt-get update -y && \
 # package.jsonとpackage-lock.jsonをコピー
 COPY package*.json ./
 
-# 依存関係をインストール
-RUN npm ci --only=production
+# .npmrcの認証情報を安全に渡し、依存関係をインストール (--omit=devを付けずに全て)
+RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm ci
+
+# ==========================================
+# Stage 2: Builder
+# ==========================================
+# アプリケーションをビルドするステージ
+FROM node:20-slim AS builder
+WORKDIR /app
+
+# Stage 1 から依存関係をコピー
+COPY --from=deps /app/node_modules ./node_modules
+
+# アプリケーションコードと設定ファイルを全てコピー
+COPY . .
+
+# Prisma Client を生成
+RUN npx prisma generate
 
 # Prisma schemaをコピー（ローカルのschema.prismaを使用）
 COPY prisma ./prisma
+RUN rm -rf src/generated && mv generated src/
 
-# Prisma Clientを生成
-RUN npx prisma generate
-
-# ソースコードをコピー
-COPY . .
-
-# TypeScriptをビルド
+# package.jsonの "build" スクリプトを実行 (TypeScript -> JavaScript)
 RUN npm run build
 
-# 環境変数の設定（実行時に上書き可能）
+# ==========================================
+# Stage 3: Runner (本番環境)
+# ==========================================
+# 実際にバッチ処理を実行する本番用ステージ
+FROM node:20-slim AS runner
+WORKDIR /app
+
+# Prismaの実行に必要なOpenSSLライブラリをインストール
+RUN apt-get update -y && \
+    apt-get install -y openssl && \
+    rm -rf /var/lib/apt/lists/*
+
 ENV NODE_ENV=production
 
-# デフォルトのエントリーポイント
-CMD ["node", "dist/user-import.js"]
+# セキュリティのため、専用の非rootユーザー(batchuser)を作成
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 batchuser
+
+# package.jsonとpackage-lock.jsonをコピー
+COPY package*.json ./
+
+# .npmrcの認証情報を安全に渡し、本番用の依存関係のみをインストール
+RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm ci --omit=dev
+
+# Builderステージからコンパイル済みのコード(/dist)をコピー
+COPY --from=builder --chown=batchuser:nodejs /app/dist ./dist
+
+# Builderステージから生成されたPrisma Clientをコピー (実行時に必須)
+COPY --from=builder --chown=batchuser:nodejs /app/node_modules/.prisma ./node_modules/.prisma
+
+# BuilderステージからPrismaスキーマファイルをコピー (実行時参照される可能性を考慮)
+COPY --from=builder --chown=batchuser:nodejs /app/prisma ./prisma
+
+# ユーザーをbatchuserに切り替え
+USER batchuser
+
+# ENTRYPOINTとしてnodeを指定。実行するスクリプトはコンテナ起動時の引数で指定。
+ENTRYPOINT ["node"]

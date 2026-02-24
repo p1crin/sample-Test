@@ -158,6 +158,3 @@ export function validateAllRows(rows: UserCsvRow[]): { valid: boolean; errors: s
     errors: allErrors,
   };
 }
-
-// 注: validateAllRowsGeneric を使った実装も可能ですが、
-// 既存の実装を維持してシンプルさを優先しています

@@ -3,11 +3,11 @@ import { Column, DataGrid, SortConfig } from '@/components/datagrid/DataGrid';
 import { Button } from '@/components/ui/button';
 import { Modal } from '@/components/ui/modal';
 import { JUDGMENT_OPTIONS, JudgmentOption } from '@/constants/constants';
+import { apiPost } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { formatDateWithHyphen } from '@/utils/date-formatter';
-import { FileInfo, getUniqueFileNames, processClipboardItems, processFileList, isImage } from '@/utils/fileUtils';
+import { FileInfo, getUniqueFileNames, isImage, processClipboardItems, processFileList } from '@/utils/fileUtils';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-
 
 interface TestTableProps {
   groupId: number;
@@ -16,6 +16,7 @@ interface TestTableProps {
   setData: React.Dispatch<React.SetStateAction<TestCaseResultRow[]>>;
   userName?: string;
   executorsList?: Array<{ id: number; name: string; }>;
+  executorsPerRow?: Record<string, Array<{ id: number; name: string }>>;
 }
 
 // 行が編集不可かどうかを判定するヘルパー関数
@@ -23,7 +24,7 @@ const isRowDisabled = (row: TestCaseResultRow): boolean => {
   return row.judgment === JUDGMENT_OPTIONS.EXCLUDED || row.is_target === false;
 };
 
-const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, userName = '', executorsList = [] }) => {
+const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, userName = '', executorsList = [], executorsPerRow = {} as Record<string, Array<{ id: number; name: string }>> }) => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [currentColumn, setCurrentColumn] = useState<string | null>(null);
   const [sortConfig, setSortConfig] = useState<SortConfig<TestCaseResultRow>>(null);
@@ -32,6 +33,8 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
   const [allChecked, setAllChecked] = useState(true);
   const [isInitialRender, setIsInitialRender] = useState(true);
   const fileInputRefs = useRef<(HTMLInputElement | null)[]>([]);
+  const [fileUrls, setFileUrls] = useState<Record<string, string>>({});
+
   useEffect(() => {
     if (isInitialRender && data) {
       const updatedData = data.map((row, index) => ({
@@ -43,6 +46,43 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
       setIsInitialRender(false);
     }
   }, [data, isInitialRender, setData]);
+
+  // S3パスの場合に署名付きURLを取得するuseEffect
+  useEffect(() => {
+    const fetchFileUrls = async () => {
+      const newFileUrls: Record<string, string> = {};
+      // data配列内のすべてのエビデンスをチェック
+      for (const row of data) {
+        if (row.evidence) {
+          for (const file of row.evidence) {
+            // file.pathが存在し、まだURLを取得していない場合
+            if (file.path && !fileUrls[file.path]) {
+              // ローカルパス（/で始まる）の場合はそのまま使用
+              if (file.path.startsWith('/')) {
+                newFileUrls[file.path] = file.path;
+              } else {
+                // S3パスの場合は署名付きURLを取得
+                try {
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const response = await apiPost<any>('/api/files/url', { filePath: file.path });
+                  if (response.data?.url) {
+                    newFileUrls[file.path] = response.data.url;
+                  }
+                } catch (err) {
+                  clientLogger.error('TestTable', 'ファイルURLの取得に失敗しました。', { filePath: file.path, error: err instanceof Error ? err.message : String(err) });
+                }
+              }
+            }
+          }
+        }
+      }
+      if (Object.keys(newFileUrls).length > 0) {
+        setFileUrls(prev => ({ ...prev, ...newFileUrls }));
+      }
+    };
+    fetchFileUrls();
+  }, [data, fileUrls]);
+
 
   // 行のインデックスを取得するメモ化された関数（パフォーマンス最適化）
   const getRowIndex = useCallback((row: TestCaseResultRow): number => {
@@ -73,6 +113,7 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
   };
 
   // 行のデータを更新する汎用ハンドラー（メモ化）
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const updateRowData = useCallback((rowIndex: number, field: keyof TestCaseResultRow, value: any) => {
     setData(prevData => {
       const newData = [...prevData];
@@ -98,7 +139,6 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
     try {
       const row = data[rowIndex];
       const historyCount = row.historyCount ?? 0;
-
       const formData = new FormData();
 
       // Base64からBlobを作成してFormDataに追加
@@ -108,7 +148,6 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
 
       // file.typeが空の場合はデフォルトのMIMEタイプを使用
       const fileType = file.type || 'application/octet-stream';
-
       const byteString = atob(file.base64);
       const arrayBuffer = new ArrayBuffer(byteString.length);
       const uint8Array = new Uint8Array(arrayBuffer);
@@ -155,15 +194,14 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
       } else {
         throw new Error(`エビデンスのアップロードに失敗しました: ${response.error || 'unknown error'}`);
       }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+    } catch (err) {
       clientLogger.error('TestTable', 'エビデンスアップロード失敗', {
-        error: errorMessage,
+        error: err instanceof Error ? err.message : String(err),
         fileName: file.name,
         fileType: file.type,
         hasBase64: !!file.base64
       });
-      throw error;
+      throw err;
     }
   }, [groupId, tid, data]);
 
@@ -184,8 +222,8 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
           const uploadedFile = await uploadEvidenceFile(file, rowIndex);
           processedFiles.push(uploadedFile);
         }
-      } catch (error) {
-        clientLogger.error('TestTable', 'ペーストしたファイルのアップロードに失敗しました', { error });
+      } catch (err) {
+        clientLogger.error('TestTable', 'ペーストしたファイルのアップロードに失敗しました', { error: err instanceof Error ? err.message : String(err) });
         return;
       } finally {
         updateRowData(rowIndex, 'uploading', false);
@@ -218,8 +256,8 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
           const uploadedFile = await uploadEvidenceFile(file, rowIndex);
           processedFiles.push(uploadedFile);
         }
-      } catch (error) {
-        clientLogger.error('TestTable', '選択したファイルのアップロードに失敗しました', { error });
+      } catch (err) {
+        clientLogger.error('TestTable', '選択したファイルのアップロードに失敗しました', { error: err instanceof Error ? err.message : String(err) });
         return;
       } finally {
         updateRowData(rowIndex, 'uploading', false);
@@ -238,7 +276,7 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
     if (fileInputRefs.current[rowIndex]) {
       fileInputRefs.current[rowIndex]!.value = '';
     }
-  }, [setData, uploadEvidenceFile]);
+  }, [setData, uploadEvidenceFile, updateRowData]);
 
   // ファイル削除ハンドラー（削除リストに追加のみ）
   const handleFileDelete = useCallback((fileIndex: number, rowIndex: number) => {
@@ -288,9 +326,6 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
             className='accent-[#FF5611]'
             onChange={(e) => handleAllCheckboxChange(e.target.checked)}
           />
-          <p>
-            全選択/全解除
-          </p>
         </div>
       ),
       render: (value: boolean, row: TestCaseResultRow) => {
@@ -375,6 +410,7 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
             onChange={(e) => updateRowData(rowIndex, 'softwareVersion', e.target.value)}
             className="border border-gray-300 rounded p-1 w-25"
             readOnly={isRowDisabled(row)}
+            maxLength={255}
           />
         );
       },
@@ -396,6 +432,7 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
             onChange={(e) => updateRowData(rowIndex, 'hardwareVersion', e.target.value)}
             className="border border-gray-300 rounded p-1 w-25"
             readOnly={isRowDisabled(row)}
+            maxLength={255}
           />
         );
       },
@@ -417,6 +454,7 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
             onChange={(e) => updateRowData(rowIndex, 'comparatorVersion', e.target.value)}
             className="border border-gray-300 rounded p-1 w-25"
             readOnly={isRowDisabled(row)}
+            maxLength={255}
           />
         );
       },
@@ -447,6 +485,14 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
       render: (value: string, row: TestCaseResultRow) => {
         const rowIndex = getRowIndex(row);
         const isReadOnly = isRowDisabled(row);
+        const key = `${row.test_case_no}_${row.historyCount ?? 0}`;
+        const rowPastExecutors = executorsPerRow[key] || [];
+        const mergedExecutors: Array<{ id: number; name: string }> = [...(executorsList as Array<{ id: number; name: string }>)];
+        rowPastExecutors.forEach((pe: { id: number; name: string }) => {
+          if (!mergedExecutors.some(e => e.name === pe.name)) {
+            mergedExecutors.push(pe);
+          }
+        });
         return (
           <div className={`flex items-center ${isReadOnly ? 'bg-gray-200' : ''}`}>
             <select
@@ -456,7 +502,7 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
               disabled={isReadOnly}
             >
               <option value=""></option>
-              {executorsList.map((executor) => (
+              {mergedExecutors.map((executor) => (
                 <option key={executor.id} value={executor.name}>
                   {executor.name}
                 </option>
@@ -513,26 +559,28 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
                   {row.evidence.map((file, fileIndex) => {
                     return (
                       <div
-                        key={`${rowIndex}-${fileIndex}`}
+                        key={`${rowIndex}-${fileIndex}-${file.name}`} // keyをよりユニークに
                         className="relative flex items-center justify-between border border-gray-300 p-2 rounded-sm bg-white"
                         style={{ minHeight: '40px', maxWidth: '300px' }}
                       >
-                        {file.path && isImage(file.path) ? (
+                        {file.path && fileUrls[file.path] && isImage(file.path) ? (
+                          // S3署名付きURLで表示
                           <img
-                            src={file.path}
+                            src={fileUrls[file.path]}
                             alt={file.name}
                             className="object-contain h-8 max-w-120"
                           />
                         ) : file.base64 && file.type?.startsWith('image/') ? (
+                          // Base64データで表示 (アップロード前のプレビュー)
                           <img
                             src={`data:${file.type};base64,${file.base64}`}
                             alt={file.name}
                             className="object-contain h-8 max-w-120"
                           />
                         ) : (
+                          // 画像でない場合はファイル名を表示
                           <span className="text-xs truncate max-w-120">{file.name}</span>
                         )}
-
                         <button
                           type="button"
                           onClick={() => !isReadOnly && handleFileDelete(fileIndex, rowIndex)}

@@ -1,10 +1,12 @@
 'use client';
 import { Button } from '@/components/ui/button';
 import Loading from '@/components/ui/loading';
+import { Modal } from '@/components/ui/modal';
 import { JUDGMENT_OPTIONS, JudgmentOption } from '@/constants/constants';
 import { STATUS_CODES } from '@/constants/statusCodes';
-import { apiGet, apiPost, apiDelete } from '@/utils/apiClient';
+import { apiDelete, apiGet, apiPost } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
+import { FileInfo, generateUniqueId } from '@/utils/fileUtils';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -12,8 +14,7 @@ import { TestCaseDetailRow } from '../../_components/types/testCase-detail-list-
 import { TestCaseResultRow, TestResultsData } from '../../_components/types/testCase-result-list-row';
 import { TestCaseConduct } from './TestCaseConduct';
 import TestTable from './testTable';
-import { Modal } from '@/components/ui/modal';
-import { FileInfo, generateUniqueId } from '@/utils/fileUtils';
+import router from 'next/router';
 
 // 判定のバリデーションを行うための型ガード
 const isValidJudgment = (value: unknown): value is JudgmentOption => {
@@ -76,12 +77,13 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
   const [buttonDisabled, setButtonDisabled] = useState(false);
   const [apiError, setApiError] = useState<Error | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [resultsWithHistory, setResultsWithHistory] = useState<TestResultsData>({});
+  const [isConductLoading, setIsConductLoading] = useState(false);
   const [expandedSections, setExpandedSections] = useState<Set<number>>(new Set([0]));
-  const [errors, setErrors] = useState<Record<string, string>>({});
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
   const [executorsList, setExecutorsList] = useState<Array<{ id: number; name: string; }>>([]);
+  const [isApiSuccess, setIsApiSuccess] = useState(false);
+  const [executorsPerRow, setExecutorsPerRow] = useState<Record<string, Array<{ id: number; name: string }>>>({});
 
   // 登録成功フラグ（タブクローズ時のクリーンアップ用）
   const isRegistrationSuccessful = useRef(false);
@@ -111,11 +113,9 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
         })) || [];
 
         setExecutorsList(fetchedExecutors);
-        clientLogger.info('テスト結果登録画面', '実施者取得成功', { count: fetchedExecutors.length });
+        clientLogger.info('テストケース結果登録画面', '実施者取得成功', { count: fetchedExecutors.length });
       } catch (err) {
-        clientLogger.error('テスト結果登録画面', '実施者取得失敗', {
-          error: err instanceof Error ? err.message : String(err),
-        });
+        clientLogger.error('テストケース結果登録画面', '実施者取得失敗', { error: err instanceof Error ? err.message : String(err) });
         // エラーの場合、少なくとも自分自身は選択できるようにする
         if (user) {
           const fallbackList = [{
@@ -129,30 +129,31 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
 
     const fetchTestCaseDetail = async () => {
       try {
-        clientLogger.info('テストケース結果確認画面', 'テストケース詳細取得開始', { groupId, tid });
+        clientLogger.info('テストケース結果登録画面', 'テスト結果取得開始', { groupId, tid });
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const result = await apiGet<any>(`/api/test-groups/${groupId}/cases/${tid}`);
         if (!result || !result.success || !result.data || result.data.length === 0) {
-          throw new Error('テストケース詳細の取得に失敗しました');
+          throw new Error('テスト結果の取得に失敗しました');
         }
 
         const testCase = result.data[0] as TestCaseDetailRow;
         setData(testCase);
         setLabelData(labels);
 
-        clientLogger.info('テストケース結果確認画面', 'テストケース詳細取得成功', { tid });
+        clientLogger.info('テストケース結果登録画面', 'テスト結果取得成功', { groupId, tid: testCase.tid });
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        clientLogger.error('テストケース結果確認画面', 'テストケース詳細取得失敗', { error: errorMessage });
-        setLoadError('テストケース詳細の取得に失敗しました');
+        clientLogger.error('テストケース結果登録画面', 'テスト結果取得失敗', { error: err instanceof Error ? err.message : String(err) });
+        setLoadError('テスト結果の取得に失敗しました');
         setApiError(err instanceof Error ? err : new Error(String(err)));
       }
     };
 
     const fetchTestResults = async () => {
       try {
-        clientLogger.info('テストケース結果確認画面', 'テスト結果取得開始', { groupId, tid });
+        clientLogger.info('テストケース結果登録画面', 'テスト結果取得開始', { testGroupId: groupId, tid });
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const data = await apiGet<any>(`/api/test-groups/${groupId}/cases/${tid}/results`);
 
         if (!data.success) {
@@ -165,10 +166,11 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
 
         // 履歴付きの結果を保存
         const resultsData = data.results as TestResultsData;
-        setResultsWithHistory(resultsData);
         // 初期のテストケースデータを設定
-        const initialData = Object.values(resultsData).map((result) => ({
+        const initialData = Object.values(resultsData).map((result, index) => ({
           ...result.latestValidResult,
+          index: index + 1,
+          checked: result.latestValidResult.is_target !== false,
           result: '',
           softwareVersion: '',
           hardwareVersion: '',
@@ -228,29 +230,33 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
         setButtonDisabled(allHistoryCountsZero);
         setInitialTestCaseData(initialDataWithHistoryCount);
 
-        // 実行者リストに結果の実行者を含める
-        const resultExecutors = Object.values(resultsData).flatMap(result =>
-          result.allHistory.map(histItem => ({
-            id: histItem.executor_id ?? -Date.now() - Math.floor(Math.random() * 1000), // 負の値で一時IDを生成
-            name: histItem.executor ?? ''
-          }))
-        ).filter((executor, index, self) =>
-          executor.id && self.findIndex(e => e.id === executor.id) === index
-        ).map(executor => ({
-          id: typeof executor.id === 'number' ? executor.id : -Date.now() - Math.floor(Math.random() * 1000),
-          name: typeof executor.name === 'string' ? executor.name : ''
-        }));
-        // 重複を削除
-        const uniqueExecutorsList = resultExecutors.filter((executor, index, self) =>
-          index === self.findIndex((e) => e.name === executor.name)
-        ).filter((e) => e.name !== '');
-        setExecutorsList(prev => [...prev, ...uniqueExecutorsList]);
+        // 行ごと（test_case_noごと）に過去の実施者を抽出する
+        const perRowExecutors: Record<string, Array<{ id: number; name: string }>> = {};
+        Object.entries(resultsData).forEach(([testCaseNoStr, result]) => {
+          const testCaseNo = Number(testCaseNoStr);
+          result.allHistory.forEach(histItem => {
+            const executorName = (histItem.executor ?? '') as string;
+            if (!executorName) return;
+            const key = `${testCaseNo}_${histItem.history_count}`;
+            const executor: { id: number; name: string } = {
+              id: (histItem.executor_id ?? -Date.now() - Math.floor(Math.random() * 1000)) as number,
+              name: executorName,
+            };
+            if (!perRowExecutors[key]) {
+              perRowExecutors[key] = [];
+            }
+            // 名前で重複排除
+            if (!perRowExecutors[key].some(e => e.name === executor.name)) {
+              perRowExecutors[key].push(executor);
+            }
+          });
+        });
+        setExecutorsPerRow(perRowExecutors);
 
-        clientLogger.info('テストケース結果確認画面', 'テスト結果取得成功', { tid, count: Object.keys(resultsData).length });
+        clientLogger.info('テストケース結果登録画面', 'テスト結果取得成功', { testGroupId: groupId, tid, count: Object.keys(resultsData).length });
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        clientLogger.error('テストケース結果確認画面', 'テスト結果取得失敗', { error: errorMessage });
-        setLoadError('テスト結果の取得に失敗しました');
+        clientLogger.error('テストケース結果登録画面', 'テスト結果取得失敗', { error: err instanceof Error ? err.message : String(err) });
+        setLoadError('テスト結果取得に失敗しました');
         setApiError(err instanceof Error ? err : new Error(String(err)));
       } finally {
         setIsLoading(false);
@@ -262,10 +268,10 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
       // テスト詳細取得後にテスト結果を取得
       fetchTestResults();
     });
-  }, [groupId, tid, user]);
+  }, [groupId, tid]);
 
   // 初期エビデンスIDを記録（新規追加されたエビデンスのみを削除するため）
-  // 注意: 初回ロード時のみ記録し、その後の変更では更新しない
+  // 初回ロード時のみ記録し、その後の変更では更新しない
   useEffect(() => {
     // 既に記録済みの場合はスキップ
     if (initialEvidenceIdsRecorded.current) return;
@@ -305,7 +311,7 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
 
     // 記録済みフラグを立てる
     initialEvidenceIdsRecorded.current = true;
-    clientLogger.info('テスト結果登録画面', '初期エビデンスID記録完了', {
+    clientLogger.info('テストケース結果登録画面', '初期エビデンスID記録完了', {
       keys: Array.from(initialEvidenceIds.current.keys()),
       counts: Array.from(initialEvidenceIds.current.entries()).map(([k, v]) => ({ key: k, count: v.size }))
     });
@@ -313,7 +319,7 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
 
   // 新規追加されたエビデンスを削除するクリーンアップ関数
   const cleanupNewEvidences = useCallback(async (useKeepalive: boolean = false): Promise<void> => {
-    clientLogger.info('テスト結果登録画面', 'クリーンアップ開始', {
+    clientLogger.info('テストケース結果登録画面', 'クリーンアップ開始', {
       useKeepalive,
       isRegistrationSuccessful: isRegistrationSuccessful.current,
       initialEvidenceIdsRecorded: initialEvidenceIdsRecorded.current,
@@ -321,7 +327,7 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
 
     // 登録が成功している場合はクリーンアップ不要
     if (isRegistrationSuccessful.current) {
-      clientLogger.info('テスト結果登録画面', 'クリーンアップスキップ（登録成功済み）');
+      clientLogger.info('テストケース結果登録画面', 'クリーンアップスキップ（登録成功済み）');
       return;
     }
 
@@ -342,10 +348,10 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
         }),
         keepalive: useKeepalive,
       }).then(() => {
-        clientLogger.info('テスト結果登録画面', 'エビデンス削除成功', { testCaseNo, historyCount, fileNo });
+        clientLogger.info('テストケース結果登録画面', 'エビデンス削除成功', { testCaseNo, historyCount, fileNo });
       }).catch((err) => {
         if (!useKeepalive) {
-          clientLogger.error('テスト結果登録画面', 'エビデンス削除失敗', { error: err });
+          clientLogger.error('テストケース結果登録画面', 'エビデンス削除失敗', { error: err });
         }
         // keepaliveの場合はページがアンロードされるためエラーは無視
       });
@@ -356,7 +362,7 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
       const key = `new_${item.test_case_no}`;
       const initialIds = initialEvidenceIds.current.get(key) || new Set<number>();
 
-      clientLogger.info('テスト結果登録画面', 'エビデンスチェック（新規）', {
+      clientLogger.info('テストケース結果登録画面', 'エビデンスチェック（新規）', {
         key,
         initialIds: Array.from(initialIds),
         currentEvidence: item.evidence?.map(f => ({ fileNo: f.fileNo, name: f.name })) || [],
@@ -364,7 +370,7 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
 
       item.evidence?.forEach((file) => {
         if (file.fileNo !== undefined && !initialIds.has(file.fileNo)) {
-          clientLogger.info('テスト結果登録画面', '削除対象エビデンス検出', {
+          clientLogger.info('テストケース結果登録画面', '削除対象エビデンス検出', {
             testCaseNo: item.test_case_no,
             historyCount: item.historyCount ?? 0,
             fileNo: file.fileNo,
@@ -389,12 +395,12 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
       });
     });
 
-    clientLogger.info('テスト結果登録画面', 'クリーンアップ削除対象数', { count: deletePromises.length });
+    clientLogger.info('テストケース結果登録画面', 'クリーンアップ削除対象数', { count: deletePromises.length });
 
     // すべての削除リクエストが完了するまで待機（keepaliveの場合は待機不要）
     if (!useKeepalive && deletePromises.length > 0) {
       await Promise.all(deletePromises);
-      clientLogger.info('テスト結果登録画面', 'クリーンアップ完了');
+      clientLogger.info('テストケース結果登録画面', 'クリーンアップ完了');
     }
   }, [initialTestCaseData, pastTestCaseData, groupId, tid]);
 
@@ -438,9 +444,8 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
     });
   };
   const handleSubmit = async () => {
-    clientLogger.info('テスト結果登録画面', '登録ボタン押下');
-    setErrors({});
-    setIsLoading(true);
+    clientLogger.info('テストケース結果登録画面', '登録ボタン押下');
+    setIsConductLoading(true);
     // API呼び出し
     try {
       // 削除予定のエビデンスを収集して物理削除
@@ -482,7 +487,7 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
 
       // 削除予定のエビデンスを物理削除
       if (deletedEvidences.length > 0) {
-        clientLogger.info('テスト結果登録画面', 'エビデンス削除開始', { count: deletedEvidences.length });
+        clientLogger.info('テストケース結果登録画面', 'エビデンス削除開始', { count: deletedEvidences.length });
 
         for (const { file, testCaseNo, historyCount } of deletedEvidences) {
           try {
@@ -493,13 +498,13 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
               historyCount: historyCount,
               fileNo: file.fileNo,
             });
-            clientLogger.info('テスト結果登録画面', 'エビデンス削除成功', {
+            clientLogger.info('テストケース結果登録画面', 'エビデンス削除成功', {
               testCaseNo,
               historyCount,
               fileNo: file.fileNo,
             });
           } catch (deleteError) {
-            clientLogger.error('テスト結果登録画面', 'エビデンス削除失敗', {
+            clientLogger.error('テストケース結果登録画面', 'エビデンス削除失敗', {
               error: deleteError,
               testCaseNo,
               historyCount,
@@ -561,38 +566,49 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
         historyDataList
       }
 
-      clientLogger.info('テスト結果登録画面', 'テスト結果登録開始', { combinedFormData });
+      clientLogger.info('テストケース結果登録画面', 'テストケース結果登録開始', { combinedFormData });
       // ここでAPI呼び出しを行う
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const response = await apiPost<any>(`/api/test-groups/${groupId}/cases/${tid}/results`, combinedFormData);
 
       if (response.success) {
         // 登録成功フラグを設定（タブクローズ時のクリーンアップをスキップ）
         isRegistrationSuccessful.current = true;
-        clientLogger.info('テスト結果登録画面', 'テスト結果登録成功', { tid: tid });
-        setModalMessage('テスト結果を登録しました');
+        clientLogger.info('テストケース結果登録画面', 'テストケース結果登録成功', { testGroupId: groupId, tid });
+        setModalMessage('テストケース結果を登録しました');
+        setIsApiSuccess(true);
         setIsModalOpen(true);
         setTimeout(() => {
           router.push(`/testGroup/${groupId}/testCase/${tid}/result`);
         }, 1500);
       } else {
-        clientLogger.error('テストケース結果登録画面', 'テストケース結果登録失敗', { error: response.error });
+        clientLogger.error('テストケース結果登録画面', 'テストケース結果登録失敗', { error: response.error instanceof Error ? response.error.message : String(response.error) });
         setModalMessage('テストケース結果登録に失敗しました');
         setIsModalOpen(true);
       }
-    } catch (error) {
-      clientLogger.error('テストケース結果登録画面', 'テストケース結果登録エラー', { error });
+    } catch (err) {
+      clientLogger.error('テストケース結果登録画面', 'テストケース結果登録エラー', { error: err instanceof Error ? err.message : String(err) });
       setModalMessage('テストケース結果登録に失敗しました');
       setIsModalOpen(true);
     } finally {
-      setIsLoading(false);
+      setIsConductLoading(false);
     }
   };
   const handleCancel = async () => {
+    clientLogger.info('テストケース結果登録画面', '戻るボタン押下');
     // ナビゲーションフラグを設定してクリーンアップを実行
     isNavigatingAway.current = true;
     // 削除完了を待ってからナビゲーション
     await cleanupNewEvidences(false);
     router.back();
+  };
+
+  const closeModal = (isApiSuccess: boolean) => {
+    setIsModalOpen(false);
+    // 登録成功時テスト結果確認画面へ遷移する
+    if (isApiSuccess) {
+      router.push(`/testGroup/${groupId}/testCase/${tid}/result`);
+    }
   };
 
   return (
@@ -646,10 +662,10 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
                     setData={setInitialTestCaseData}
                     userName={user.name || ''}
                     executorsList={[{ id: user.id, name: user.name }]}
+                    executorsPerRow={executorsPerRow}
                   />}
                 {Object.entries(pastTestCaseData).length > 0 &&
                   (() => {
-
                     // セクションをレンダリング
                     return pastTestCaseData.slice().reverse().map((_row, reverseIndex) => {
                       const actualIndex = pastTestCaseData.length - 1 - reverseIndex; // 実際の配列のインデックスを保存
@@ -685,7 +701,8 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
                                     return newState;
                                   })}
                                   userName={user?.name || ''}
-                                  executorsList={executorsList} />
+                                  executorsList={executorsList}
+                                  executorsPerRow={executorsPerRow} />
                               </div>
                             )}
                           </div>
@@ -708,11 +725,22 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
           {loadError}
         </div>
       )}
+      <Modal open={isConductLoading} onClose={() => setIsConductLoading(false)} isUnclosable={true}>
+        <div className="flex justify-center">
+          <Loading
+            isLoading={true}
+            message="データ登録中..."
+            size="md"
+          />
+        </div>
+      </Modal>
       {/* 登録結果モーダル */}
       <Modal open={isModalOpen} onClose={() => setIsModalOpen(false)}>
         <p className="mb-8">{modalMessage}</p>
         <div className="flex justify-center">
-          <Button className="w-24" onClick={() => setIsModalOpen(false)}>閉じる</Button>
+          <Button className="w-24" onClick={() => closeModal(isApiSuccess)}>
+            閉じる
+          </Button>
         </div>
       </Modal>
     </div >

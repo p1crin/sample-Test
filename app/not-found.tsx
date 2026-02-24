@@ -1,16 +1,31 @@
 'use client';
 
+import { Button } from "@/components/ui/button";
+import { useRouter } from "next/navigation";
+
+
 export default function NotFound() {
+  const router = useRouter();
+  const handleToTestGroup = () => {
+    router.push('/testGroup');
+  }
+
   return (
-    <div className="min-h-screen bg-neutral-50">
-      <main className="flex items-center justify-center min-h-screen">
-        <div className="w-full max-w-md p-8">
-          <div className="flex flex-col items-center justify-center gap-4">
-            <h2 className="text-2xl font-bold">404 Not Found</h2>
-            <p>ページが見つかりませんでした。</p>
-          </div>
+    <div className="flex items-center justify-center min-h-screen bg-gray-50">
+      <div className="text-center">
+        <div className="mb-4">
+          <h1 className="text-2xl font-semibold text-gray-800 mb-4 pb-2">ページが見つかりませんでした</h1>
         </div>
-      </main>
-    </div>
+
+        <div className="flex gap-4 justify-center">
+          <Button
+            onClick={handleToTestGroup}
+            className="px-6 py-2 bg-stnly text-white font-semibold rounded-md hover:bg-stnly-light transition-colors"
+          >
+            テストグループ一覧へ戻る
+          </Button>
+        </div>
+      </div>
+    </div >
   );
 }

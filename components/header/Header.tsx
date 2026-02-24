@@ -3,8 +3,8 @@ import { clearAuthSession } from '@/stores/feature/auth';
 import { User } from '@/types';
 import clientLogger from '@/utils/client-logger';
 import { signOut, useSession } from 'next-auth/react';
-import Link from 'next/link';
 import Image from 'next/image';
+import Link from 'next/link';
 
 export type HeaderProps = {
   onToggleSidebar: () => void;
@@ -14,10 +14,8 @@ export type HeaderProps = {
   onAvatarClick: () => void;
 };
 
-
 export function Header({ onToggleSidebar, user, onLogout, popupOpen, onAvatarClick }: HeaderProps) {
   const { data: session } = useSession();
-
   const userEmail = session?.user?.email || user?.email;
 
   return (

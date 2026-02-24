@@ -3,7 +3,8 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   /* config options here */
   devIndicators: false,
-  output: 'standalone', // Docker最適化のため
+  serverExternalPackages: ['pino'],
+  output: 'standalone',
   async redirects() {
     return [
       {

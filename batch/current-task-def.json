@@ -1,0 +1,96 @@
+{
+    "containerDefinitions": [
+        {
+            "name": "prooflink-app",
+            "image": "${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}",
+            "cpu": 0,
+            "portMappings": [
+                {
+                    "containerPort": 3000,
+                    "hostPort": 3000,
+                    "protocol": "tcp",
+                    "name": "app-3000-tcp",
+                    "appProtocol": "http"
+                }
+            ],
+            "essential": true,
+            "environment": [
+                {
+                    "name": "AWS_REGION",
+                    "value": "ap-northeast-1"
+                },
+                {
+                    "name": "S3_IMPORT_BUCKET",
+                    "value": "prooflink-dev-import"
+                },
+                {
+                    "name": "DATABASE_URL",
+                    "value": "postgresql://postgres:ProofLink_dev@prooflink-dev-db.cfg8c4yegxbi.ap-northeast-1.rds.amazonaws.com:5432/prooflink_dev"
+                },
+                {
+                    "name": "NEXTAUTH_SECRET",
+                    "value": "aJW1uk216/H9VYB9nP7fPFTC2J9is3CQbEP96UrnZzU="
+                },
+                {
+                    "name": "S3_OUTPUT_BUCKET",
+                    "value": "prooflink-dev-files"
+                },
+                {
+                    "name": "AWS_S3_BUCKET_NAME",
+                    "value": "prooflink-dev-files"
+                },
+                {
+                    "name": "NODE_ENV",
+                    "value": "production"
+                },
+                {
+                    "name": "AWS_BATCH_USER_IMPORT_JOB_DEFINITION",
+                    "value": "prooflink-user-import-job"
+                },
+                {
+                    "name": "AWS_BATCH_TEST_IMPORT_JOB_DEFINITION",
+                    "value": "prooflink-test-import-job"
+                },
+                {
+                    "name": "NEXTAUTH_URL",
+                    "value": "http://prooflink-dev-alb-1534808195.ap-northeast-1.elb.amazonaws.com/"
+                },
+                {
+                    "name": "AWS_BATCH_JOB_QUEUE",
+                    "value": "prooflink-batch-queue"
+                }
+            ],
+            "environmentFiles": [],
+            "mountPoints": [],
+            "volumesFrom": [],
+            "ulimits": [],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/prooflink-dev-task",
+                    "awslogs-create-group": "true",
+                    "awslogs-region": "ap-northeast-1",
+                    "awslogs-stream-prefix": "ecs"
+                },
+                "secretOptions": []
+            },
+            "systemControls": []
+        }
+    ],
+    "family": "prooflink-dev-task",
+    "taskRoleArn": "arn:aws:iam::717892305715:role/prooflink-ecs-task-role",
+    "executionRoleArn": "arn:aws:iam::717892305715:role/prooflink-ecs-task-execution-role",
+    "networkMode": "awsvpc",
+    "volumes": [],
+    "placementConstraints": [],
+    "runtimePlatform": {
+        "cpuArchitecture": "X86_64",
+        "operatingSystemFamily": "LINUX"
+    },
+    "requiresCompatibilities": [
+        "FARGATE"
+    ],
+    "cpu": "512",
+    "memory": "1024",
+    "enableFaultInjection": false
+}

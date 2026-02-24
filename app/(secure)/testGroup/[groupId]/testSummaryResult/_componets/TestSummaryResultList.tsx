@@ -25,7 +25,6 @@ export function TestSummaryResultList({
   const [items, setItems] = useState<TestSummaryResultListRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [apiError, setApiError] = useState<Error | null>(null);
-
   if (apiError) throw apiError;
 
   useEffect(() => {
@@ -35,6 +34,7 @@ export function TestSummaryResultList({
 
         clientLogger.info('テスト集計結果表示画面', 'データ取得開始', { groupId });
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const data = await apiGet<any>(`/api/test-groups/${groupId}/report-data`);
 
         if (!data.success || !data.data) {
@@ -63,17 +63,10 @@ export function TestSummaryResultList({
 
         setItems(mappedData);
 
-        clientLogger.info('テスト集計結果表示画面', 'データ取得成功', {
-          groupId,
-          count: mappedData.length,
-        });
+        clientLogger.info('テスト集計結果表示画面', 'データ取得成功', { groupId, count: mappedData.length });
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
         setItems([]);
-        clientLogger.error('テスト集計結果表示画面', 'データ取得失敗', {
-          groupId,
-          error: errorMessage,
-        });
+        clientLogger.error('テスト集計結果表示画面', 'データ取得失敗', { groupId, error: err instanceof Error ? err.message : String(err) });
         setApiError(err instanceof Error ? err : new Error(String(err)));
       } finally {
         setLoading(false);

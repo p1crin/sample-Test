@@ -1,6 +1,7 @@
 'use server';
 import { canEditTestCases, canViewTestGroup, requireAuth } from "@/app/lib/auth";
 import { prisma } from '@/app/lib/prisma';
+import { ERROR_MESSAGES } from "@/constants/errorMessages";
 import { STATUS_CODES } from "@/constants/statusCodes";
 import { Prisma } from '@/generated/prisma/client';
 import { TestCase } from "@/types";
@@ -23,8 +24,19 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
   try {
     const user = await requireAuth(req);
     // 取得したテストグループIDとユーザ情報で権限チェック
-    await canViewTestGroup(user.id, user.user_role, testGroupId);
+    const canView = await canViewTestGroup(user.id, user.user_role, testGroupId);
+    if (!canView) {
+      return handleError(
+        new Error(ERROR_MESSAGES.PERMISSION_DENIED),
+        STATUS_CODES.FORBIDDEN,
+        apiTimer,
+        'GET',
+        `/api/test-groups/${testGroupId}/cases`,
+      );
+    }
+
     const isCanModify = await canEditTestCases(user, testGroupId);
+
 
     // クエリ文字列から検索パラメータを取得
     const { searchParams } = new URL(req.url);
@@ -182,6 +194,18 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
   try {
     // 認証チェック
     const user = await requireAuth(req);
+    const canView = await canViewTestGroup(user.id, user.user_role, testGroupId);
+    const isCanModify = await canEditTestCases(user, testGroupId);
+
+    if (!canView || !isCanModify) {
+      return handleError(
+        new Error(ERROR_MESSAGES.PERMISSION_DENIED),
+        STATUS_CODES.FORBIDDEN,
+        apiTimer,
+        'GET',
+        `/api/test-groups/${testGroupId}/cases`,
+      );
+    }
 
     // JSON形式でリクエストボディを受け取る（編集画面と同じ形式）
     const body = await req.json();

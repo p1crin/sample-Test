@@ -5,6 +5,10 @@ import { NextResponse } from 'next/server';
 
 export function handleError(error: Error, code: number, apiTimer: QueryTimer, method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", endpoint: string) {
 
+  if (error instanceof Error && error.message === 'Unauthorized') {
+    code = STATUS_CODES.UNAUTHORIZED;
+  }
+
   logAPIEndpoint({
     method,
     endpoint,

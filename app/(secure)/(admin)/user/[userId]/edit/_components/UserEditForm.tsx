@@ -3,6 +3,7 @@ import ButtonGroup from '@/components/ui/buttonGroup';
 import { Modal } from '@/components/ui/modal';
 import { VerticalForm } from '@/components/ui/verticalForm';
 import { ROLE_OPTIONS, STATUS_OPTIONS } from '@/constants/constants';
+import { ERROR_MESSAGES } from '@/constants/errorMessages';
 import { UserRole } from '@/types';
 import { apiGet, apiPut } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
@@ -10,7 +11,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { UpdateUserListRow } from '../../../_components/types/user-list-row';
 import { userEditSchema } from './schemas/user-edit-schema';
-import { ERROR_MESSAGES } from '@/constants/errorMessages';
+import Loading from '@/components/ui/loading';
 
 export type UserEditFormState = UpdateUserListRow;
 
@@ -32,14 +33,16 @@ export function UserEditForm({
   id,
   form,
 }: UserEditFormProps) {
-  const router = useRouter();
   const [formData, setFormData] = useState(form);
   const [tagOptions, setTagOptions] = useState<{ value: string, label: string }[]>([]);
   const [tagError, setTagError] = useState<string | null>(null);
-  const [editError, setEditErrors] = useState<Record<string, string>>({});
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({});
   const [editModalMessage, setEditModalMessage] = useState('');
-  const [editIsModalOpen, setEditIsModalOpen] = useState(false);
-  const [editIsLoading, setEditIsLoading] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isEditLoading, setIsEditLoading] = useState(false);
+  const [isApiSuccess, setIsApiSuccess] = useState(false);
+  const [isEmailChecking, setIsEmailChecking] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
     setFormData(form);
@@ -60,9 +63,9 @@ export function UserEditForm({
         } else {
           setTagError('タグの取得に失敗しました');
         }
-      } catch (error) {
-        clientLogger.error('TestGroupRegistration', 'タグ取得エラー', { error });
-        setTagError(error instanceof Error ? error.message : 'タグの取得に失敗しました');
+      } catch (err) {
+        clientLogger.error('ユーザ編集画面', 'タグ取得エラー', { error: err instanceof Error ? err.message : String(err) });
+        setTagError(err instanceof Error ? err.message : 'タグの取得に失敗しました');
       }
     };
     fetchTags();
@@ -101,35 +104,44 @@ export function UserEditForm({
     }));
   };
 
-  const handleBlur = async () => {
+  // メールアドレスの重複チェック
+  const checkEmailDuplication = async (email: string): Promise<boolean> => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await apiGet<any>(`/api/users/check-email?id=${id}&email=${encodeURIComponent(email)}`);
+      return result.success && result.isDuplicate
+    } catch (err) {
+      clientLogger.error('ユーザ編集画面', 'ID(メールアドレス)重複チェックエラー', { error: err instanceof Error ? err.message : String(err) });
+      return false;
+    }
+  }
+
+  // Blurでメールアドレス重複チェック
+  const handleEmailBlur = async () => {
     if (!formData.email.trim()) {
       return;
     }
-
+    setIsEmailChecking(true);
     clientLogger.info('ユーザ編集画面', 'ID(メールアドレス)重複チェック開始', { email: formData.email });
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const result = await apiGet<any>(`/api/users/check-email?id=${id}&email=${encodeURIComponent(formData.email)}`);
-
-      if (result.success && result.isDuplicate) {
+      const isDuplicate = await checkEmailDuplication(formData.email)
+      if (isDuplicate) {
         setEditErrors(prev => ({
           ...prev,
           email: ERROR_MESSAGES.VALIDATION_ERROR_DUPLICATION_EMAIL
         }));
-        clientLogger.warn('ユーザ編集画面', 'ID(メールアドレス)重複', { email: formData.email });
       } else {
-        // ID(メールアドレス)が重複していない場合、エラークリア
         setEditErrors(prev => {
-          const newError = { ...prev };
-          delete newError.email;
-          return newError;
+          const newErrors = { ...prev };
+          delete newErrors.email;
+          return newErrors;
         });
         clientLogger.info('ユーザ編集画面', 'ID(メールアドレス)重複なし', { email: formData.email });
       }
-    } catch (error) {
-      clientLogger.error('ユーザ編集画面', 'ID(メールアドレス)重複チェックエラー', { error });
+    } finally {
+      setIsEmailChecking(false);
     }
-  }
+  };
 
 
   const fields = [
@@ -140,8 +152,9 @@ export function UserEditForm({
       value: formData.email,
       onChange: handleInputChange,
       placeholder: 'ID (メールアドレス)',
-      onBlur: handleBlur,
-      error: editError.email
+      onBlur: handleEmailBlur,
+      error: editErrors.email,
+      disabled: isEmailChecking
     },
     {
       label: '氏名',
@@ -150,7 +163,7 @@ export function UserEditForm({
       value: formData.name,
       onChange: handleInputChange,
       placeholder: '氏名',
-      error: editError.name
+      error: editErrors.name
     },
     {
       label: '部署',
@@ -159,16 +172,16 @@ export function UserEditForm({
       value: formData.department,
       onChange: handleInputChange,
       placeholder: '部署',
-      error: editError.department
+      error: editErrors.department
     },
     {
       label: '会社名',
       type: 'text',
-      name: 'conpany',
+      name: 'company',
       value: formData.company,
       onChange: handleInputChange,
       placeholder: '会社名',
-      error: editError.company
+      error: editErrors.company
     },
     {
       label: '権限',
@@ -181,7 +194,7 @@ export function UserEditForm({
         value: role,
         label: role
       })),
-      error: editError.user_role
+      error: editErrors.user_role
     },
     {
       label: 'パスワード',
@@ -190,7 +203,7 @@ export function UserEditForm({
       value: formData.password,
       onChange: handleInputChange,
       placeholder: 'パスワード',
-      error: editError.password
+      error: editErrors.password
     },
     {
       label: 'タグ',
@@ -200,7 +213,7 @@ export function UserEditForm({
       onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement> | { target: { name: string; value: string | string[] } }) => handleTagChange('tags', Array.isArray(e.target?.value) ? e.target.value : []),
       placeholder: 'タグ',
       options: tagOptions,
-      error: editError.tags
+      error: editErrors.tags
     },
     {
       label: 'ステータス',
@@ -213,7 +226,7 @@ export function UserEditForm({
         value: is_deleted,
         label: is_deleted
       })),
-      error: editError.is_deleted
+      error: editErrors.is_deleted
     },
   ];
 
@@ -230,10 +243,22 @@ export function UserEditForm({
       return;
     }
 
+    // メールアドレス重複チェック(ブラーをスキップして直接登録ボタン押した場合)
+    clientLogger.info('ユーザ編集画面', '更新時ID(メールアドレス)重複チェック開始', { email: formData.email })
+    const isDuplicate = await checkEmailDuplication(formData.email);
+    if (isDuplicate) {
+      setEditErrors(prev => ({
+        ...prev,
+        email: ERROR_MESSAGES.VALIDATION_ERROR_DUPLICATION_EMAIL,
+      }));
+      return;
+    }
+
     // バリデーション成功時にエラークリア
     setEditErrors({});
 
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await apiPut<any>(`/api/users/${id}`, {
         name: formData.name,
         email: formData.email,
@@ -249,42 +274,47 @@ export function UserEditForm({
       if (result.success) {
         clientLogger.info('ユーザ編集画面', 'ユーザデータ更新成功', { userId: result.data.id });
         setEditModalMessage(result.message);
-        setEditIsModalOpen(true);
+        setIsApiSuccess(result.success);
+        setIsEditModalOpen(true);
         setTimeout(() => {
           router.push('/user');
         }, 1500);
       } else {
-        clientLogger.error('ユーザ編集画面', 'ユーザデータ更新失敗', { error: result.error });
+        clientLogger.error('ユーザ編集画面', 'ユーザデータ更新失敗', { error: result.error instanceof Error ? result.error.message : String(result.error) });
         setEditModalMessage('ユーザの更新に失敗しました');
-        setEditIsModalOpen(true);
+        setIsEditModalOpen(true);
       }
-    } catch (error) {
-      clientLogger.error('ユーザ編集画面', 'ユーザデータ更新エラー', { error });
+    } catch (err) {
+      clientLogger.error('ユーザ編集画面', 'ユーザデータ更新エラー', { error: err instanceof Error ? err.message : String(err) });
       setEditModalMessage('ユーザの更新に失敗しました');
-      setEditIsModalOpen(true);
+      setIsEditModalOpen(true);
     } finally {
-      setEditIsLoading(false);
+      setIsEditLoading(false);
     }
   };
 
-  // キャンセルボタン押下時処理
-  const handleCancel = () => {
-    router.back();
+  const closeModal = (isApiSuccess: boolean) => {
+    setIsEditModalOpen(false);
+    // 更新成功時はユーザ一覧へ遷移する
+    if (isApiSuccess) {
+      router.push('/user');
+    }
   };
 
   const buttons = [
     {
-      label: editIsLoading ? '更新中...' : '更新',
+      label: isEditLoading ? '更新中...' : '更新',
       onClick: () => {
         clientLogger.info('ユーザ編集画面', '更新ボタン押下');
         handleEditer();
       },
-      disabled: editIsLoading,
+      disabled: isEditLoading,
     },
     {
       label: '戻る',
       onClick: () => {
-        handleCancel()
+        clientLogger.info('ユーザ編集画面', '戻るボタン押下');
+        router.back();
       },
       isCancel: true
     }
@@ -296,18 +326,28 @@ export function UserEditForm({
       {tagError && (
         <div className="mb-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
           <p className="font-bold">タグの読み込みに失敗しました</p>
-
         </div>
       )}
       <>
         <VerticalForm fields={fields} />
         <ButtonGroup buttons={buttons} />
       </>
+      <Modal open={isEditLoading} onClose={() => setIsEditLoading(false)} isUnclosable={true}>
+        <div className="flex justify-center">
+          <Loading
+            isLoading={true}
+            message="データ更新中..."
+            size="md"
+          />
+        </div>
+      </Modal>
       {/* 結果モーダル */}
-      <Modal open={editIsModalOpen} onClose={() => setEditIsModalOpen(false)}>
+      <Modal open={isEditModalOpen} onClose={() => setIsEditModalOpen(false)}>
         <p className="mb-8">{editModalMessage}</p>
         <div className="flex justify-center">
-          <Button className="w-24" onClick={() => setEditIsModalOpen(false)}>閉じる</Button>
+          <Button className="w-24" onClick={() => closeModal(isApiSuccess)}>
+            閉じる
+          </Button>
         </div>
       </Modal>
     </div>

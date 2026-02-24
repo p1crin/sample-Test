@@ -1,12 +1,11 @@
 import { canEditTestCases, canViewTestGroup, requireAuth } from '@/app/lib/auth';
 import { prisma } from '@/app/lib/prisma';
+import { deleteDirectory } from '@/app/lib/storage';
 import { ERROR_MESSAGES } from '@/constants/errorMessages';
 import { STATUS_CODES } from '@/constants/statusCodes';
 import { logAPIEndpoint, logDatabaseQuery, QueryTimer } from '@/utils/database-logger';
 import { handleError } from '@/utils/errorHandler';
-import { rm } from 'fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
-import { join } from 'path';
 
 // GET /api/test-groups/[groupId]/cases/[tid] - テストケース詳細を取得
 export async function GET(
@@ -155,7 +154,7 @@ export async function GET(
     });
   } catch (error) {
     return handleError(
-      new Error(ERROR_MESSAGES.GET_FALED),
+      error as Error,
       STATUS_CODES.INTERNAL_SERVER_ERROR,
       apiTimer,
       'GET',
@@ -186,7 +185,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ grou
     // 認証チェック
     const user = await requireAuth(req);
     // 権限チェック
-    const canEdit = canEditTestCases(user, testGroupId);
+    const canEdit = await canEditTestCases(user, testGroupId);
 
     if (!canEdit) {
       return handleError(
@@ -319,15 +318,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ grou
             test_case_no: testContentIds[testCaseNo] || null,
             test_case: content.testCase || null,
             expected_value: content.expectedValue || null,
-            is_target: content.is_target || null,
-            tt_test_cases: {
-              connect: {
-                test_group_id_tid: {
-                  test_group_id: testGroupId,
-                  tid: tid
-                }
-              }
-            }
+            is_target: content.is_target,
           }
         })
         testCaseNo++;
@@ -395,17 +386,6 @@ export async function DELETE(
       );
     }
 
-    // TIDの形式チェック
-    const tidPattern = /^([1-9][0-9]{0,2}-){3}[1-9][0-9]{0,2}$/;
-    if (!tidPattern.test(tid)) {
-      return handleError(
-        new Error(ERROR_MESSAGES.INVALID_TID),
-        STATUS_CODES.BAD_REQUEST,
-        apiTimer,
-        'DELETE',
-        `/api/test-groups/${groupIdParam}/cases/${tid}`
-      );
-    }
     const groupId = parseInt(groupIdParam, 10);
 
     // ユーザが管理者または削除権限があるかチェック
@@ -456,8 +436,12 @@ export async function DELETE(
         `/api/test-groups/${groupIdParam}/cases/${tid}`
       );
     }
-    const deleteDir = join(process.cwd(), 'public', 'uploads', 'test-cases', String(groupId), tid);
-    await rm(deleteDir, { recursive: true, force: true })
+
+    // 紐づいているファイルの削除（制御仕様書、データフロー、エビデンス）
+    await Promise.all([
+      deleteDirectory(`test-cases/${groupId}/${tid}`),  // 制御仕様書・データフロー
+      deleteDirectory(`evidences/${groupId}/${tid}`),   // エビデンス
+    ]);
 
     const deleteTimer = new QueryTimer();
     // Prisma トランザクション内でテストケースを削除

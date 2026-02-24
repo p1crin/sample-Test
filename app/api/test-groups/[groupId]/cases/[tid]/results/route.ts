@@ -494,7 +494,7 @@ export async function POST(
 
     // トランザクション内で処理
     const result = await prisma.$transaction(async (tx) => {
-      let fileCount = 0;
+      const fileCount = 0;
       // historyDataListの処理
       if (historyDataList) {
         for (const historyList of historyDataList) {
@@ -519,6 +519,7 @@ export async function POST(
                 comparator_version: rest.comparatorVersion || null,
                 execution_date: rest.executionDate ? new Date(rest.executionDate) : null,
                 executor: rest.executor,
+                note: rest.note,
                 updated_at: new Date(),
               },
             });
@@ -537,6 +538,54 @@ export async function POST(
           ],
           executionTime: apiTimer.elapsed(),
         });
+        // historyCountが最大のものを探す
+        const latestHistory = historyDataList.reduce((max: { historyCount: number; }, current: { historyCount: number; }) =>
+          current.historyCount > max.historyCount ? current : max
+          , { historyCount: 0 }
+        );
+
+        if (latestHistory && latestHistory.testResult) {
+          for (const resultToUpdate of latestHistory.testResult) {
+            const { test_case_no, ...rest } = resultToUpdate;
+            const executionDate = rest.executionDate ? new Date(rest.executionDate) : null;
+
+            await tx.tt_test_results.update({
+              where: {
+                test_group_id_tid_test_case_no: {
+                  test_group_id: groupId,
+                  tid: tid,
+                  test_case_no: test_case_no,
+                },
+              },
+              data: {
+                result: rest.result || null,
+                judgment: rest.judgment || JUDGMENT_OPTIONS.UNTOUCHED,
+                software_version: rest.softwareVersion || null,
+                hardware_version: rest.hardwareVersion || null,
+                comparator_version: rest.comparatorVersion || null,
+                execution_date: executionDate,
+                executor: rest.executor,
+                note: rest.note,
+                updated_at: new Date(),
+              },
+            });
+          }
+
+          logDatabaseQuery({
+            operation: 'UPDATE',
+            table: 'tt_test_results',
+            rowsAffected: latestHistory.testResult.length,
+            query: 'update from history',
+            params: [
+              {
+                testGroup: groupId,
+                tid: tid,
+                historyCount: latestHistory.historyCount,
+              }
+            ],
+            executionTime: apiTimer.elapsed(),
+          });
+        }
       }
 
       // newTestResultDataの処理

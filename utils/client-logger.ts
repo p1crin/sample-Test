@@ -33,11 +33,11 @@ class ClientLogger {
     // 開発環境ではコンソール出力、本番環境ではサーバー送信
     this.isEnabled = env !== 'production';
     this.shouldSendToServer = env === 'production';
-    this.level = env === 'production' ? 'warn' : 'debug';
     this.userId = undefined;
-
+    
     // サーバー送信するログレベルの閾値（環境変数で設定可能）
     this.sendLevel = (process.env.NEXT_PUBLIC_CLIENT_LOG_SEND_LEVEL as LogLevel) || 'warn';
+    this.level = env === 'production' ? this.sendLevel : 'debug';
 
     // バッチ送信の設定
     this.logQueue = [];

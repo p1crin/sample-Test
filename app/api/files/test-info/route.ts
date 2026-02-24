@@ -4,6 +4,7 @@ import { uploadFile, deleteFile } from '@/app/lib/storage';
 import { ERROR_MESSAGES } from '@/constants/errorMessages';
 import { STATUS_CODES } from '@/constants/statusCodes';
 import { logAPIEndpoint, QueryTimer } from '@/utils/database-logger';
+import { formatDateTimeToTimestamp } from '@/utils/date-formatter';
 import { handleError } from '@/utils/errorHandler';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -62,7 +63,7 @@ export async function POST(req: NextRequest) {
 
     // ファイル名生成（タイムスタンプ + 元のファイル名）
     const fileTypePrefix = fileType === 0 ? 'control_spec' : 'data_flow';
-    const fileName = `${fileTypePrefix}_${Date.now()}_${file.name}`;
+    const fileName = `${fileTypePrefix}_${formatDateTimeToTimestamp(new Date().toISOString())}_${file.name}`;
 
     // ストレージにアップロード（環境に応じてローカルまたはS3）
     const uploadResult = await uploadFile(

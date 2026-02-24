@@ -1,10 +1,11 @@
 'use client';
+import { Column } from "@/components/datagrid/DataGrid";
+import { Button } from "@/components/ui/button";
+import clientLogger from "@/utils/client-logger";
 import { useState } from "react";
 import TestSummaryResultGraph from "./TestSummaryResultGraph";
 import { TestSummaryResultList } from "./TestSummaryResultList";
 import { TestSummaryResultListRow } from "./types/test-summary-result-list-row";
-import { Column } from "@/components/datagrid/DataGrid";
-import { Button } from "@/components/ui/button";
 
 type TestSummaryResultContainerProps = {
   groupId: number;
@@ -26,6 +27,7 @@ export default function TestSummaryResultContainer({ groupId }: TestSummaryResul
   };
 
   const handleCancel = () => {
+    clientLogger.info('テスト集計結果表示画面', '戻るボタン押下');
     history.back();
   };
 

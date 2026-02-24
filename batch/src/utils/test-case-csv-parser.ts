@@ -1,4 +1,6 @@
-import { TestCaseCsvRow, ValidationResult, GroupedTestCase, Judgment } from '../types/test-case-import.types';
+
+import { TestCaseCsvRow, Judgment, GroupedTestCase } from '../types/test-case-import.types';
+import { ValidationResult } from '../types/user-import.types';
 import { parseCsvBase, normalizeRowWithMapping } from './csv-parser-base';
 
 /**
@@ -215,48 +217,30 @@ export function validateTestCaseRow(row: TestCaseCsvRow, rowNumber: number): Val
     errors.push(`${rowNumber}行目: 期待値は必須です`);
   }
 
-  if (!row.result || row.result.trim() === '') {
-    errors.push(`${rowNumber}行目: 結果は必須です`);
-  }
-
   if (!row.judgment || row.judgment.trim() === '') {
-    errors.push(`${rowNumber}行目: 判定は必須です`);
+    row.judgment = Judgment.NOT_STARTED;
   } else if (!isValidJudgment(row.judgment)) {
     errors.push(`${rowNumber}行目: 判定は「未着手、保留、QA中、OK、参照OK、NG、再実施対象外、対象外」のいずれかである必要があります`);
   }
 
-  if (!row.execution_date || row.execution_date.trim() === '') {
-    errors.push(`${rowNumber}行目: 実施日は必須です`);
-  } else if (!isValidDate(row.execution_date)) {
+  if (!isValidDate(row.execution_date)) {
     errors.push(`${rowNumber}行目: 実施日はyyyy/mm/dd形式である必要があります（例: 2025/01/01）`);
   }
 
-  if (!row.software_version || row.software_version.trim() === '') {
-    errors.push(`${rowNumber}行目: ソフトVer.は必須です`);
-  } else if (row.software_version.length > 255) {
+  if (row.software_version.length > 255) {
     errors.push(`${rowNumber}行目: ソフトVer.は255文字以内である必要があります`);
   }
 
-  if (!row.hardware_version || row.hardware_version.trim() === '') {
-    errors.push(`${rowNumber}行目: ハードVer.は必須です`);
-  } else if (row.hardware_version.length > 255) {
+  if (row.hardware_version.length > 255) {
     errors.push(`${rowNumber}行目: ハードVer.は255文字以内である必要があります`);
   }
 
-  if (!row.comparator_version || row.comparator_version.trim() === '') {
-    errors.push(`${rowNumber}行目: コンパラVer.は必須です`);
-  } else if (row.comparator_version.length > 255) {
+  if (row.comparator_version.length > 255) {
     errors.push(`${rowNumber}行目: コンパラVer.は255文字以内である必要があります`);
   }
 
-  if (!row.executor || row.executor.trim() === '') {
-    errors.push(`${rowNumber}行目: 実施者は必須です`);
-  } else if (row.executor.length > 255) {
+  if (row.executor.length > 255) {
     errors.push(`${rowNumber}行目: 実施者は255文字以内である必要があります`);
-  }
-
-  if (!row.note || row.note.trim() === '') {
-    errors.push(`${rowNumber}行目: 備考は必須です`);
   }
 
   return {

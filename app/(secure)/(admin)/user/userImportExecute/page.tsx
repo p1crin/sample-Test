@@ -1,82 +1,41 @@
-'use client';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { useState } from 'react';
-import { VerticalForm } from '@/components/ui/verticalForm';
-import Papa from 'papaparse';
-import ButtonGroup from '@/components/ui/buttonGroup';
+import { isAdmin } from "@/app/lib/auth";
+import { authOptions } from "@/app/lib/authOption";
+import ForbiddenUI from "@/components/ui/forbiddenUI";
+import InternalServerErrorUI from "@/components/ui/internalServerErrorUI";
+import UnauthorizedUI from "@/components/ui/unauthorizedUI";
+import { getServerSession } from "next-auth";
+import { Suspense } from "react";
+import { UserImportExecuteContainer } from "./_components/UserImportExecuteContainer";
 
-interface CsvData {
-  [key: string]: string;
-}
+export default async function UserImportPage() {
+  try {
+    // サーバー側で権限チェック
+    const session = await getServerSession(authOptions);
 
-export default function ImportExecute() {
-  const router = useRouter();
-  const label = "ユーザファイル（csv形式）";
-  const [csvContent, setCsvContent] = useState<CsvData[]>([]);
-
-  const handleCancel = () => {
-    console.log('キャンセルされました');
-    history.back();
-  }
-
-  const handleSubmit = () => {
-    console.log('インポートされました');
-    if (csvContent.length > 0) {
-      // インポート処理を実行
-      router.push('/importResult');
-    } else {
-      console.log('CSVファイルの内容が読み込まれていません');
+    // 認証確認
+    if (!session?.user?.id) {
+      return <UnauthorizedUI />;
     }
-  }
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement> | { target: { name: string; value: string | string[]; }; }) => {
-    if ('files' in e.target) {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (file) {
-        Papa.parse(file, {
-          header: true,
-          skipEmptyLines: true,
-          complete: (results) => {
-            setCsvContent(results.data as CsvData[]);
-          },
-          encoding: 'shift-jis'
-        });
-        console.log(file || "ファイルが選択されていません");
-      }
-    } else {
-      console.log("Unexpected event target");
+    // ユーザロールが管理者のみがアクセス可能
+    const isCanView = isAdmin(session.user);
+    if (!isCanView) {
+      return <ForbiddenUI />;
     }
+  } catch (error) {
+    // エラーハンドリング
+    if (error instanceof Error && error.message.includes('Forbidden')) {
+      return <ForbiddenUI />;
+    }
+    return <InternalServerErrorUI />;
   }
-  const fields = [
-    {
-      label: label,
-      type: 'file',
-      name: 'file',
-      value: '',
-      onChange: handleFileChange,
-      placeholder: '',
-    },
-  ]
-
-  const buttons = [
-    {
-      label: 'インポート',
-      onClick: handleSubmit
-    },
-    {
-      label: '戻る',
-      onClick: handleCancel,
-      isCancel: true
-    }
-  ];
 
   return (
     <>
       <h1 className="text-2xl font-bold mt-4 pb-3">ユーザインポート実施</h1>
-      <div className='flex mt-4 pb-3 flex-col justify-start'>
-        <VerticalForm fields={fields} />
-        <ButtonGroup buttons={buttons} />
-      </div>
+      <Suspense fallback={<div>Loading...</div>}>
+        <UserImportExecuteContainer />
+      </Suspense>
     </>
   );
 }

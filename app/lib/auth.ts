@@ -1,8 +1,7 @@
 import { prisma } from '@/app/lib/prisma';
 import { TestRole, UserRole } from '@/types';
-import { runWithContextAsync } from '@/utils/request-context';
 import { getToken } from 'next-auth/jwt';
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 
 // セッションユーザーのインターフェース
 export interface SessionUser {
@@ -41,13 +40,36 @@ export async function getAuthUser(
 export async function requireAuth(
   req: NextRequest
 ): Promise<SessionUser> {
-  const user = await getAuthUser(req);
-
-  if (!user) {
+  const authUser = await getAuthUser(req);
+  if (!authUser) {
     throw new Error('Unauthorized');
   }
 
-  return user;
+  try {
+    const user = await prisma.mt_users.findUnique({
+      where: {
+        id: authUser.id,
+        is_deleted: false,
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        user_role: true,
+        department: true,
+        company: true
+      }
+    });
+
+    if (!user) {
+      throw new Error('Unauthorized');
+    }
+
+    return user;
+  } catch (error) {
+    return authUser;
+  }
+
 }
 
 // ユーザーが管理者かどうかをチェック
@@ -69,84 +91,6 @@ export async function requireAdmin(req: NextRequest): Promise<SessionUser> {
   }
 
   return user;
-}
-
-// APIハンドラータイプ
-type ApiHandler<T = NextResponse> = (
-  req: NextRequest,
-  user: SessionUser,
-  context?: { params: Promise<Record<string, string>> }
-) => Promise<T>;
-
-/**
- * 認証付きAPIハンドラーラッパー
- * ユーザーIDがリクエストコンテキストに自動設定され、すべてのログに含まれる
- */
-export function withAuth<T = NextResponse>(handler: ApiHandler<T>) {
-  return async (
-    req: NextRequest,
-    context?: { params: Promise<Record<string, string>> }
-  ): Promise<T | NextResponse> => {
-    const user = await getAuthUser(req);
-
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    return runWithContextAsync({ userId: user.id }, () =>
-      handler(req, user, context)
-    );
-  };
-}
-
-/**
- * 管理者認証付きAPIハンドラーラッパー
- * ユーザーIDがリクエストコンテキストに自動設定され、すべてのログに含まれる
- */
-export function withAdmin<T = NextResponse>(handler: ApiHandler<T>) {
-  return async (
-    req: NextRequest,
-    context?: { params: Promise<Record<string, string>> }
-  ): Promise<T | NextResponse> => {
-    const user = await getAuthUser(req);
-
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    if (!isAdmin(user)) {
-      return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
-    }
-
-    return runWithContextAsync({ userId: user.id }, () =>
-      handler(req, user, context)
-    );
-  };
-}
-
-/**
- * 管理者またはテスト管理者認証付きAPIハンドラーラッパー
- * ユーザーIDがリクエストコンテキストに自動設定され、すべてのログに含まれる
- */
-export function withAdminOrTestManager<T = NextResponse>(handler: ApiHandler<T>) {
-  return async (
-    req: NextRequest,
-    context?: { params: Promise<Record<string, string>> }
-  ): Promise<T | NextResponse> => {
-    const user = await getAuthUser(req);
-
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    if (!isAdmin(user) && !isTestManager(user)) {
-      return NextResponse.json({ error: 'Forbidden: Admin or Test Manager access required' }, { status: 403 });
-    }
-
-    return runWithContextAsync({ userId: user.id }, () =>
-      handler(req, user, context)
-    );
-  };
 }
 
 // 管理者ロールまたはテスト管理者ロールが必要

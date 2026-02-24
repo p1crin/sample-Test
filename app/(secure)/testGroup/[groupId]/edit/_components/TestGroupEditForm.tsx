@@ -7,6 +7,7 @@ import clientLogger from '@/utils/client-logger';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { testGroupEditSchema } from './schemas/testGroup-edit-schema';
+import Loading from '@/components/ui/loading';
 
 export type TestGroupEditFormState = {
   oem: string;
@@ -42,12 +43,16 @@ export function TestGroupEditForm({
 }: TestGroupEditFormProps) {
   const router = useRouter();
   const [formData, setFormData] = useState(form);
-  const [editIsLoading, setEditIsLoading] = useState(false);
-  const [editIsModalOpen, setEditIsModalOpen] = useState(false);
+  const [isEditLoading, setIsEditLoading] = useState(false);
+  const [isApiSuccess, setIsApiSuccess] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editModalMessage, setEditModalMessage] = useState('');
   const [editError, setEditErrors] = useState<Record<string, string>>({});
   const [tagOptions, setTagOptions] = useState<{ value: string, label: string }[]>([]);
   const [tagError, setTagError] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<Error | null>(null);
+  if (apiError) throw apiError;
+
   const params = useParams();
   const groupId = params.groupId;
 
@@ -72,9 +77,10 @@ export function TestGroupEditForm({
         } else {
           setTagError('タグの取得に失敗しました');
         }
-      } catch (error) {
-        clientLogger.error('TestGroupRegistration', 'タグ取得エラー', { error });
-        setTagError(error instanceof Error ? error.message : 'タグの取得に失敗しました');
+      } catch (err) {
+        clientLogger.error('テストグループ編集画面', 'タグ取得エラー', { error: err instanceof Error ? err.message : String(err) });
+        setTagError(err instanceof Error ? err.message : 'タグの取得に失敗しました');
+        setApiError(err instanceof Error ? err : new Error(String(err)));
       }
     };
     fetchTags();
@@ -97,7 +103,7 @@ export function TestGroupEditForm({
     // バリデーション成功時にエラークリア
     setEditErrors({});
 
-    setEditIsLoading(true);
+    setIsEditLoading(true);
     try {
       // タグ名の配列を生成
       const tag_names: { tag_name: string; test_role: number }[] = [];
@@ -134,29 +140,25 @@ export function TestGroupEditForm({
       });
 
       if (result.success) {
-        clientLogger.info('TestGroupEditForm', 'テストグループ更新成功', { groupId: result.data?.id });
+        clientLogger.info('テストグループ編集画面', 'テストグループ更新成功', { testGroupId: result.data.id });
         setEditModalMessage('テストグループを更新しました');
-        setEditIsModalOpen(true);
+        setIsApiSuccess(result.success);
+        setIsEditModalOpen(true);
         setTimeout(() => {
           router.push('/testGroup');
         }, 1500); // 1.5秒後にテストグループ一覧に飛ばす
       } else {
-        clientLogger.error('TestGroupEditForm', 'テストグループ更新失敗', { error: result.error });
+        clientLogger.error('テストグループ編集画面', 'テストグループ更新失敗', { error: result.error instanceof Error ? result.error.message : String(result.error) });
         setEditModalMessage('テストグループの更新に失敗しました');
-        setEditIsModalOpen(true);
+        setIsEditModalOpen(true);
       }
-    } catch (error) {
-      clientLogger.error('TestGroupEditForm', 'テストグループ更新エラー', { error });
+    } catch (err) {
+      clientLogger.error('テストグループ編集画面', 'テストグループ更新エラー', { error: err instanceof Error ? err.message : String(err) });
       setEditModalMessage('テストグループの更新に失敗しました');
-      setEditIsModalOpen(true);
+      setIsEditModalOpen(true);
     } finally {
-      setEditIsLoading(false);
+      setIsEditLoading(false);
     }
-  };
-
-  // キャンセルボタン押下時処理
-  const handleCansel = () => {
-    router.push('/testGroup',);
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement> | { target: { name: string; value: string | string[] } }) => {
@@ -173,6 +175,14 @@ export function TestGroupEditForm({
       ...prev,
       [tagName]: selectedValues
     }));
+  };
+
+  const closeModal = (isApiSuccess: boolean) => {
+    setIsEditModalOpen(false);
+    // 更新成功時はテストグループ一覧へ遷移する
+    if (isApiSuccess) {
+      router.push('/testGroup');
+    }
   };
 
   const fields = [
@@ -299,17 +309,18 @@ export function TestGroupEditForm({
 
   const buttons = [
     {
-      label: editIsLoading ? '更新中...' : '更新',
+      label: isEditLoading ? '更新中...' : '更新',
       onClick: () => {
-        clientLogger.info('TestGroupEditForm', '更新ボタン押下');
+        clientLogger.info('テストグループ編集画面', '更新ボタン押下');
         handleEditer();
       },
-      disabled: editIsLoading,
+      disabled: isEditLoading,
     },
     {
       label: '戻る',
       onClick: () => {
-        handleCansel();
+        clientLogger.info('テストグループ編集画面', '戻るボタン押下');
+        router.push('/testGroup');
       },
       isCancel: true
     },
@@ -324,15 +335,26 @@ export function TestGroupEditForm({
 
         </div>
       )}
-
-      <VerticalForm fields={fields} />
-      <ButtonGroup buttons={buttons} />
-
+      <>
+        <VerticalForm fields={fields} />
+        <ButtonGroup buttons={buttons} />
+      </>
+      <Modal open={isEditLoading} onClose={() => setIsEditLoading(false)} isUnclosable={true}>
+        <div className="flex justify-center">
+          <Loading
+            isLoading={true}
+            message="データ更新中..."
+            size="md"
+          />
+        </div>
+      </Modal>
       {/* 結果モーダル */}
-      <Modal open={editIsModalOpen} onClose={() => setEditIsModalOpen(false)}>
+      <Modal open={isEditModalOpen} onClose={() => setIsEditModalOpen(false)}>
         <p className="mb-8">{editModalMessage}</p>
         <div className="flex justify-center">
-          <Button className="w-24" onClick={() => setEditIsModalOpen(false)}>閉じる</Button>
+          <Button className="w-24" onClick={() => closeModal(isApiSuccess)}>
+            閉じる
+          </Button>
         </div>
       </Modal>
     </div>

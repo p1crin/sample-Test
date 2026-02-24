@@ -34,10 +34,10 @@ export function extractZip(zipBuffer: Buffer): {
 
     // その他のファイルを保存
     // パスの正規化（先頭の./ を削除）
-    const normalizedPath = fileName.startsWith('./') ? fileName.substring(2) : fileName;
+    const normalizedPath = fileName.includes("/") ? fileName.split('/').pop() : fileName;
 
-    files.set(normalizedPath, {
-      path: normalizedPath,
+    files.set(normalizedPath!, {
+      path: normalizedPath!,
       buffer,
       originalName: fileName,
     });
@@ -54,7 +54,7 @@ export function extractZip(zipBuffer: Buffer): {
  * ファイルパスを正規化（./を削除）
  */
 export function normalizeFilePath(path: string): string {
-  return path.startsWith('./') ? path.substring(2) : path;
+  return path.includes('/') ? path.split('/').pop()! : path;
 }
 
 /**

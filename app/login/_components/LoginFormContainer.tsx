@@ -13,7 +13,7 @@ export function LoginFormContainer() {
   const [form, setForm] = useState({ email: '', password: '' });
   const [errorMsg, setErrorMsg] = useState('');
   const [loading, setLoading] = useState(false);
-  const { data: session, status } = useSession();
+  const { status } = useSession();
 
   // 認証済みならテストグループ一覧にリダイレクト
   useEffect(() => {
@@ -51,13 +51,13 @@ export function LoginFormContainer() {
 
       if (signInResult?.error) {
         setErrorMsg(ERROR_MESSAGES.INVALID_CREDENTIALS);
-        clientLogger.error('ログイン画面', 'ログイン失敗:', signInResult.error);
+        clientLogger.error('ログイン画面', 'ログイン失敗:', { error: signInResult instanceof Error ? signInResult.message : String(signInResult) });
       } else if (signInResult?.ok) {
         clientLogger.debug('ログイン画面', 'ログイン成功');
         // リダイレクトはuseSessionの変更で自動的に行われる
       }
-    } catch (error) {
-      clientLogger.error('ログイン画面', 'ログイン失敗:', error);
+    } catch (err) {
+      clientLogger.error('ログイン画面', 'ログイン失敗:', { error: err instanceof Error ? err.message : String(err) });
       setErrorMsg(ERROR_MESSAGES.LOGIN_FAILED);
     } finally {
       setLoading(false);

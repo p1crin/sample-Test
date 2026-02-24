@@ -8,10 +8,6 @@ const FileInfoSchema = z.object({
 });
 
 export const testCaseEditSchema = z.object({
-  tid: z.string()
-    .min(1, { message: 'TIDは必須項目です' })
-    .max(15, { message: 'TIDは15文字以内で入力してください' })
-    .regex(/^([1-9][0-9]{0,2}-){3}[1-9][0-9]{0,2}$/, { message: 'TIDは「1～3桁の数字」を4つ、ハイフンで区切って入力してください（例: 123-45-6-789）' }),
   first_layer: z.string()
     .min(1, { message: '第1層は必須項目です' })
     .max(255, { message: '第1層は255文字以内で入力してください' }),

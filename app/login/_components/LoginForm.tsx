@@ -36,6 +36,7 @@ export function LoginForm({
           value={form.email}
           onChange={onChange}
           autoFocus
+          maxLength={255}
         />
       </label>
       <label className="flex flex-col gap-1" htmlFor="password">

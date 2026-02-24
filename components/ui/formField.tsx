@@ -33,6 +33,8 @@ export interface FormFieldProps {
   onBlur?: () => void;
   /** フィールドを無効化するフラグ (オプション) */
   disabled?: boolean;
+  /** 入力可能文字数（SearchFormで設定） */
+  maxLength?: number;
 }
 
 const FORM_FIELD_STYLE = "flex flex-cols space-x-4 justify-end";
@@ -60,7 +62,8 @@ export default function FormField({
   onBlur,
   disabled,
   min,
-  max
+  max,
+  maxLength,
 }: FormFieldProps) {
   const [isClient, setIsClient] = useState(false);
 
@@ -176,6 +179,7 @@ export default function FormField({
             disabled={disabled}
             {...(type === 'number' && min !== undefined && { min })}
             {...(type === 'number' && max !== undefined && { max })}
+            {...(maxLength !== undefined && { maxLength })}
           />
         )}
       </div>

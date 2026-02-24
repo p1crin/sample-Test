@@ -11,6 +11,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { UpdateTestCaseListRow } from '../../../../_components/types/testCase-list-row';
 import { testCaseEditSchema } from './schemas/testCase-edit-schema';
+import Loading from '@/components/ui/loading';
 
 // ファイルタイプ定数（API側と統一）
 const FILE_TYPE = {
@@ -79,9 +80,10 @@ export function TestCaseEditForm({
   const maxId = useRef(0);
 
   const [editError, setEditErrors] = useState<Record<string, string>>({});
-  const [editIsModalOpen, setEditIsModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editModalMessage, setEditModalMessage] = useState('');
-  const [editIsLoading, setEditIsLoading] = useState(false);
+  const [isEditLoading, setIsEditLoading] = useState(false);
+  const [isApiSuccess, setIsApiSuccess] = useState(false);
 
   // 更新成功フラグ（ブラウザバック時の判定用）
   const isUpdateSuccessful = useRef(false);
@@ -105,7 +107,7 @@ export function TestCaseEditForm({
         });
         maxId.current = (Math.max(...testContentIds.current) + 1);
       }
-      maxId.current = maxId.current > 0 ? maxId.current : 0;
+      maxId.current = maxId.current > 0 ? maxId.current : 1;
     }
     setFormData(form);
     setTestContents(contents);
@@ -272,8 +274,8 @@ export function TestCaseEditForm({
       });
 
       if (response.ok) {
-        clientLogger.info('テストケース編集画面', 'ファイルアップロード成功');
         const result = await response.json();
+        clientLogger.info('テストケース編集画面', 'ファイルアップロード成功', { fileNo: result.data.fileNo, path: result.data.filePath, fileType: result.data.fileType });
         // アップロード成功後、サーバーから返されたfileId等を設定
         return {
           ...file,
@@ -410,16 +412,16 @@ export function TestCaseEditForm({
         top: 0,
         behavior: "smooth",
       });
-      clientLogger.warn('テストケース編集画面', 'バリデーションエラー', { errors: newErrors });
       return;
     }
 
     // バリデーション成功時にエラークリア
     setEditErrors({});
 
-    setEditIsLoading(true);
-    clientLogger.info('テストケース編集画面', 'テストケース更新開始', { formData, testContents, deletedFiles, deletedContents });
-
+    setIsEditLoading(true);
+    // ログに出力するデータからファイル情報を除外
+    const { controlSpecFile, dataFlowFile, ...formDataForLog } = formData;
+    clientLogger.info('テストケース編集画面', 'テストケース更新開始', { formData: formDataForLog, testContents, deletedFiles, deletedContents });
     try {
       // JSONペイロードを作成
       const payload = {
@@ -456,37 +458,33 @@ export function TestCaseEditForm({
 
       try {
         await Promise.all(deletePromises);
-        clientLogger.info('テストケース編集画面', 'ファイル削除成功', {
-          deletedFiles: deletedFiles,
-        });
-      } catch (error) {
-        clientLogger.error('テストケース編集画面', 'ファイル削除失敗', {
-          error: error instanceof Error ? error.message : String(error)
-        });
+        clientLogger.info('テストケース編集画面', 'ファイル削除成功', { deletedFiles: deletedFiles });
+      } catch (err) {
+        clientLogger.error('テストケース編集画面', 'ファイル削除失敗', { error: err instanceof Error ? err.message : String(err) });
       }
 
       if (result.success) {
         // 更新成功フラグを立てる（ブラウザバック時のファイル削除を防ぐため）
         isUpdateSuccessful.current = true;
-        clientLogger.info('テストケース編集画面', 'テストケース更新成功');
+        clientLogger.info('テストケース編集画面', 'テストケース更新成功', { testGroupId: groupId, tid: result.data.tid });
         setEditModalMessage('テストケースを更新しました');
-        setEditIsModalOpen(true);
+        setIsApiSuccess(result.success);
+        setIsEditModalOpen(true);
         setTimeout(() => {
           router.push(`/testGroup/${groupId}/testCase`);
         }, 1500);
-        clearTimeout;
       } else {
         // エラーレスポンスを取得
-        clientLogger.error('テストケース編集画面', 'テストケース更新失敗', { error: result.error });
+        clientLogger.error('テストケース編集画面', 'テストケース更新失敗', { error: result.error instanceof Error ? result.error.message : String(result.error) });
         setEditModalMessage('テストケースの更新に失敗しました');
-        setEditIsModalOpen(true);
+        setIsEditModalOpen(true);
       }
-    } catch (error) {
-      clientLogger.error('テストケース編集画面', 'テストケース更新エラー', { error });
+    } catch (err) {
+      clientLogger.error('テストケース編集画面', 'テストケース更新エラー', { error: err instanceof Error ? err.message : String(err) });
       setEditModalMessage('テストケースの更新に失敗しました');
-      setEditIsModalOpen(true);
+      setIsEditModalOpen(true);
     } finally {
-      setEditIsLoading(false);
+      setIsEditLoading(false);
     }
   }
 
@@ -543,31 +541,36 @@ export function TestCaseEditForm({
 
     try {
       await Promise.all(deletePromises);
-      clientLogger.info('テストケース編集画面', 'キャンセル時のファイル削除成功', {
-        deletedControlSpec: newControlSpecIds,
-        deletedDataFlow: newDataFlowIds
-      });
-    } catch (error) {
-      clientLogger.error('テストケース編集画面', 'キャンセル時のファイル削除失敗', {
-        error: error instanceof Error ? error.message : String(error)
-      });
+      clientLogger.info('テストケース編集画面', 'キャンセル時のファイル削除成功', { deletedControlSpec: newControlSpecIds, deletedDataFlow: newDataFlowIds });
+    } catch (err) {
+      clientLogger.error('テストケース編集画面', 'キャンセル時のファイル削除失敗', { error: err instanceof Error ? err.message : String(err) });
     }
-
     router.push(`/testGroup/${groupId}/testCase`);
   }
 
+  const closeModal = (isApiSuccess: boolean) => {
+    setIsEditModalOpen(isApiSuccess);
+    // 更新成功時はテストケース一覧へ遷移する
+    if (isApiSuccess) {
+      router.push(`/testGroup/${groupId}/testCase`);
+    }
+  };
+
   const buttons = [
     {
-      label: editIsLoading ? '更新中...' : '更新',
+      label: isEditLoading ? '更新中...' : '更新',
       onClick: () => {
         clientLogger.info('テストケース編集画面', '更新ボタン押下');
         handleEditer();
       },
-      disabled: editIsLoading,
+      disabled: isEditLoading,
     },
     {
       label: '戻る',
-      onClick: handleCansel,
+      onClick: () => {
+        clientLogger.info('テストケース編集画面', '戻るボタン押下');
+        handleCansel();
+      },
       isCancel: true
     }
   ];
@@ -617,11 +620,22 @@ export function TestCaseEditForm({
       <div className="flex justify-center space-x-4">
         <ButtonGroup buttons={buttons} />
       </div>
+      <Modal open={isEditLoading} onClose={() => setIsEditLoading(false)} isUnclosable={true}>
+        <div className="flex justify-center">
+          <Loading
+            isLoading={true}
+            message="データ更新中..."
+            size="md"
+          />
+        </div>
+      </Modal>
       {/* 結果モーダル */}
-      <Modal open={editIsModalOpen} onClose={() => setEditIsModalOpen(false)}>
+      <Modal open={isEditModalOpen} onClose={() => setIsEditModalOpen(false)}>
         <p className="mb-8">{editModalMessage}</p>
         <div className="flex justify-center">
-          <Button className="w-24" onClick={() => setEditIsModalOpen(false)}>閉じる</Button>
+          <Button className="w-24" onClick={() => closeModal(isApiSuccess)}>
+            閉じる
+          </Button>
         </div>
       </Modal>
     </div>

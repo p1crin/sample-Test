@@ -4,8 +4,8 @@ import ButtonGroup from '@/components/ui/buttonGroup';
 import Loading from '@/components/ui/loading';
 import { Modal } from '@/components/ui/modal';
 import { VerticalForm } from '@/components/ui/verticalForm';
-import clientLogger from '@/utils/client-logger';
 import { apiGet, apiPost } from '@/utils/apiClient';
+import clientLogger from '@/utils/client-logger';
 import { useRouter } from 'next/navigation';
 import React, { useEffect, useState } from 'react';
 import { testGroupRegistSchema } from './schemas/testGroup-regist-schema';
@@ -30,9 +30,12 @@ const Resist: React.FC = () => {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isApiSuccess, setIsApiSuccess] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const router = useRouter();
+  const [apiError, setApiError] = useState<Error | null>(null);
+  if (apiError) throw apiError;
 
   useEffect(() => {
     const fetchTags = async () => {
@@ -50,9 +53,10 @@ const Resist: React.FC = () => {
         } else {
           setTagError('タグの取得に失敗しました');
         }
-      } catch (error) {
-        clientLogger.error('テストグループ新規登録画面', 'タグ取得エラー', { error });
-        setTagError(error instanceof Error ? error.message : 'タグの取得に失敗しました');
+      } catch (err) {
+        clientLogger.error('テストグループ新規登録画面', 'タグ取得エラー', { error: err instanceof Error ? err.message : String(err) });
+        setTagError(err instanceof Error ? err.message : 'タグの取得に失敗しました');
+        setApiError(err instanceof Error ? err : new Error(String(err)));
       } finally {
         setTagLoading(false);
       }
@@ -251,19 +255,20 @@ const Resist: React.FC = () => {
       });
 
       if (result.success) {
-        clientLogger.info('テストグループ新規登録画面', 'テストグループ作成成功', { groupId: result.data?.id });
+        clientLogger.info('テストグループ新規登録画面', 'テストグループ作成成功', { testGroupId: result.data?.id });
         setModalMessage('テストグループを作成しました');
+        setIsApiSuccess(result.success);
         setIsModalOpen(true);
         setTimeout(() => {
           router.push('/testGroup');
         }, 1500); // 1.5秒後にテストグループ一覧に飛ばす
       } else {
-        clientLogger.error('テストグループ新規登録画面', 'テストグループ作成失敗', { error: result.error });
+        clientLogger.error('テストグループ新規登録画面', 'テストグループ作成失敗', { error: result.error instanceof Error ? result.error.message : String(result.error) });
         setModalMessage(result.error?.message || 'テストグループの作成に失敗しました');
         setIsModalOpen(true);
       }
-    } catch (error) {
-      clientLogger.error('テストグループ新規登録画面', 'テストグループ作成エラー', { error });
+    } catch (err) {
+      clientLogger.error('テストグループ新規登録画面', 'テストグループ作成エラー', { error: err instanceof Error ? err.message : String(err) });
       setModalMessage('テストグループの作成に失敗しました');
       setIsModalOpen(true);
     } finally {
@@ -271,8 +276,12 @@ const Resist: React.FC = () => {
     }
   };
 
-  const handleCancel = () => {
-    router.back();
+  const closeModal = (isApiSuccess: boolean) => {
+    setIsModalOpen(false);
+    // 登録成功時テストグループ一覧へ遷移する
+    if (isApiSuccess) {
+      router.push('/testGroup');
+    }
   };
 
   const buttons = [
@@ -288,7 +297,7 @@ const Resist: React.FC = () => {
       label: '戻る',
       onClick: () => {
         clientLogger.info('テストグループ新規登録画面', '戻るボタン押下');
-        handleCancel();
+        router.back();
       },
       isCancel: true,
       disabled: isLoading
@@ -303,14 +312,12 @@ const Resist: React.FC = () => {
           <p className="font-bold">タグの読み込みに失敗しました</p>
         </div>
       )}
-
       {/* タグ読み込み中の表示 */}
       <Loading
         isLoading={tagLoading}
         message="タグを読み込み中..."
         size="md"
       />
-
       {/* フォームの表示 */}
       {!tagLoading && (
         <>
@@ -318,12 +325,22 @@ const Resist: React.FC = () => {
           <ButtonGroup buttons={buttons} />
         </>
       )}
-
+      <Modal open={isLoading} onClose={() => setIsLoading(false)} isUnclosable={true}>
+        <div className="flex justify-center">
+          <Loading
+            isLoading={true}
+            message="データ登録中..."
+            size="md"
+          />
+        </div>
+      </Modal>
       {/* 登録結果モーダル */}
       <Modal open={isModalOpen} onClose={() => setIsModalOpen(false)}>
         <p className="mb-8">{modalMessage}</p>
         <div className="flex justify-center">
-          <Button className="w-24" onClick={() => setIsModalOpen(false)}>閉じる</Button>
+          <Button className="w-24" onClick={() => closeModal(isApiSuccess)}>
+            閉じる
+          </Button>
         </div>
       </Modal>
     </div>

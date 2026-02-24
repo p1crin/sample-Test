@@ -8,6 +8,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { UpdateTestGroupListRow } from '../../../_components/types/testGroup-Form-row';
 import { testGroupCopySchema } from './schemas/testGroup-copy-schema';
+import Loading from '@/components/ui/loading';
 
 export type TestGroupCopyFormState = UpdateTestGroupListRow;
 
@@ -30,11 +31,13 @@ export function TestGroupCopyForm({
   const router = useRouter();
   const [formData, setFormData] = useState(form);
   const [copyIsLoading, setCopyIsLoading] = useState(false);
-  const [copyIsModalOpen, setCopyIsModalOpen] = useState(false);
+  const [isApiSuccess, setIsApisuccess] = useState(false);
+  const [isCopyModalOpen, setIsCopyModalOpen] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
   const [tagOptions, setTagOptions] = useState<{ value: string, label: string }[]>([]);
   const [tagError, setTagError] = useState<string | null>(null);
   const [copyError, setCopyErrors] = useState<Record<string, string>>({});
+
   const params = useParams();
   const groupId = params.groupId;
 
@@ -58,9 +61,9 @@ export function TestGroupCopyForm({
         } else {
           setTagError('タグの取得に失敗しました');
         }
-      } catch (error) {
-        clientLogger.error('テストグループ複製画面', 'タグ取得エラー', { error });
-        setTagError(error instanceof Error ? error.message : 'タグの取得に失敗しました');
+      } catch (err) {
+        clientLogger.error('テストグループ複製画面', 'タグ取得エラー', { error: err instanceof Error ? err.message : String(err) });
+        setTagError(err instanceof Error ? err.message : 'タグの取得に失敗しました');
       }
     };
     fetchTags();
@@ -121,29 +124,25 @@ export function TestGroupCopyForm({
       });
 
       if (response.success) {
-        clientLogger.info('テストグループ複製画面', 'テストグループ複製成功', { groupId: response.data.id });
+        clientLogger.info('テストグループ複製画面', 'テストグループ複製成功', { testGroupId: response.data.id });
         setModalMessage('テストグループを複製しました');
-        setCopyIsModalOpen(true);
+        setIsApisuccess(response.success);
+        setIsCopyModalOpen(true);
         setTimeout(() => {
           router.push('/testGroup');
         }, 1500);
       } else {
-        clientLogger.error('テストグループ複製画面', 'テストグループ複製失敗', { error: response.error });
+        clientLogger.error('テストグループ複製画面', 'テストグループ複製失敗', { error: response.error instanceof Error ? response.error.message : String(response.error) });
         setModalMessage('テストグループの複製に失敗しました');
-        setCopyIsModalOpen(true);
+        setIsCopyModalOpen(true);
       }
-    } catch (error) {
-      clientLogger.error('テストグループ複製画面', 'テストグループ複製失敗', { error });
+    } catch (err) {
+      clientLogger.error('テストグループ複製画面', 'テストグループ複製失敗', { error: err instanceof Error ? err.message : String(err) });
       setModalMessage('テストグループの複製に失敗しました');
-      setCopyIsModalOpen(true);
+      setIsCopyModalOpen(true);
     } finally {
       setCopyIsLoading(false);
     }
-  };
-
-  // キャンセルボタン押下時処理
-  const handleCansel = () => {
-    router.push('/testGroup');
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement> | { target: { name: string; value: string | string[] } }) => {
@@ -160,6 +159,14 @@ export function TestGroupCopyForm({
       ...prev,
       [tagName]: selectedValues
     }));
+  };
+
+  const closeModal = (isApiSuccess: boolean) => {
+    setIsCopyModalOpen(false);
+    // 登録成功時はテストグループ一覧へ遷移する
+    if (isApiSuccess) {
+      router.push('/testGroup');
+    }
   };
 
   const fields = [
@@ -289,7 +296,10 @@ export function TestGroupCopyForm({
     },
     {
       label: '戻る',
-      onClick: handleCansel,
+      onClick: () => {
+        clientLogger.info('テストグループ複製画面', '戻るボタン押下');
+        router.push('/testGroup');
+      },
       isCancel: true
     },
   ];
@@ -308,13 +318,21 @@ export function TestGroupCopyForm({
       <ButtonGroup buttons={buttons} />
 
       {/* 結果モーダル */}
-      <Modal open={copyIsModalOpen} onClose={() => setCopyIsModalOpen(false)}>
+      <Modal open={copyIsLoading} onClose={() => setCopyIsLoading(false)} isUnclosable={true}>
+        <div className="flex justify-center">
+          <Loading
+            isLoading={true}
+            message="データ登録中..."
+            size="md"
+          />
+        </div>
+      </Modal>
+
+      {/* 結果モーダル */}
+      <Modal open={isCopyModalOpen} onClose={() => setIsCopyModalOpen(false)}>
         <p className="mb-8">{modalMessage}</p>
         <div className="flex justify-center">
-          <Button className="w-24" onClick={() => {
-            setCopyIsModalOpen(false);
-            router.push('/testGroup');
-          }}>
+          <Button className="w-24" onClick={() => closeModal(isApiSuccess)}>
             閉じる
           </Button>
         </div>

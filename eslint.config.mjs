@@ -35,6 +35,7 @@ export default [
           allowDefaultProject: ['eslint.config.mjs', 'postcss.config.mjs', 'next.config.js'],
         },
         tsconfigRootDir: import.meta.dirname,
+        // project: './tsconfig.json',
         ecmaFeatures: {
           jsx: true,
           modules: true,

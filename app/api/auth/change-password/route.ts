@@ -1,5 +1,5 @@
 import { requireAuth } from "@/app/lib/auth";
-import { Prisma } from "@/generated/prisma/client";
+import { prisma } from '@/app/lib/prisma';
 import { logAPIEndpoint, logDatabaseQuery, QueryTimer } from "@/utils/database-logger";
 import { handleError } from "@/utils/errorHandler";
 import { NextRequest, NextResponse } from "next/server";
@@ -11,9 +11,8 @@ import { ERROR_MESSAGES } from "@/constants/errorMessages";
 // PUT /api/auth/change-password -登録済みのパスワードを更新
 export async function PUT(req: NextRequest) {
   const apiTimer = new QueryTimer();
-  const user = await requireAuth(req);
-
   try {
+    const user = await requireAuth(req);
     const body = await req.json();
     const {
       current_password,
@@ -85,7 +84,7 @@ export async function PUT(req: NextRequest) {
 
     // ユーザIDが一致するユーザ情報を取得
     const selectTimer = new QueryTimer();
-    const userInfo = await prisma?.mt_users.findUnique({
+    const userInfo = await prisma.mt_users.findUnique({
       where: {
         id: user.id,
         is_deleted: false,
@@ -125,7 +124,7 @@ export async function PUT(req: NextRequest) {
     const newPasswordHash = await hashPassword(new_password)
     // パスワードを更新
     const updateTimer = new QueryTimer();
-    const userData = await prisma?.mt_users.update({
+    const userData = await prisma.mt_users.update({
       data: {
         password: newPasswordHash
       },

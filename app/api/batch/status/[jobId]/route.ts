@@ -18,8 +18,10 @@ export async function GET(
 ) {
   const apiTimer = new QueryTimer();
   const user = await requireAuth(req);
+  const { jobId } = await params;
 
   try {
+
     // システム管理者のみ許可
     if (user.user_role !== UserRole.ADMIN) {
       return handleError(
@@ -27,11 +29,9 @@ export async function GET(
         STATUS_CODES.FORBIDDEN,
         apiTimer,
         'GET',
-        '/api/batch/status/[jobId]'
+        `/api/batch/status/${jobId}`
       );
     }
-
-    const { jobId } = await params;
 
     if (!jobId) {
       return handleError(
@@ -39,7 +39,7 @@ export async function GET(
         STATUS_CODES.BAD_REQUEST,
         apiTimer,
         'GET',
-        '/api/batch/status/[jobId]'
+        `/api/batch/status/${jobId}`
       );
     }
 
@@ -74,10 +74,10 @@ export async function GET(
         stoppedAt: job.stoppedAt,
         container: job.container
           ? {
-              exitCode: job.container.exitCode,
-              reason: job.container.reason,
-              logStreamName: job.container.logStreamName,
-            }
+            exitCode: job.container.exitCode,
+            reason: job.container.reason,
+            logStreamName: job.container.logStreamName,
+          }
           : undefined,
       },
     });
@@ -87,7 +87,7 @@ export async function GET(
       STATUS_CODES.INTERNAL_SERVER_ERROR,
       apiTimer,
       'GET',
-      '/api/batch/status/[jobId]'
+      `/api/batch/status/${jobId}`
     );
   }
 }

@@ -12,9 +12,6 @@ import { TestGroupEditForm } from './TestGroupEditForm';
 export function TestGroupEditFormContainer() {
 
   const [editLoading, setEditLoading] = useState(true);
-  const params = useParams();
-  const groupId = params.groupId;
-
   const [formData, setFormData] = useState({
     oem: '',
     model: '',
@@ -31,6 +28,9 @@ export function TestGroupEditFormContainer() {
   });
   const [apiError, setApiError] = useState<Error | null>(null);
   if (apiError) throw apiError;
+
+  const params = useParams();
+  const groupId = params.groupId;
 
   useEffect(() => {
     const getFormFunc = async () => {
@@ -82,10 +82,9 @@ export function TestGroupEditFormContainer() {
           viewerTag: viewers,
         }
         setFormData(formingEdit);
+        clientLogger.info('テストグループ編集画面', 'データ取得成功', { testGroupId: getEditData.id });
       } catch (err) {
-        clientLogger.error('TestGroupEditFormContainer', 'データ取得失敗', {
-          error: err instanceof Error ? err.message : String(err),
-        });
+        clientLogger.error('テストグループ編集画面', 'データ取得失敗', { error: err instanceof Error ? err.message : String(err) });
         setApiError(err instanceof Error ? err : new Error(String(err)));
       } finally {
         setEditLoading(false);

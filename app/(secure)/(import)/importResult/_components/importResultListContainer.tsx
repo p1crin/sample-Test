@@ -17,17 +17,19 @@ export function ImportResultListContainer() {
   const [page, setPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const [pageCount, setPageCount] = useState(0);
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [importResultLoading, setImportResultLoading] = useState(true);
   const [sortConfig, setSortConfig] = useState<{
     key: keyof ImportResultListRow;
     direction: 'asc' | 'desc';
   } | null>(null);
-  const [isInitialized, setIsInitialized] = useState(false);
-  const [importResultLoading, setImportResultLoading] = useState(true);
+  const [apiError, setApiError] = useState<Error | null>(null);
+  if (apiError) throw apiError;
+
   const pageSize = 10;
   const router = useRouter();
   const searchParamsQuery = useSearchParams();
-  const [apiError, setApiError] = useState<Error | null>(null);
-  if (apiError) throw apiError;
+
   const pagePath = '/importResult'
   // URLパラメータをコンポーネント状態に同期する
   useEffect(() => {
@@ -91,13 +93,12 @@ export function ImportResultListContainer() {
         clientLogger.info('インポート結果一覧画面', 'データ取得成功', {
           page,
           count: importResultData.data?.length,
+          data: importResultData.data,
         });
       } catch (err) {
         if (!ignore) setMenuItems([]);
         const errorMessage = err instanceof Error ? err.message : String(err);
-        clientLogger.error('インポート結果一覧画面', 'データ取得失敗',
-          page,
-          { error: errorMessage });
+        clientLogger.error('インポート結果一覧画面', 'データ取得失敗', { error: errorMessage });
         setApiError(err instanceof Error ? err : new Error(String(err)));
       } finally {
         setImportResultLoading(false);
@@ -127,6 +128,7 @@ export function ImportResultListContainer() {
   ];
 
   const toImportInfoPage = (id: string) => {
+    clientLogger.info('インポート結果一覧画面', '確認ボタン押下', { importId: id });
     router.push(`/importResult/importInfo/${id}`);
   };
 

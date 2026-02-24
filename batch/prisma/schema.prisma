@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "../generated/prisma"
 }
 
 datasource db {
@@ -34,7 +35,7 @@ model mt_users {
   email        String         @unique @db.VarChar(255)
   name         String         @db.VarChar(255)
   user_role    Int            @default(2)
-  department   String
+  department   String         
   company      String         @db.VarChar(255)
   password     String         @db.VarChar(255)
   created_at   DateTime       @default(now()) @db.Timestamp(6)
@@ -46,14 +47,15 @@ model mt_users {
   @@index([user_role], map: "idx_users_role")
 }
 
+
 model tt_import_results {
   id                      Int                       @id @default(autoincrement())
-  file_name               String?
+  file_name               String?                   
   import_status           Int?                      @default(1)
   executor_name           String?                   @db.VarChar(255)
   import_type             Int?
   count                   Int?                      @default(0)
-  message                 String?
+  message                 String?                                      
   created_at              DateTime                  @default(now()) @db.Timestamp(6)
   updated_at              DateTime                  @default(now()) @updatedAt @db.Timestamp(6)
   is_deleted              Boolean                   @default(false)
@@ -98,49 +100,36 @@ model tt_test_cases {
 }
 
 model tt_test_contents {
-  test_group_id    Int
-  tid              String          @db.VarChar(255)
-  test_no          Int
-  variation        String?
-  procedure        String?
-  condition        String?
-  expect           String?
-  test_data        String?
-  check_point      String?
-  executor_id      Int?
-  test_result      Int?
-  ng_level         Int?
-  ng_reason        String?
-  ng_detail        String?
-  judgment         String?
-  memo             String?
-  created_at       DateTime        @default(now()) @db.Timestamp(6)
-  updated_at       DateTime        @default(now()) @updatedAt @db.Timestamp(6)
-  is_deleted       Boolean         @default(false)
-  tt_test_cases    tt_test_cases   @relation(fields: [test_group_id, tid], references: [test_group_id, tid], onDelete: Cascade, onUpdate: NoAction)
+  test_group_id           Int
+  tid                     String                    @db.VarChar(255)
+  test_case_no            Int
+  test_case               String?
+  expected_value          String?
+  is_target               Boolean                   @default(true)
+  created_at              DateTime                  @default(now()) @db.Timestamp(6)
+  updated_at              DateTime                  @default(now()) @updatedAt @db.Timestamp(6)
+  is_deleted              Boolean                   @default(false)
+  tt_test_cases           tt_test_cases             @relation(fields: [test_group_id, tid], references: [test_group_id, tid], onDelete: Cascade, onUpdate: NoAction)
+  tt_test_results         tt_test_results?
+  tt_test_results_history tt_test_results_history[]
 
-  @@id([test_group_id, tid, test_no])
-  @@index([test_group_id, tid], map: "idx_test_contents_case")
+  @@id([test_group_id, tid, test_case_no])
+  @@index([is_target], map: "idx_test_contents_target")
 }
 
-model tt_test_groups {
-  id                 Int                  @id @default(autoincrement())
-  oem                String               @db.VarChar(255)
-  model              String               @db.VarChar(255)
-  event              String               @db.VarChar(255)
-  variation          String               @db.VarChar(255)
-  destination        String               @db.VarChar(255)
-  specs              String               @db.VarChar(255)
-  test_startdate     DateTime             @db.Date
-  test_enddate       DateTime             @db.Date
-  ng_plan_count      Int
-  created_at         DateTime             @default(now()) @db.Timestamp(6)
-  updated_at         DateTime             @default(now()) @updatedAt @db.Timestamp(6)
-  is_deleted         Boolean              @default(false)
-  tt_test_cases      tt_test_cases[]
-  tt_test_group_tags tt_test_group_tags[]
+model tt_test_evidences {
+  test_group_id           Int
+  tid                     String                  @db.VarChar(255)
+  test_case_no            Int
+  history_count           Int
+  evidence_no             Int
+  evidence_name           String?
+  evidence_path           String?
+  created_at              DateTime                @default(now()) @db.Timestamp(6)
+  updated_at              DateTime                @default(now()) @updatedAt @db.Timestamp(6)
+  is_deleted              Boolean                 @default(false)
 
-  @@index([oem, model], map: "idx_test_groups_oem_model")
+  @@id([test_group_id, tid, test_case_no, history_count, evidence_no], map: "tt_test_evidences_pkey")
 }
 
 model tt_test_group_tags {
@@ -148,11 +137,76 @@ model tt_test_group_tags {
   tag_id         Int
   test_role      Int
   mt_tags        mt_tags        @relation(fields: [tag_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  created_at              DateTime                @default(now()) @db.Timestamp(6)
+  updated_at              DateTime                @default(now()) @updatedAt @db.Timestamp(6)
+  is_deleted              Boolean                 @default(false)
   tt_test_groups tt_test_groups @relation(fields: [test_group_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
-  created_at     DateTime       @default(now()) @db.Timestamp(6)
-  updated_at     DateTime       @default(now()) @updatedAt @db.Timestamp(6)
-  is_deleted     Boolean        @default(false)
 
-  @@id([test_group_id, tag_id])
+  @@id([test_group_id, tag_id, test_role])
   @@index([test_group_id], map: "idx_test_group_tags_group")
+  @@index([tag_id], map: "idx_test_group_tags_tag")
+}
+
+model tt_test_groups {
+  id                 Int                  @id @default(autoincrement())
+  oem                String?              @db.VarChar(255)
+  model              String?              @db.VarChar(255)
+  event              String?              @db.VarChar(255)
+  variation          String?              @db.VarChar(255)
+  destination        String?              @db.VarChar(255)
+  specs              String?
+  test_startdate     DateTime?            @db.Date
+  test_enddate       DateTime?            @db.Date
+  ng_plan_count      Int?                 @default(0)
+  created_by         Int?
+  updated_by         Int?
+  created_at         DateTime             @default(now()) @db.Timestamp(6)
+  updated_at         DateTime             @default(now()) @updatedAt @db.Timestamp(6)
+  is_deleted         Boolean              @default(false)
+  tt_test_cases      tt_test_cases[]
+  tt_test_group_tags tt_test_group_tags[]
+
+  @@index([created_by], map: "idx_test_groups_created_by")
+}
+
+model tt_test_results {
+  test_group_id      Int
+  tid                String           @db.VarChar(255)
+  test_case_no       Int
+  result             String?
+  judgment           String?          @db.VarChar(16)
+  software_version   String?          @db.VarChar(255)
+  hardware_version   String?          @db.VarChar(255)
+  comparator_version String?          @db.VarChar(255)
+  execution_date     DateTime?        @db.Date
+  executor           String?          @db.VarChar(255)
+  note               String?
+  created_at         DateTime         @default(now()) @db.Timestamp(6)
+  updated_at         DateTime         @default(now()) @updatedAt @db.Timestamp(6)
+  is_deleted         Boolean          @default(false)
+  tt_test_contents   tt_test_contents @relation(fields: [test_group_id, tid, test_case_no], references: [test_group_id, tid, test_case_no], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([test_group_id, tid, test_case_no])
+  @@index([judgment], map: "idx_test_results_judgment")
+}
+
+model tt_test_results_history {
+  test_group_id      Int
+  tid                String              @db.VarChar(255)
+  test_case_no       Int
+  history_count      Int
+  result             String?
+  judgment           String?             @db.VarChar(16)
+  software_version   String?             @db.VarChar(255)
+  hardware_version   String?             @db.VarChar(255)
+  comparator_version String?             @db.VarChar(255)
+  execution_date     DateTime?           @db.Date
+  executor           String?             @db.VarChar(255)
+  note               String?
+  created_at         DateTime            @default(now()) @db.Timestamp(6)
+  updated_at         DateTime            @default(now()) @updatedAt @db.Timestamp(6)
+  is_deleted         Boolean             @default(false)
+  tt_test_contents   tt_test_contents    @relation(fields: [test_group_id, tid, test_case_no], references: [test_group_id, tid, test_case_no], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([test_group_id, tid, test_case_no, history_count])
 }

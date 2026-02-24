@@ -1,11 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, canViewTestGroup } from '@/app/lib/auth';
+import { canViewTestGroup, requireAuth } from '@/app/lib/auth';
 import { prisma } from '@/app/lib/prisma';
-import { QueryTimer, logAPIEndpoint, logDatabaseQuery } from '@/utils/database-logger';
-import { STATUS_CODES } from '@/constants/statusCodes';
 import { ERROR_MESSAGES } from '@/constants/errorMessages';
-import { handleError } from '@/utils/errorHandler';
+import { STATUS_CODES } from '@/constants/statusCodes';
 import { Prisma } from '@/generated/prisma/client';
+import { QueryTimer, logAPIEndpoint, logDatabaseQuery } from '@/utils/database-logger';
+import { handleError } from '@/utils/errorHandler';
+import { NextRequest, NextResponse } from 'next/server';
 
 // 予測曲線の計算用パラメータ
 const LAMBDA_BASE = 0.35;      // 曲線の傾き係数
@@ -208,9 +208,8 @@ export async function GET(
   } catch (error) {
     const isUnauthorized = error instanceof Error && error.message === 'Unauthorized';
     statusCode = isUnauthorized ? STATUS_CODES.UNAUTHORIZED : STATUS_CODES.INTERNAL_SERVER_ERROR;
-    const errorMessage = isUnauthorized ? ERROR_MESSAGES.UNAUTHORIZED : ERROR_MESSAGES.GET_FALED;
     return handleError(
-      new Error(errorMessage),
+      error as Error,
       statusCode,
       apiTimer,
       'GET',
