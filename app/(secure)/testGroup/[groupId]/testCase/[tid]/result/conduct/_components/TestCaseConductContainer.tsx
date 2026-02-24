@@ -661,7 +661,7 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
                     data={initialTestCaseData}
                     setData={setInitialTestCaseData}
                     userName={user.name || ''}
-                    executorsList={[{ id: user.id, name: user.name }]}
+                    executorsList={executorsList}
                     executorsPerRow={executorsPerRow}
                   />}
                 {Object.entries(pastTestCaseData).length > 0 &&
