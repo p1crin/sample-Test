@@ -82,6 +82,7 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
   const [executorsList, setExecutorsList] = useState<Array<{ id: number; name: string; }>>([]);
+  const [executorsPerRow, setExecutorsPerRow] = useState<Record<string, Array<{ id: number; name: string }>>>({});
 
   // 登録成功フラグ（タブクローズ時のクリーンアップ用）
   const isRegistrationSuccessful = useRef(false);
@@ -228,23 +229,28 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
         setButtonDisabled(allHistoryCountsZero);
         setInitialTestCaseData(initialDataWithHistoryCount);
 
-        // 実行者リストに結果の実行者を含める
-        const resultExecutors = Object.values(resultsData).flatMap(result =>
-          result.allHistory.map(histItem => ({
-            id: histItem.executor_id ?? -Date.now() - Math.floor(Math.random() * 1000), // 負の値で一時IDを生成
-            name: histItem.executor ?? ''
-          }))
-        ).filter((executor, index, self) =>
-          executor.id && self.findIndex(e => e.id === executor.id) === index
-        ).map(executor => ({
-          id: typeof executor.id === 'number' ? executor.id : -Date.now() - Math.floor(Math.random() * 1000),
-          name: typeof executor.name === 'string' ? executor.name : ''
-        }));
-        // 重複を削除
-        const uniqueExecutorsList = resultExecutors.filter((executor, index, self) =>
-          index === self.findIndex((e) => e.name === executor.name)
-        ).filter((e) => e.name !== '');
-        setExecutorsList(prev => [...prev, ...uniqueExecutorsList]);
+        // 行（test_case_no）×履歴回数（historyCount）ごとに過去の実施者を抽出する
+        const perRowExecutors: Record<string, Array<{ id: number; name: string }>> = {};
+        Object.entries(resultsData).forEach(([testCaseNoStr, result]) => {
+          const testCaseNo = Number(testCaseNoStr);
+          result.allHistory.forEach(histItem => {
+            const executorName = (histItem.executor ?? '') as string;
+            if (!executorName) return;
+            const key = `${testCaseNo}_${histItem.history_count}`;
+            const executor: { id: number; name: string } = {
+              id: (histItem.executor_id ?? -Date.now() - Math.floor(Math.random() * 1000)) as number,
+              name: executorName,
+            };
+            if (!perRowExecutors[key]) {
+              perRowExecutors[key] = [];
+            }
+            // 名前で重複排除
+            if (!perRowExecutors[key].some(e => e.name === executor.name)) {
+              perRowExecutors[key].push(executor);
+            }
+          });
+        });
+        setExecutorsPerRow(perRowExecutors);
 
         clientLogger.info('テストケース結果確認画面', 'テスト結果取得成功', { tid, count: Object.keys(resultsData).length });
       } catch (err) {
@@ -646,6 +652,7 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
                     setData={setInitialTestCaseData}
                     userName={user.name || ''}
                     executorsList={[{ id: user.id, name: user.name }]}
+                    executorsPerRow={executorsPerRow}
                   />}
                 {Object.entries(pastTestCaseData).length > 0 &&
                   (() => {
@@ -685,7 +692,8 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
                                     return newState;
                                   })}
                                   userName={user?.name || ''}
-                                  executorsList={executorsList} />
+                                  executorsList={executorsList}
+                                  executorsPerRow={executorsPerRow} />
                               </div>
                             )}
                           </div>
