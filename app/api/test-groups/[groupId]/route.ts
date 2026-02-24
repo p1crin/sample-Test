@@ -5,10 +5,10 @@ import { STATUS_CODES } from '@/constants/statusCodes';
 import { logAPIEndpoint, logDatabaseQuery, QueryTimer } from '@/utils/database-logger';
 import { handleError } from '@/utils/errorHandler';
 import serverLogger from '@/utils/server-logger';
-import { existsSync } from 'fs';
-import { mkdir, rm } from 'fs/promises';
+import { rm } from 'fs/promises';
 import { NextRequest, NextResponse } from 'next/server';
 import { join } from 'path';
+import { copyStorageFile, deleteFile, getStorageType } from '@/app/lib/storage';
 
 interface RouteParams {
   params: Promise<{ groupId: string }>;
@@ -636,8 +636,8 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       }
     }
 
-    // Prisma トランザクション内でテストグループを作成
-    const testGroupCopy = await prisma.$transaction(async (tx) => {
+    // Prisma トランザクション内でDBレコードのみ作成（ファイルコピーはトランザクション外で実施）
+    const { newTestGroup, fileCopyTasks } = await prisma.$transaction(async (tx) => {
       // テストグループを新規作成
       const insertTimer = new QueryTimer();
       const newTestGroup = await tx.tt_test_groups.create({
@@ -750,7 +750,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         });
       }
 
-      // 複製したテストグループに紐づくテストケースのファイル情報をコピー
+      // 複製したテストグループに紐づくテストケースのファイル情報をコピー（DBレコードのみ）
       const testCasesfilesCopy = await tx.tt_test_case_files.findMany({
         where: {
           test_group_id: testGroupId,
@@ -758,19 +758,23 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         }
       });
 
+      // ファイルコピー情報を収集（トランザクション外で実行するため）
+      const fileCopyTasks: { sourcePath: string; destDirectory: string; fileName: string }[] = [];
+      const isS3 = getStorageType() === 'S3';
+
       for (const file of testCasesfilesCopy) {
-        // ファイル保存処理
-        const uploadDir = join(process.cwd(), 'public', 'uploads', 'test-cases', String(newTestGroup.id), file.tid);
-
-        // ディレクトリが存在しない場合は作成
-        if (!existsSync(uploadDir)) {
-          await mkdir(uploadDir, { recursive: true });
-        }
-
-        // ファイル名生成
+        // ファイル名を取得
         const filePath = file.file_path;
         const splitPath = filePath?.split('/');
-        const newFilePath = splitPath?.pop();
+        const fileName = splitPath?.pop() || '';
+
+        // コピー先パスを生成（環境に応じてパス形式を変更）
+        const destDirectory = `test-cases/${newTestGroup.id}/${file.tid}`;
+        const dbFilePath = isS3
+          ? `${destDirectory}/${fileName}`
+          : `/uploads/${destDirectory}/${fileName}`;
+
+        fileCopyTasks.push({ sourcePath: filePath, destDirectory, fileName });
 
         // コピー元のcreated_at, updated_atの除去
         const { created_at, updated_at, ...filteredFile } = file;
@@ -779,7 +783,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
           data: {
             ...filteredFile,
             test_group_id: newTestGroup.id,
-            file_path: `/uploads/test-cases/${newTestGroup.id}/${file.tid}/${newFilePath}`
+            file_path: dbFilePath
           }
         });
       }
@@ -804,82 +808,56 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         });
       }
 
-      // 複製したテストグループに紐づくテスト結果をコピー
-      const testResultsCopy = await tx.tt_test_results.findMany({
-        where: {
-          test_group_id: testGroupId,
-          is_deleted: false
-        }
-      });
-
-      for (const result of testResultsCopy) {
-        // コピー元のcreated_at, updated_atの除去
-        const { created_at, updated_at, ...filteredResult } = result;
-
-        await tx.tt_test_results.create({
-          data: {
-            ...filteredResult,
-            test_group_id: newTestGroup.id,
-          }
-        });
-      }
-
-      // 複製したテストグループに紐づくテスト結果履歴をコピー
-      const testResultsHistoryCopy = await tx.tt_test_results_history.findMany({
-        where: {
-          test_group_id: testGroupId,
-          is_deleted: false
-        }
-      });
-
-      for (const resultHistory of testResultsHistoryCopy) {
-        // コピー元のcreated_at, updated_atの除去
-        const { created_at, updated_at, ...filteredResultHistory } = resultHistory;
-
-        await tx.tt_test_results_history.create({
-          data: {
-            ...filteredResultHistory,
-            test_group_id: newTestGroup.id,
-          }
-        });
-      }
-
-      // 複製したテストグループに紐づくテストエビデンスをコピー
-      const testEvidencesCopy = await tx.tt_test_evidences.findMany({
-        where: {
-          test_group_id: testGroupId,
-          is_deleted: false
-        }
-      });
-
-      for (const evidences of testEvidencesCopy) {
-        // ファイル保存処理
-        const uploadDir = join(process.cwd(), 'public', 'evidences', String(newTestGroup.id), evidences.tid);
-
-        // ディレクトリが存在しない場合は作成
-        if (!existsSync(uploadDir)) {
-          await mkdir(uploadDir, { recursive: true });
-        }
-
-        // パス名生成
-        const evidencesPath = evidences.evidence_path;
-        const splitPath = evidencesPath?.split('/');
-        const newEvidencesPath = splitPath?.pop();
-
-        // コピー元のcreated_at, updated_atの除去
-        const { created_at, updated_at, ...filteredEvidences } = evidences;
-
-        await tx.tt_test_evidences.create({
-          data: {
-            ...filteredEvidences,
-            test_group_id: newTestGroup.id,
-            evidence_path: `/evidences/${newTestGroup.id}/${evidences.tid}/${newEvidencesPath}`
-          }
-        });
-      }
-
-      return newTestGroup;
+      return { newTestGroup, fileCopyTasks };
     });
+
+    // トランザクション外でファイルコピーを実行
+    const copiedFiles: string[] = [];
+    try {
+      for (const task of fileCopyTasks) {
+        const copiedPath = await copyStorageFile(task.sourcePath, task.destDirectory, task.fileName);
+        copiedFiles.push(copiedPath);
+      }
+    } catch (fileCopyError) {
+      // ファイルコピー失敗時: コピー済みファイルをクリーンアップ
+      serverLogger.error('テストグループ複製', 'ファイルコピー失敗。ロールバックを実行します。', { error: fileCopyError });
+
+      for (const copiedPath of copiedFiles) {
+        try {
+          await deleteFile(copiedPath);
+        } catch (cleanupError) {
+          serverLogger.error('テストグループ複製', 'コピー済みファイルのクリーンアップ失敗', { error: cleanupError, path: copiedPath });
+        }
+      }
+
+      // 作成済みDBレコードを削除（ロールバック）
+      try {
+        await prisma.$transaction(async (tx) => {
+          await tx.tt_test_contents.deleteMany({
+            where: { test_group_id: newTestGroup.id }
+          });
+          await tx.tt_test_case_files.deleteMany({
+            where: { test_group_id: newTestGroup.id }
+          });
+          await tx.tt_test_cases.deleteMany({
+            where: { test_group_id: newTestGroup.id }
+          });
+          await tx.tt_test_group_tags.deleteMany({
+            where: { test_group_id: newTestGroup.id }
+          });
+          await tx.tt_test_groups.delete({
+            where: { id: newTestGroup.id }
+          });
+        });
+      } catch (rollbackError) {
+        serverLogger.error('テストグループ複製', 'DBロールバック失敗', { error: rollbackError });
+      }
+
+      return NextResponse.json(
+        { success: false, error: 'テストグループの複製中にファイルコピーに失敗しました。処理を取り消しました。' },
+        { status: STATUS_CODES.INTERNAL_SERVER_ERROR }
+      );
+    }
 
     logAPIEndpoint({
       method: 'POST',
@@ -891,7 +869,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
     });
 
     return NextResponse.json(
-      { success: true, data: testGroupCopy },
+      { success: true, data: newTestGroup },
       { status: STATUS_CODES.CREATED }
     );
   } catch (error) {
