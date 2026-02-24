@@ -327,7 +327,7 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
 
     const deletePromises: Promise<void>[] = [];
 
-    const deleteEvidence = (testCaseNo: number, historyCount: number, fileNo: number): Promise<void> => {
+    const deleteEvidence = (testCaseNo: number, fileNo: number): Promise<void> => {
       return fetch('/api/files/evidences', {
         method: 'DELETE',
         headers: {
@@ -337,12 +337,11 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
           testGroupId: groupId,
           tid: tid,
           testCaseNo: testCaseNo,
-          historyCount: historyCount,
           fileNo: fileNo,
         }),
         keepalive: useKeepalive,
       }).then(() => {
-        clientLogger.info('テスト結果登録画面', 'エビデンス削除成功', { testCaseNo, historyCount, fileNo });
+        clientLogger.info('テスト結果登録画面', 'エビデンス削除成功', { testCaseNo, fileNo });
       }).catch((err) => {
         if (!useKeepalive) {
           clientLogger.error('テスト結果登録画面', 'エビデンス削除失敗', { error: err });
@@ -366,11 +365,10 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
         if (file.fileNo !== undefined && !initialIds.has(file.fileNo)) {
           clientLogger.info('テスト結果登録画面', '削除対象エビデンス検出', {
             testCaseNo: item.test_case_no,
-            historyCount: item.historyCount ?? 0,
             fileNo: file.fileNo,
             fileName: file.name,
           });
-          deletePromises.push(deleteEvidence(item.test_case_no, item.historyCount ?? 0, file.fileNo));
+          deletePromises.push(deleteEvidence(item.test_case_no, file.fileNo));
         }
       });
     });
@@ -383,7 +381,7 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
 
         item.evidence?.forEach((file) => {
           if (file.fileNo !== undefined && !initialIds.has(file.fileNo)) {
-            deletePromises.push(deleteEvidence(item.test_case_no, historyIndex + 1, file.fileNo));
+            deletePromises.push(deleteEvidence(item.test_case_no, file.fileNo));
           }
         });
       });
@@ -447,7 +445,6 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
       const deletedEvidences: Array<{
         file: FileInfo;
         testCaseNo: number;
-        historyCount: number;
       }> = [];
 
       // 新規入力データから削除予定のエビデンスを収集
@@ -458,7 +455,6 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
               deletedEvidences.push({
                 file,
                 testCaseNo: item.test_case_no,
-                historyCount: item.historyCount ?? 0,
               });
             });
           }
@@ -466,14 +462,13 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
       }
 
       // 履歴データから削除予定のエビデンスを収集
-      pastTestCaseData.forEach((historyData, historyIndex) => {
+      pastTestCaseData.forEach((historyData) => {
         historyData.forEach(item => {
           if (item.deletedEvidences && item.deletedEvidences.length > 0) {
             item.deletedEvidences.forEach(file => {
               deletedEvidences.push({
                 file,
                 testCaseNo: item.test_case_no,
-                historyCount: historyIndex + 1,
               });
             });
           }
@@ -484,25 +479,22 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
       if (deletedEvidences.length > 0) {
         clientLogger.info('テスト結果登録画面', 'エビデンス削除開始', { count: deletedEvidences.length });
 
-        for (const { file, testCaseNo, historyCount } of deletedEvidences) {
+        for (const { file, testCaseNo } of deletedEvidences) {
           try {
             await apiDelete('/api/files/evidences', {
               testGroupId: groupId,
               tid: tid,
               testCaseNo: testCaseNo,
-              historyCount: historyCount,
               fileNo: file.fileNo,
             });
             clientLogger.info('テスト結果登録画面', 'エビデンス削除成功', {
               testCaseNo,
-              historyCount,
               fileNo: file.fileNo,
             });
           } catch (deleteError) {
             clientLogger.error('テスト結果登録画面', 'エビデンス削除失敗', {
               error: deleteError,
               testCaseNo,
-              historyCount,
               fileNo: file.fileNo,
             });
             // エビデンス削除失敗は警告のみで続行

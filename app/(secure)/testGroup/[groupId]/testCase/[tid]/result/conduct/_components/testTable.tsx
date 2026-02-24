@@ -97,7 +97,6 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
   const uploadEvidenceFile = useCallback(async (file: FileInfo, rowIndex: number): Promise<FileInfo> => {
     try {
       const row = data[rowIndex];
-      const historyCount = row.historyCount ?? 0;
 
       const formData = new FormData();
 
@@ -122,7 +121,6 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
       formData.append('testGroupId', String(groupId));
       formData.append('tid', tid);
       formData.append('testCaseNo', String(row.test_case_no));
-      formData.append('historyCount', String(historyCount));
 
       // FormDataの場合はfetchを直接使用（Content-Typeは自動設定される）
       const fetchResponse = await fetch('/api/files/evidences', {
@@ -147,9 +145,11 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
         });
 
         // アップロード成功時、pathとfileNoを含むFileInfoを返す
+        // evidenceUrl: S3の場合は署名付きURL、ローカルの場合はパス（サムネイル表示用）
+        // evidencePath: S3キーまたはローカルパス（DB保存・削除用）
         return {
           ...file,
-          path: response.data.evidencePath,
+          path: response.data.evidenceUrl || response.data.evidencePath,
           fileNo: response.data.fileNo,
         };
       } else {

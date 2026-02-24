@@ -206,6 +206,7 @@ export async function GET(
         test_group_id: groupId,
         tid: tid,
         is_deleted: false,
+        history_count: { not: null },
       },
       orderBy: [
         { test_case_no: 'asc' },
@@ -597,6 +598,20 @@ export async function POST(
               execution_date: executionDate,
               executor: result.executor || null,
               note: result.note || null,
+            },
+          });
+
+          // 今回アップロードされたエビデンス（history_count = null）に履歴番号を紐づける
+          await tx.tt_test_evidences.updateMany({
+            where: {
+              test_group_id: groupId,
+              tid: tid,
+              test_case_no: testCaseNo,
+              history_count: null,
+              is_deleted: false,
+            },
+            data: {
+              history_count: newHistoryCount,
             },
           });
         }
