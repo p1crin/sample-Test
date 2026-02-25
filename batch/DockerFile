@@ -26,14 +26,17 @@ WORKDIR /app
 # Stage 1 から依存関係をコピー
 COPY --from=deps /app/node_modules ./node_modules
 
-# アプリケーションコードと設定ファイルを全てコピー
-COPY . .
+# PrismaスキーマのみをコピーしてDockerレイヤーキャッシュを最大活用
+# → アプリコードのみ変更時に prisma generate がキャッシュヒットする
+COPY prisma ./prisma
 
-# Prisma Client を生成
+# Prisma Client を生成（スキーマが変わらない限りキャッシュが有効）
 RUN npx prisma generate
 
-# Prisma schemaをコピー（ローカルのschema.prismaを使用）
-COPY prisma ./prisma
+# アプリケーションコードをコピー（コード変更時も上記レイヤーはキャッシュ済み）
+COPY . .
+
+# 生成されたPrisma ClientをsrcディレクトリへMOVE
 RUN rm -rf src/generated && mv generated src/
 
 # package.jsonの "build" スクリプトを実行 (TypeScript -> JavaScript)

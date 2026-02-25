@@ -1,28 +1,27 @@
 # Dependencies
 node_modules
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
 
-# Testing
-.vitest
-coverage
-*.log
-
-# Next.js
+# Build outputs
 .next/
 out/
 build
 dist
+
+# Testing
+.vitest
+coverage
+__snapshots__
 
 # Production
 .vercel
 
 # Misc
 .DS_Store
+Thumbs.db
 *.pem
 
-# Debug
+# Logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -30,6 +29,7 @@ yarn-error.log*
 # Local env files
 .env
 .env*.local
+.env.example
 .env.development
 .env.test
 .env.production
@@ -37,6 +37,7 @@ yarn-error.log*
 # Git
 .git
 .gitignore
+.gitattributes
 
 # IDE
 .vscode
@@ -47,10 +48,12 @@ yarn-error.log*
 
 # Documentation
 README.md
+CHANGELOG.md
 docs/
 
 # Tests
 tests/
+__tests__/
 *.test.ts
 *.test.tsx
 *.spec.ts
@@ -64,3 +67,6 @@ tests/
 Dockerfile
 .dockerignore
 docker-compose*.yml
+
+# Batch service (not needed for main app build)
+batch/
