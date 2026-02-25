@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { s3Key, testGroupId } = body;
+    const { s3Key, testGroupId, fileName } = body;
 
     // バリデーション
     if (!s3Key || typeof s3Key !== 'string') {
@@ -102,6 +102,10 @@ export async function POST(req: NextRequest) {
           {
             name: 'EXECUTOR_NAME',
             value: user.name,
+          },
+          {
+            name: 'FILE_NAME',
+            value: (fileName && typeof fileName === 'string') ? fileName : s3Key,
           },
           {
             name: 'AWS_REGION',

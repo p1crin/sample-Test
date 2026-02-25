@@ -69,6 +69,7 @@ export function TestImportExecuteContainer({ groupId }: { groupId: string }) {
       const result = await apiPost<any>('/api/batch/test-import', {
         s3Key: key,
         testGroupId: groupId,
+        fileName: files[0].name,
       });
       if (result.success) {
         router.push('/importResult');
