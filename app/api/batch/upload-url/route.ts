@@ -53,10 +53,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // CSVファイルかチェック
-    if (!fileName.toLowerCase().endsWith('.csv')) {
+    // ファイル種別チェック（userインポート: CSV、testインポート: ZIP）
+    if (importType === 'user' && !fileName.toLowerCase().endsWith('.csv')) {
       return handleError(
-        new Error('CSVファイルのみアップロード可能です'),
+        new Error('ユーザインポートにはCSVファイルのみアップロード可能です'),
+        STATUS_CODES.BAD_REQUEST,
+        apiTimer,
+        'POST',
+        '/api/batch/upload-url'
+      );
+    }
+    if (importType === 'test' && !fileName.toLowerCase().endsWith('.zip')) {
+      return handleError(
+        new Error('テストインポートにはZIPファイルのみアップロード可能です'),
         STATUS_CODES.BAD_REQUEST,
         apiTimer,
         'POST',
@@ -80,11 +89,13 @@ export async function POST(req: NextRequest) {
     const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
     const key = `${importType}-import/${timestamp}_${sanitizedFileName}`;
 
+    const contentType = importType === 'test' ? 'application/zip' : 'text/csv';
+
     // プリサインドURLを生成（15分間有効）
     const command = new PutObjectCommand({
       Bucket: bucket,
       Key: key,
-      ContentType: 'text/csv',
+      ContentType: contentType,
     });
 
     const uploadUrl = await getSignedUrl(s3Client, command, {
