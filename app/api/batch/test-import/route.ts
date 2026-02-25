@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
     const jobDefinition = process.env.AWS_BATCH_JOB_DEFINITION;
     const jobQueue = process.env.AWS_BATCH_JOB_QUEUE;
     const inputBucket = process.env.INPUT_S3_BUCKET;
-    const outputBucket = process.env.INPUT_S3_BUCKET;
+    const outputBucket = process.env.OUTPUT_S3_BUCKET;
     const databaseUrl = process.env.DATABASE_URL;
 
     if (!jobDefinition || !jobQueue || !inputBucket || !outputBucket || !databaseUrl) {

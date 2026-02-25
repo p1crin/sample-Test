@@ -31,9 +31,43 @@ export function TestImportExecuteContainer({ groupId }: { groupId: string }) {
     setIsLoading(true);
     try {
       clientLogger.info('テストインポート実施画面', 'インポート処理開始');
+
+      // Step1: プリサインドURLを取得
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const uploadUrlResult = await apiPost<any>('/api/batch/upload-url', {
+        fileName: files[0].name,
+        importType: 'test',
+      });
+      if (!uploadUrlResult.success) {
+        setModalMessage('アップロードURLの取得に失敗しました');
+        setIsModalOpen(true);
+        return;
+      }
+      const { uploadUrl, key } = uploadUrlResult.data;
+
+      // Step2: S3にファイルをアップロード
+      const file = files[0];
+      const byteCharacters = atob(file.base64!);
+      const byteNumbers = new Uint8Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const blob = new Blob([byteNumbers], { type: 'application/zip' });
+      const s3UploadResponse = await fetch(uploadUrl, {
+        method: 'PUT',
+        body: blob,
+        headers: { 'Content-Type': 'application/zip' },
+      });
+      if (!s3UploadResponse.ok) {
+        setModalMessage('ファイルのアップロードに失敗しました');
+        setIsModalOpen(true);
+        return;
+      }
+
+      // Step3: バッチジョブを起動
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await apiPost<any>('/api/batch/test-import', {
-        s3Key: `test-import/${files[0].name}`,
+        s3Key: key,
         testGroupId: groupId,
       });
       if (result.success) {
