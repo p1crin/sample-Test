@@ -56,7 +56,6 @@ export function UserImportExecuteContainer() {
       const s3UploadResponse = await fetch(uploadUrl, {
         method: 'PUT',
         body: blob,
-        headers: { 'Content-Type': 'text/csv' },
       });
       if (!s3UploadResponse.ok) {
         setModalMessage('ファイルのアップロードに失敗しました');
@@ -68,6 +67,7 @@ export function UserImportExecuteContainer() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await apiPost<any>('/api/batch/user-import', {
         s3Key: key,
+        fileName: files[0].name,
       });
       if (result.success) {
         router.push('/importResult');
