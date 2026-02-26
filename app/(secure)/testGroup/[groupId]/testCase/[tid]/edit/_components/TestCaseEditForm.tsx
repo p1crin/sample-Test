@@ -84,6 +84,10 @@ export function TestCaseEditForm({
   const [editModalMessage, setEditModalMessage] = useState('');
   const [isEditLoading, setIsEditLoading] = useState(false);
   const [isApiSuccess, setIsApiSuccess] = useState(false);
+  // S3アップロード失敗時のエラーメッセージ（nullの場合はエラーなし）
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  // S3アップロードエラーモーダルの表示状態
+  const [isUploadErrorModalOpen, setIsUploadErrorModalOpen] = useState(false);
 
   // 更新成功フラグ（ブラウザバック時の判定用）
   const isUpdateSuccessful = useRef(false);
@@ -275,16 +279,24 @@ export function TestCaseEditForm({
 
       if (response.ok) {
         const result = await response.json();
+        // アップロード成功: エラー状態をクリアしてサーバー返却値を設定
+        setUploadError(null);
+        setIsUploadErrorModalOpen(false);
         clientLogger.info('テストケース編集画面', 'ファイルアップロード成功', { fileNo: result.data.fileNo, path: result.data.filePath, fileType: result.data.fileType });
-        // アップロード成功後、サーバーから返されたfileId等を設定
         return {
           ...file,
+          base64: undefined,
           fileNo: result.data.fileNo,
           path: result.data.filePath,
           fileType: result.data.fileType,
         };
       } else {
-        clientLogger.error('テストケース編集画面', 'ファイルアップロード失敗');
+        // アップロード失敗: エラー状態を設定してスローし、ファイルリストへの追加を防ぐ
+        const errorMsg = `「${file.name}」のアップロードに失敗しました。再度アップロードするか、戻るボタンで中断してください。`;
+        clientLogger.error('テストケース編集画面', 'ファイルアップロード失敗', { fileName: file.name });
+        setUploadError(errorMsg);
+        setIsUploadErrorModalOpen(true);
+        throw new Error(errorMsg);
       }
     }
 
@@ -563,7 +575,8 @@ export function TestCaseEditForm({
         clientLogger.info('テストケース編集画面', '更新ボタン押下');
         handleEditer();
       },
-      disabled: isEditLoading,
+      // アップロードエラーがある場合は更新ボタンを無効化
+      disabled: isEditLoading || !!uploadError,
     },
     {
       label: '戻る',
@@ -636,6 +649,13 @@ export function TestCaseEditForm({
           <Button className="w-24" onClick={() => closeModal(isApiSuccess)}>
             閉じる
           </Button>
+        </div>
+      </Modal>
+      {/* S3アップロードエラーモーダル */}
+      <Modal open={isUploadErrorModalOpen} onClose={() => setIsUploadErrorModalOpen(false)}>
+        <p className="mb-8">{uploadError}</p>
+        <div className="flex justify-center">
+          <Button className="w-24" onClick={() => setIsUploadErrorModalOpen(false)}>閉じる</Button>
         </div>
       </Modal>
     </div>
