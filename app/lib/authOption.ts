@@ -1,4 +1,5 @@
 import { prisma } from '@/app/lib/prisma';
+import { TestRole } from '@/types';
 import { ERROR_MESSAGES } from '@/constants/errorMessages';
 import { compare } from 'bcryptjs';
 import { NextAuthOptions, User as NextAuthUser } from 'next-auth';
@@ -31,6 +32,16 @@ export const authOptions: NextAuthOptions = {
         if (!isPasswordValid) {
           throw new Error(ERROR_MESSAGES.INVALID_CREDENTIALS);
         }
+        const designerCount = await prisma.tt_test_group_tags.count({
+          where: {
+            test_role: TestRole.DESIGNER,
+            mt_tags: {
+              mt_user_tags: {
+                some: { user_id: user.id },
+              },
+            },
+          },
+        });
         return {
           id: user.id,
           email: user.email,
@@ -38,6 +49,7 @@ export const authOptions: NextAuthOptions = {
           user_role: user.user_role,
           department: user.department ?? undefined,
           company: user.company ?? undefined,
+          has_designer_tag: designerCount > 0,
         };
       },
     }),
@@ -60,15 +72,17 @@ export const authOptions: NextAuthOptions = {
         token.user_role = user.user_role;
         token.department = user.department;
         token.company = user.company;
+        token.has_designer_tag = user.has_designer_tag;
         return token;
       }
 
       // 既存セッションの更新時
       // DBから最新のユーザ情報を取得するロジックは素晴らしいので、そのまま維持
       try {
+        const userId = parseInt(token.sub!);
         const currentUser = await prisma.mt_users.findUnique({
           where: {
-            id: parseInt(token.sub!),
+            id: userId,
             is_deleted: false,
           },
           select: {
@@ -83,12 +97,24 @@ export const authOptions: NextAuthOptions = {
           // ユーザーが存在しない場合、空のオブジェクトを返してセッションを無効化
           return {};
         }
+        // テスト設計者ロールを持つタグの有無を確認
+        const designerCount = await prisma.tt_test_group_tags.count({
+          where: {
+            test_role: TestRole.DESIGNER,
+            mt_tags: {
+              mt_user_tags: {
+                some: { user_id: userId },
+              },
+            },
+          },
+        });
         // 最新のユーザー情報をトークンに反映
         token.user_role = currentUser.user_role;
         token.name = currentUser.name;
         token.email = currentUser.email;
         token.department = currentUser.department;
         token.company = currentUser.company;
+        token.has_designer_tag = designerCount > 0;
       } catch {
         // DBエラー時は何もしない（既存のトークンを返す）
       }
@@ -102,6 +128,7 @@ export const authOptions: NextAuthOptions = {
         session.user.user_role = token.user_role!;
         session.user.department = token.department;
         session.user.company = token.company;
+        session.user.has_designer_tag = token.has_designer_tag;
       }
       return session;
     },

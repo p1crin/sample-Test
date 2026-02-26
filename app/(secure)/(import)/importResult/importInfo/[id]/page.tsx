@@ -1,7 +1,8 @@
 import { Suspense } from "react";
 import { ImportInfoContainer } from "../_components/ImportInfoContainer";
-import { isAdmin, isTestManager } from "@/app/lib/auth";
+import { isAdmin, isTestDesignerUser, isTestManager } from "@/app/lib/auth";
 import { authOptions } from "@/app/lib/authOption";
+import { UserRole } from "@/types";
 import ForbiddenUI from "@/components/ui/forbiddenUI";
 import InternalServerErrorUI from "@/components/ui/internalServerErrorUI";
 import UnauthorizedUI from "@/components/ui/unauthorizedUI";
@@ -29,8 +30,13 @@ export default async function Page({ params }: Props) {
       return <UnauthorizedUI />;
     }
 
-    // ユーザロールがテストマネージャーまたは管理者のみが作成可能
-    isCanView = isAdmin(session.user) || isTestManager(session.user);
+    // 管理者またはテストマネージャーは閲覧可能
+    // 一般ユーザーはテスト設計者タグを持つ場合のみ閲覧可能
+    if (isAdmin(session.user) || isTestManager(session.user)) {
+      isCanView = true;
+    } else if (session.user.user_role === UserRole.GENERAL) {
+      isCanView = await isTestDesignerUser(session.user.id);
+    }
 
     if (!isCanView) {
       return <ForbiddenUI />;

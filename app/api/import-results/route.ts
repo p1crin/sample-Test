@@ -1,4 +1,4 @@
-import { isAdmin, isTestManager, requireAuth } from "@/app/lib/auth";
+import { isAdmin, isTestDesignerUser, isTestManager, requireAuth } from "@/app/lib/auth";
 import { prisma } from '@/app/lib/prisma';
 import { ERROR_MESSAGES } from "@/constants/errorMessages";
 import { STATUS_CODES } from "@/constants/statusCodes";
@@ -14,7 +14,12 @@ export async function GET(req: NextRequest) {
 
   try {
     // ユーザーが管理者またはテスト管理者かどうかを確認
-    if (!isAdmin(user) && !isTestManager(user)) {
+    // 一般ユーザーはテスト設計者タグを持つ場合のみ許可
+    const isDesigner = !isAdmin(user) && !isTestManager(user)
+      ? await isTestDesignerUser(user.id)
+      : false;
+
+    if (!isAdmin(user) && !isTestManager(user) && !isDesigner) {
       logAPIEndpoint({
         method: 'GET',
         endpoint: '/api/import-results',
@@ -40,8 +45,8 @@ export async function GET(req: NextRequest) {
     const whereConditions: Prisma.tt_import_resultsWhereInput = {
       is_deleted: false,
     };
-    // テスト管理者の場合はインポート種別を1(テストケース)に設定する。
-    if (isTestManager(user)) {
+    // テスト管理者またはテスト設計者の場合はインポート種別を1(テストケース)に設定する。
+    if (isTestManager(user) || isDesigner) {
       whereConditions.import_type = {
         equals: 1,
       };

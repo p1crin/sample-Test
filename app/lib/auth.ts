@@ -82,6 +82,23 @@ export function isTestManager(user: SessionUser): boolean {
   return user.user_role === UserRole.TEST_MANAGER;
 }
 
+// ユーザーがいずれかのテストグループでテスト設計者ロールを持っているかチェック
+export async function isTestDesignerUser(userId: number): Promise<boolean> {
+  const count = await prisma.tt_test_group_tags.count({
+    where: {
+      test_role: TestRole.DESIGNER,
+      mt_tags: {
+        mt_user_tags: {
+          some: {
+            user_id: userId,
+          },
+        },
+      },
+    },
+  });
+  return count > 0;
+}
+
 // 管理者ロールが必要
 export async function requireAdmin(req: NextRequest): Promise<SessionUser> {
   const user = await requireAuth(req);
