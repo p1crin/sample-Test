@@ -31,8 +31,10 @@ class ClientLogger {
     const env = process.env.NODE_ENV;
 
     // 開発環境ではコンソール出力、本番環境ではサーバー送信
-    this.isEnabled = env !== 'production';
-    this.shouldSendToServer = env === 'production';
+    // NEXT_PUBLIC_FORCE_LOG_SEND=true の場合は環境に関わらずサーバー送信を有効化（結合テスト向け）
+    const forceLogSend = process.env.NEXT_PUBLIC_FORCE_LOG_SEND === 'true';
+    this.isEnabled = env !== 'production' || forceLogSend;
+    this.shouldSendToServer = env === 'production' || forceLogSend;
     this.userId = undefined;
     
     // サーバー送信するログレベルの閾値（環境変数で設定可能）
