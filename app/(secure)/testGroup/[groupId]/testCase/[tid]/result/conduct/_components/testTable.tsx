@@ -34,6 +34,8 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
   const [isInitialRender, setIsInitialRender] = useState(true);
   const fileInputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const [fileUrls, setFileUrls] = useState<Record<string, string>>({});
+  // S3アップロードエラーモーダル用
+  const [uploadErrorMsg, setUploadErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (isInitialRender && data) {
@@ -185,9 +187,10 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
           fileType: file.type
         });
 
-        // アップロード成功時、pathとfileNoを含むFileInfoを返す
+        // アップロード成功時、pathとfileNoを含むFileInfoを返す（base64はクリア）
         return {
           ...file,
+          base64: undefined,
           path: response.data.evidencePath,
           fileNo: response.data.fileNo,
         };
@@ -223,7 +226,9 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
           processedFiles.push(uploadedFile);
         }
       } catch (err) {
-        clientLogger.error('TestTable', 'ペーストしたファイルのアップロードに失敗しました', { error: err instanceof Error ? err.message : String(err) });
+        const msg = err instanceof Error ? err.message : 'エビデンスのアップロードに失敗しました。再度アップロードしてください。';
+        clientLogger.error('TestTable', 'ペーストしたファイルのアップロードに失敗しました', { error: msg });
+        setUploadErrorMsg(msg);
         return;
       } finally {
         updateRowData(rowIndex, 'uploading', false);
@@ -257,7 +262,9 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
           processedFiles.push(uploadedFile);
         }
       } catch (err) {
-        clientLogger.error('TestTable', '選択したファイルのアップロードに失敗しました', { error: err instanceof Error ? err.message : String(err) });
+        const msg = err instanceof Error ? err.message : 'エビデンスのアップロードに失敗しました。再度アップロードしてください。';
+        clientLogger.error('TestTable', '選択したファイルのアップロードに失敗しました', { error: msg });
+        setUploadErrorMsg(msg);
         return;
       } finally {
         updateRowData(rowIndex, 'uploading', false);
@@ -627,6 +634,13 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
           pageCount={-1}
           onSort={handleSort}
           onPageChange={setPage} />
+        {/* S3アップロードエラーモーダル */}
+        <Modal open={!!uploadErrorMsg} onClose={() => setUploadErrorMsg(null)}>
+          <p className="mb-8">{uploadErrorMsg}</p>
+          <div className="flex justify-center">
+            <Button className="w-24" onClick={() => setUploadErrorMsg(null)}>閉じる</Button>
+          </div>
+        </Modal>
         <Modal open={isDialogOpen} onClose={() => setIsDialogOpen(false)}>
           <h2 className="mb-4">セットする値を入力してください</h2>
           {currentColumn === 'judgment' ? (
