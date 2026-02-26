@@ -56,7 +56,6 @@ export function TestImportExecuteContainer({ groupId }: { groupId: string }) {
       const s3UploadResponse = await fetch(uploadUrl, {
         method: 'PUT',
         body: blob,
-        headers: { 'Content-Type': 'application/zip' },
       });
       if (!s3UploadResponse.ok) {
         setModalMessage('ファイルのアップロードに失敗しました');

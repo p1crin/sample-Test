@@ -56,7 +56,6 @@ export function UserImportExecuteContainer() {
       const s3UploadResponse = await fetch(uploadUrl, {
         method: 'PUT',
         body: blob,
-        headers: { 'Content-Type': 'text/csv' },
       });
       if (!s3UploadResponse.ok) {
         setModalMessage('ファイルのアップロードに失敗しました');

@@ -89,13 +89,10 @@ export async function POST(req: NextRequest) {
     const sanitizedFileName = fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
     const key = `${importType}-import/${timestamp}_${sanitizedFileName}`;
 
-    const contentType = importType === 'test' ? 'application/zip' : 'text/csv';
-
     // プリサインドURLを生成（15分間有効）
     const command = new PutObjectCommand({
       Bucket: bucket,
       Key: key,
-      ContentType: contentType,
     });
 
     const uploadUrl = await getSignedUrl(s3Client, command, {
