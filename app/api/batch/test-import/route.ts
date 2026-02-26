@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { BatchClient, SubmitJobCommand } from '@aws-sdk/client-batch';
-import { requireAuth, isAdmin, isTestManager } from '@/app/lib/auth';
+import { requireAuth, isAdmin, isTestManager, canEditTestCases } from '@/app/lib/auth';
 import { handleError } from '@/utils/errorHandler';
 import { STATUS_CODES } from '@/constants/statusCodes';
 import { ERROR_MESSAGES } from '@/constants/errorMessages';
@@ -16,19 +16,24 @@ export async function POST(req: NextRequest) {
   const user = await requireAuth(req);
 
   try {
-    // テストマネージャーまたは管理者のみ許可
-    if (!isAdmin(user) && !isTestManager(user)) {
-      return handleError(
-        new Error(ERROR_MESSAGES.PERMISSION_DENIED),
-        STATUS_CODES.FORBIDDEN,
-        apiTimer,
-        'POST',
-        '/api/batch/test-import'
-      );
-    }
-
     const body = await req.json();
     const { s3Key, testGroupId } = body;
+
+    // テストマネージャー・管理者、またはテストグループの設計者のみ許可
+    if (!isAdmin(user) && !isTestManager(user)) {
+      const canEdit = testGroupId
+        ? await canEditTestCases(user, Number(testGroupId))
+        : false;
+      if (!canEdit) {
+        return handleError(
+          new Error(ERROR_MESSAGES.PERMISSION_DENIED),
+          STATUS_CODES.FORBIDDEN,
+          apiTimer,
+          'POST',
+          '/api/batch/test-import'
+        );
+      }
+    }
 
     // バリデーション
     if (!s3Key || typeof s3Key !== 'string') {

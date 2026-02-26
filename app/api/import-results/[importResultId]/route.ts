@@ -1,4 +1,4 @@
-import { isAdmin, isTestManager, requireAuth } from "@/app/lib/auth";
+import { isAdmin, isTestDesignerUser, isTestManager, requireAuth } from "@/app/lib/auth";
 import { prisma } from '@/app/lib/prisma';
 import { ERROR_MESSAGES } from "@/constants/errorMessages";
 import { STATUS_CODES } from "@/constants/statusCodes";
@@ -19,7 +19,12 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
 
   try {
     // ユーザーが管理者またはテスト管理者かどうかを確認
-    if (!isAdmin(user) && !isTestManager(user)) {
+    // 一般ユーザーはテスト設計者タグを持つ場合のみ許可
+    const isDesigner = !isAdmin(user) && !isTestManager(user)
+      ? await isTestDesignerUser(user.id)
+      : false;
+
+    if (!isAdmin(user) && !isTestManager(user) && !isDesigner) {
       logAPIEndpoint({
         method: 'GET',
         endpoint: '/api/import-results',
