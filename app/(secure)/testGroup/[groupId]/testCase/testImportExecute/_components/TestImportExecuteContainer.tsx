@@ -11,6 +11,9 @@ import clientLogger from '@/utils/client-logger';
 import { apiPost } from '@/utils/apiClient';
 import Loading from '@/components/ui/loading';
 
+// マルチパートアップロードのチャンクサイズ（50MB）
+const MULTIPART_CHUNK_SIZE = 50 * 1024 * 1024;
+
 export function TestImportExecuteContainer({ groupId }: { groupId: string }) {
   const router = useRouter();
   const [files, setFiles] = useState<FileInfo[]>([]);
@@ -32,42 +35,105 @@ export function TestImportExecuteContainer({ groupId }: { groupId: string }) {
     try {
       clientLogger.info('テストインポート実施画面', 'インポート処理開始');
 
-      // Step1: プリサインドURLを取得
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const uploadUrlResult = await apiPost<any>('/api/batch/upload-url', {
-        fileName: files[0].name,
-        importType: 'test',
-      });
-      if (!uploadUrlResult.success) {
-        setModalMessage('アップロードURLの取得に失敗しました');
-        setIsModalOpen(true);
-        return;
-      }
-      const { uploadUrl, key } = uploadUrlResult.data;
-
-      // Step2: S3にファイルをアップロード
       const file = files[0];
-      const byteCharacters = atob(file.base64!);
-      const byteNumbers = new Uint8Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-      }
-      const blob = new Blob([byteNumbers], { type: 'application/zip' });
-      const s3UploadResponse = await fetch(uploadUrl, {
-        method: 'PUT',
-        body: blob,
-        headers: { 'Content-Type': 'application/zip' },
-      });
-      if (!s3UploadResponse.ok) {
-        setModalMessage('ファイルのアップロードに失敗しました');
+      const rawFile = file.rawFile;
+      if (!rawFile) {
+        setModalMessage('ファイルの読み込みに失敗しました');
         setIsModalOpen(true);
         return;
       }
 
-      // Step3: バッチジョブを起動
+      const fileSize = rawFile.size;
+      let s3Key: string;
+
+      if (fileSize <= MULTIPART_CHUNK_SIZE) {
+        // 小さいファイル: シングルPUTアップロード
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const uploadUrlResult = await apiPost<any>('/api/batch/upload-url', {
+          fileName: file.name,
+          importType: 'test',
+        });
+        if (!uploadUrlResult.success) {
+          setModalMessage('アップロードURLの取得に失敗しました');
+          setIsModalOpen(true);
+          return;
+        }
+        const { uploadUrl, key } = uploadUrlResult.data;
+        s3Key = key;
+
+        const s3UploadResponse = await fetch(uploadUrl, {
+          method: 'PUT',
+          body: rawFile,
+          headers: { 'Content-Type': 'application/zip' },
+        });
+        if (!s3UploadResponse.ok) {
+          setModalMessage('ファイルのアップロードに失敗しました');
+          setIsModalOpen(true);
+          return;
+        }
+      } else {
+        // 大きいファイル: マルチパートアップロード（S3の5GB制限を回避）
+        const partCount = Math.ceil(fileSize / MULTIPART_CHUNK_SIZE);
+
+        // Step1: マルチパートアップロードを開始して各パートのURLを取得
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const initiateResult = await apiPost<any>('/api/batch/multipart-upload/initiate', {
+          fileName: file.name,
+          importType: 'test',
+          partCount,
+        });
+        if (!initiateResult.success) {
+          setModalMessage('アップロードURLの取得に失敗しました');
+          setIsModalOpen(true);
+          return;
+        }
+        const { uploadId, key, partUrls } = initiateResult.data;
+        s3Key = key;
+
+        // Step2: 各パートを順番にアップロード
+        const parts: { partNumber: number; etag: string }[] = [];
+        for (let i = 0; i < partCount; i++) {
+          const start = i * MULTIPART_CHUNK_SIZE;
+          const end = Math.min(start + MULTIPART_CHUNK_SIZE, fileSize);
+          const chunk = rawFile.slice(start, end);
+
+          const partResponse = await fetch(partUrls[i], {
+            method: 'PUT',
+            body: chunk,
+          });
+          if (!partResponse.ok) {
+            setModalMessage('ファイルのアップロードに失敗しました');
+            setIsModalOpen(true);
+            return;
+          }
+
+          const etag = partResponse.headers.get('ETag');
+          if (!etag) {
+            setModalMessage('アップロードの検証に失敗しました');
+            setIsModalOpen(true);
+            return;
+          }
+          parts.push({ partNumber: i + 1, etag });
+        }
+
+        // Step3: マルチパートアップロードを完了
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const completeResult = await apiPost<any>('/api/batch/multipart-upload/complete', {
+          key,
+          uploadId,
+          parts,
+        });
+        if (!completeResult.success) {
+          setModalMessage('ファイルのアップロードに失敗しました');
+          setIsModalOpen(true);
+          return;
+        }
+      }
+
+      // バッチジョブを起動
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await apiPost<any>('/api/batch/test-import', {
-        s3Key: key,
+        s3Key,
         testGroupId: groupId,
       });
       if (result.success) {
