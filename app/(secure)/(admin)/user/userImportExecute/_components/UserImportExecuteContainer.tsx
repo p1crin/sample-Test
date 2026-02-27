@@ -47,15 +47,15 @@ export function UserImportExecuteContainer() {
 
       // Step2: S3にファイルをアップロード
       const file = files[0];
-      const byteCharacters = atob(file.base64!);
-      const byteNumbers = new Uint8Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      const rawFile = file.rawFile;
+      if (!rawFile) {
+        setModalMessage('ファイルの読み込みに失敗しました');
+        setIsModalOpen(true);
+        return;
       }
-      const blob = new Blob([byteNumbers], { type: 'text/csv' });
       const s3UploadResponse = await fetch(uploadUrl, {
         method: 'PUT',
-        body: blob,
+        body: rawFile,
         headers: { 'Content-Type': 'text/csv' },
       });
       if (!s3UploadResponse.ok) {
