@@ -61,7 +61,7 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (status === 'unauthenticated') {
-      router.push('/login');
+      router.push('/auth-error');
     } else if (status === 'authenticated') {
       setInitialLoadDone(true);
     }

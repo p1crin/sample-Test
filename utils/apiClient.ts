@@ -1,8 +1,6 @@
-import { signOut } from 'next-auth/react';
-
 /**
  * APIクライアント
- * 401エラー時に自動的にログアウトする
+ * 401エラー時に認証エラー画面へリダイレクトする
  */
 
 export async function apiFetch(
@@ -11,10 +9,9 @@ export async function apiFetch(
 ): Promise<Response> {
   const response = await fetch(url, options);
 
-  // 401 Unauthorized の場合はログアウト
+  // 401 Unauthorized の場合は認証エラー画面へリダイレクト
   if (response.status === 401) {
-    // ログアウトしてログインページへリダイレクト
-    await signOut({ redirect: true, callbackUrl: '/login' });
+    window.location.href = '/auth-error';
     throw new Error('Unauthorized: Session expired');
   }
 
