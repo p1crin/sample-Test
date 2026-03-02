@@ -1,13 +1,19 @@
 'use server';
 
+import { requireAuth } from '@/app/lib/auth';
 import { prisma } from '@/app/lib/prisma';
+import { handleError } from '@/utils/errorHandler';
+import { QueryTimer } from '@/utils/database-logger';
 import { ERROR_MESSAGES } from '@/constants/errorMessages';
 import { STATUS_CODES } from '@/constants/statusCodes';
 import { NextRequest, NextResponse } from 'next/server';
 
 // GET /api/test-cases/check-tid - TID重複チェック
 export async function GET(req: NextRequest) {
+  const apiTimer = new QueryTimer();
   try {
+    await requireAuth(req);
+
     const searchParams = req.nextUrl.searchParams;
     const groupId = parseInt(searchParams.get('groupId') as string);
     const tid = searchParams.get('tid') as string;
@@ -34,10 +40,12 @@ export async function GET(req: NextRequest) {
       isDuplicate: !!existingTestCase,
     }, { status: STATUS_CODES.OK });
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : ERROR_MESSAGES.DEFAULT;
-    return NextResponse.json({
-      success: false,
-      error: errorMessage,
-    }, { status: STATUS_CODES.INTERNAL_SERVER_ERROR });
+    return handleError(
+      error as Error,
+      STATUS_CODES.INTERNAL_SERVER_ERROR,
+      apiTimer,
+      'GET',
+      '/api/test-cases/check-tid'
+    );
   }
 }

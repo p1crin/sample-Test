@@ -124,7 +124,7 @@ export async function PUT(req: NextRequest) {
     const newPasswordHash = await hashPassword(new_password)
     // パスワードを更新
     const updateTimer = new QueryTimer();
-    const userData = await prisma.mt_users.update({
+    await prisma.mt_users.update({
       data: {
         password: newPasswordHash
       },
@@ -138,11 +138,6 @@ export async function PUT(req: NextRequest) {
       userId: user.id,
       executionTime: updateTimer.elapsed(),
       rowsAffected: 1,
-      params: [
-        {
-          password: newPasswordHash
-        }
-      ]
     })
 
     logAPIEndpoint({
@@ -153,7 +148,7 @@ export async function PUT(req: NextRequest) {
       executionTime: apiTimer.elapsed(),
       dataSize: 1
     });
-    return NextResponse.json({ success: true, data: userData }, { status: STATUS_CODES.OK });
+    return NextResponse.json({ success: true }, { status: STATUS_CODES.OK });
   } catch (error) {
     return handleError(
       error as Error,

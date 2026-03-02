@@ -1,3 +1,4 @@
+import { getAuthUser } from '@/app/lib/auth';
 import clientLogHandler from '@/utils/client-log-handler';
 import { NextRequest, NextResponse } from 'next/server';
 
@@ -36,6 +37,12 @@ function processLog(log: ClientLogRequest): void {
 
 export async function POST(request: NextRequest) {
   try {
+    // 認証チェック：未認証の場合は401を返す
+    const sessionUser = await getAuthUser(request);
+    if (!sessionUser) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await request.json();
 
     // バッチログか単一ログかを判定
@@ -48,7 +55,8 @@ export async function POST(request: NextRequest) {
           screenName: log.screenName,
           message: log.message,
           params: log.params,
-          userId: log.metadata.userId,
+          // クライアント送信値は使わずセッションのユーザーIDで上書き
+          userId: sessionUser.id,
           userAgent: log.metadata.userAgent,
           url: log.metadata.url,
           clientTimestamp: log.metadata.timestamp,
@@ -58,6 +66,8 @@ export async function POST(request: NextRequest) {
     } else {
       // 単一ログの処理（後方互換性のため）
       const singleRequest = body as ClientLogRequest;
+      // クライアント送信値は使わずセッションのユーザーIDで上書き
+      singleRequest.metadata.userId = sessionUser.id;
       processLog(singleRequest);
     }
 
