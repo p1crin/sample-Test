@@ -8,9 +8,10 @@ import { UserRole } from '@/types/database';
 export type SidebarProps = {
   open: boolean;
   role: number;
+  hasDesignerTag?: boolean;
 };
 
-export function Sidebar({ open, role }: SidebarProps) {
+export function Sidebar({ open, role, hasDesignerTag }: SidebarProps) {
   const pathname = usePathname();
   const [expandedMenus, setExpandedMenus] = useState<Set<string>>(new Set());
 
@@ -22,7 +23,12 @@ export function Sidebar({ open, role }: SidebarProps) {
       filteredMenuConfig = menuConfig.filter(item => item.id !== 'adminmenu');
       break;
     case UserRole.GENERAL:
-      filteredMenuConfig = menuConfig.filter(item => item.id !== 'adminmenu' && item.id !== 'importmanager');
+      // テスト設計者タグを持つ一般ユーザーはインポート管理メニューを表示
+      filteredMenuConfig = menuConfig.filter(item => {
+        if (item.id === 'adminmenu') return false;
+        if (item.id === 'importmanager') return hasDesignerTag === true;
+        return true;
+      });
       break;
     default:
       filteredMenuConfig = menuConfig;

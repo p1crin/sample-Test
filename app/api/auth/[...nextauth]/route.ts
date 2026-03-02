@@ -12,6 +12,7 @@ declare module 'next-auth' {
       user_role: UserRole;
       department?: string;
       company?: string;
+      has_designer_tag?: boolean;
     };
   }
 
@@ -22,6 +23,7 @@ declare module 'next-auth' {
     user_role: UserRole;
     department?: string;
     company?: string;
+    has_designer_tag?: boolean;
   }
 }
 
@@ -30,6 +32,7 @@ declare module 'next-auth/jwt' {
     user_role?: UserRole;
     department?: string;
     company?: string;
+    has_designer_tag?: boolean;
   }
 }
 

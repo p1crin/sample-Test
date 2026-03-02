@@ -96,7 +96,7 @@ export default function Layout({ children }: { children: ReactNode }) {
     <div className="min-h-screen bg-gray-50">
       <HeaderContainer user={user} onToggleSidebar={handleToggleSidebar} />
       <div className="flex h-full">
-        <SidebarContainer open={sidebarOpen} role={session.user.user_role} />
+        <SidebarContainer open={sidebarOpen} role={session.user.user_role} hasDesignerTag={session.user.has_designer_tag} />
         <main
           className={`flex-1 overflow-y-auto p-5 pt-16 transition-all ${sidebarOpen ? 'md:ml-48' : ''}`}
         >
