@@ -310,18 +310,9 @@ const TestCaseRegistrantion: React.FC = () => {
       ];
 
       for (const { file, type, name } of allFiles) {
-        if (file.base64 && file.type) {
+        if (file.rawFile) {
           const formDataObj = new FormData();
-          const byteString = atob(file.base64);
-          const arrayBuffer = new ArrayBuffer(byteString.length);
-          const uint8Array = new Uint8Array(arrayBuffer);
-          for (let i = 0; i < byteString.length; i++) {
-            uint8Array[i] = byteString.charCodeAt(i);
-          }
-          const blob = new Blob([uint8Array], { type: file.type });
-          const fileObj = new File([blob], file.name, { type: file.type });
-
-          formDataObj.append('file', fileObj);
+          formDataObj.append('file', file.rawFile);
           formDataObj.append('testGroupId', String(groupId));
           formDataObj.append('tid', formData.tid);
           formDataObj.append('fileType', String(type));

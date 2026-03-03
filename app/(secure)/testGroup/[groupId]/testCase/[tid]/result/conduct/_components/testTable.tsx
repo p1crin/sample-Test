@@ -141,22 +141,10 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
       const historyCount = row.historyCount ?? 0;
       const formData = new FormData();
 
-      // Base64からBlobを作成してFormDataに追加
-      if (!file.base64) {
-        throw new Error(`ファイルデータが不正です: ${file.name} (base64データがありません)`);
+      if (!file.rawFile) {
+        throw new Error(`ファイルデータが不正です: ${file.name} (ファイルが見つかりません)`);
       }
-
-      // file.typeが空の場合はデフォルトのMIMEタイプを使用
-      const fileType = file.type || 'application/octet-stream';
-      const byteString = atob(file.base64);
-      const arrayBuffer = new ArrayBuffer(byteString.length);
-      const uint8Array = new Uint8Array(arrayBuffer);
-      for (let i = 0; i < byteString.length; i++) {
-        uint8Array[i] = byteString.charCodeAt(i);
-      }
-      const blob = new Blob([uint8Array], { type: fileType });
-      const fileObject = new File([blob], file.name, { type: fileType });
-      formData.append('file', fileObject);
+      formData.append('file', file.rawFile);
 
       formData.append('testGroupId', String(groupId));
       formData.append('tid', tid);
@@ -199,7 +187,7 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
         error: err instanceof Error ? err.message : String(err),
         fileName: file.name,
         fileType: file.type,
-        hasBase64: !!file.base64
+        hasRawFile: !!file.rawFile
       });
       throw err;
     }

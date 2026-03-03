@@ -46,7 +46,7 @@ export type TestCase = {
 export type DeletedFile = {
   fileNo: number;
   fileType: number; // 0: controlSpec, 1: dataFlow
-  base64?: string;
+  isNewlyUploaded?: boolean; // 今セッションでアップロードされたファイルかどうか
 };
 
 // 削除されたテスト内容の情報
@@ -233,7 +233,7 @@ export function TestCaseEditForm({
     // 削除されたファイルがある場合、削除リストに追加
     if (deletedFile && typeof deletedFile.fileNo === 'number') {
       const fileType = fieldName === 'controlSpecFile' ? FILE_TYPE.CONTROL_SPEC : FILE_TYPE.DATA_FLOW;
-      setDeletedFiles(prev => [...prev, { fileNo: deletedFile.fileNo as number, fileType, base64: deletedFile.base64 }]);
+      setDeletedFiles(prev => [...prev, { fileNo: deletedFile.fileNo as number, fileType, isNewlyUploaded: !!deletedFile.rawFile }]);
     }
 
     setFormData(prev => ({
@@ -252,18 +252,8 @@ export function TestCaseEditForm({
   const handleFileUpload = async (file: FileInfo, fileType: number): Promise<FileInfo> => {
     const formDataObj = new FormData();
 
-    // base64をBlobに変換
-    if (file.base64 && file.type) {
-      const byteString = atob(file.base64);
-      const arrayBuffer = new ArrayBuffer(byteString.length);
-      const uint8Array = new Uint8Array(arrayBuffer);
-      for (let i = 0; i < byteString.length; i++) {
-        uint8Array[i] = byteString.charCodeAt(i);
-      }
-      const blob = new Blob([uint8Array], { type: file.type });
-      const fileObj = new File([blob], file.name, { type: file.type });
-
-      formDataObj.append('file', fileObj);
+    if (file.rawFile) {
+      formDataObj.append('file', file.rawFile);
       formDataObj.append('testGroupId', String(groupId));
       formDataObj.append('tid', formData.tid);
       formDataObj.append('fileType', String(fileType));
@@ -526,7 +516,7 @@ export function TestCaseEditForm({
     }
 
     for (const file of deletedFiles) {
-      if (file.base64) {
+      if (file.isNewlyUploaded) {
         deletePromises.push(
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           apiDelete<any>('/api/files/test-info', {
