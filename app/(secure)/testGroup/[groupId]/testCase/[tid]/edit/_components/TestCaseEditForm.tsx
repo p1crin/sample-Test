@@ -88,6 +88,10 @@ export function TestCaseEditForm({
   // 更新成功フラグ（ブラウザバック時の判定用）
   const isUpdateSuccessful = useRef(false);
 
+  // セッションストレージキー（認証切れ時の孤立ファイルクリーンアップ用）
+  // アップロード時に削除フラグ=true として登録し、更新成功時に削除フラグ=false（クリア）する
+  const pendingFileKey = `pending_file_cleanup:${groupId}:${encodeURIComponent(form.tid)}`;
+
   // テストケースのフォーマットの各値取得
   useEffect(() => {
     // 初回のみ初期ファイルIDを保存
@@ -112,6 +116,31 @@ export function TestCaseEditForm({
     setFormData(form);
     setTestContents(contents);
   }, [form, contents]);
+
+  // マウント時: 前セッションで認証切れにより確定できなかった孤立ファイルをクリーンアップ
+  useEffect(() => {
+    let pending: Array<{ fileNo: number; fileType: number }>;
+    try {
+      pending = JSON.parse(sessionStorage.getItem(pendingFileKey) ?? '[]');
+    } catch {
+      return;
+    }
+    if (!pending.length) return;
+
+    const cleanup = async () => {
+      await Promise.allSettled(
+        pending.map(({ fileNo, fileType }) =>
+          fetch('/api/files/test-info', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ testGroupId: groupId, tid: form.tid, fileNo, fileType }),
+          }).catch(() => {})
+        )
+      );
+      sessionStorage.removeItem(pendingFileKey);
+    };
+    cleanup();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // タブクローズ・ページリロード時のクリーンアップ
   useEffect(() => {
@@ -266,7 +295,21 @@ export function TestCaseEditForm({
       if (response.ok) {
         const result = await response.json();
         clientLogger.info('テストケース編集画面', 'ファイルアップロード成功', { fileNo: result.data.fileNo, path: result.data.filePath, fileType: result.data.fileType });
-        // アップロード成功後、サーバーから返されたfileId等を設定
+
+        // アップロードしたファイルを削除フラグ付きでセッションストレージに登録
+        // 更新成功時に削除フラグを解除（クリア）、認証切れで中断した場合は次回マウント時にクリーンアップ
+        try {
+          const pending: Array<{ fileNo: number; fileType: number }> =
+            JSON.parse(sessionStorage.getItem(pendingFileKey) ?? '[]');
+          const uploadedFileNo = result.data.fileNo as number;
+          if (!pending.some(f => f.fileNo === uploadedFileNo)) {
+            sessionStorage.setItem(
+              pendingFileKey,
+              JSON.stringify([...pending, { fileNo: uploadedFileNo, fileType: result.data.fileType as number }])
+            );
+          }
+        } catch { /* sessionStorage 利用不可の場合は無視 */ }
+
         return {
           ...file,
           fileNo: result.data.fileNo,
@@ -456,6 +499,8 @@ export function TestCaseEditForm({
       if (result.success) {
         // 更新成功フラグを立てる（ブラウザバック時のファイル削除を防ぐため）
         isUpdateSuccessful.current = true;
+        // 削除フラグを解除（ファイルが確定済みのためセッションストレージをクリア）
+        try { sessionStorage.removeItem(pendingFileKey); } catch { /* ignore */ }
         clientLogger.info('テストケース編集画面', 'テストケース更新成功', { testGroupId: groupId, tid: result.data.tid });
         setEditModalMessage('テストケースを更新しました');
         setIsApiSuccess(result.success);

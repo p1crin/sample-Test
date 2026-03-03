@@ -173,6 +173,21 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
           fileType: file.type
         });
 
+        // アップロードしたエビデンスを削除フラグ付きでセッションストレージに登録
+        // 登録成功時に削除フラグを解除（クリア）、認証切れで中断した場合は次回マウント時にクリーンアップ
+        try {
+          const pendingKey = `pending_evidence_cleanup:${groupId}:${encodeURIComponent(tid)}`;
+          const current: Array<{ fileNo: number; testCaseNo: number; historyCount: number }> =
+            JSON.parse(sessionStorage.getItem(pendingKey) ?? '[]');
+          const uploadedFileNo = response.data.fileNo as number;
+          if (!current.some(e => e.fileNo === uploadedFileNo)) {
+            sessionStorage.setItem(
+              pendingKey,
+              JSON.stringify([...current, { fileNo: uploadedFileNo, testCaseNo: row.test_case_no, historyCount }])
+            );
+          }
+        } catch { /* sessionStorage 利用不可の場合は無視 */ }
+
         // アップロード成功時、pathとfileNoを含むFileInfoを返す
         return {
           ...file,
