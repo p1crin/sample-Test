@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
       }
     );
 
-    // エビデンスをデータベースに記録
+    // エビデンスをデータベースに記録（is_deleted=true: 登録成功時にfalseへ変更する削除フラグ）
     const evidenceRecord = await prisma.tt_test_evidences.create({
       data: {
         test_group_id: parsedTestGroupId,
@@ -102,6 +102,7 @@ export async function POST(req: NextRequest) {
         evidence_no: newfileNo,
         evidence_name: file.name,
         evidence_path: uploadResult.filePath,
+        is_deleted: true,
       },
     });
 

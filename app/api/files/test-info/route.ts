@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
       }
     );
 
-    // データベースに記録
+    // データベースに記録（is_deleted=true: 更新成功時にfalseへ変更する削除フラグ）
     const fileRecord = await prisma.tt_test_case_files.create({
       data: {
         test_group_id: parseInt(testGroupId, 10),
@@ -86,6 +86,7 @@ export async function POST(req: NextRequest) {
         file_no: newFileNo,
         file_name: file.name,
         file_path: uploadResult.filePath,
+        is_deleted: true,
       },
     });
 

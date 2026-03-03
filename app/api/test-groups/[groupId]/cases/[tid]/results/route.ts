@@ -472,7 +472,7 @@ export async function POST(
 
     // リクエストボディを取得
     const body = await req.json();
-    const { newTestResultData, historyDataList } = body;
+    const { newTestResultData, historyDataList, confirmedEvidences = [] } = body;
     if (newTestResultData && !Array.isArray(newTestResultData.testResult)) {
       return handleError(
         new Error(ERROR_MESSAGES.BAD_REQUEST),
@@ -495,6 +495,24 @@ export async function POST(
     // トランザクション内で処理
     const result = await prisma.$transaction(async (tx) => {
       const fileCount = 0;
+
+      // アップロード済みエビデンスの削除フラグを解除（is_deleted: true → false）
+      // アップロード時にis_deleted=trueで登録し、登録成功時にfalseへ変更する
+      if (confirmedEvidences.length > 0) {
+        for (const ev of confirmedEvidences as Array<{ testCaseNo: number; historyCount: number; evidenceNo: number }>) {
+          await tx.tt_test_evidences.updateMany({
+            where: {
+              test_group_id: groupId,
+              tid: tid,
+              test_case_no: ev.testCaseNo,
+              history_count: ev.historyCount,
+              evidence_no: ev.evidenceNo,
+              is_deleted: true,
+            },
+            data: { is_deleted: false },
+          });
+        }
+      }
       // historyDataListの処理
       if (historyDataList) {
         for (const historyList of historyDataList) {

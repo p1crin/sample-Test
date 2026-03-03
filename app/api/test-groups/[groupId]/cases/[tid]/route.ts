@@ -211,6 +211,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ grou
       testContents = [],
       testContentIds = [],
       deletedContents = [],
+      confirmedFileNos = [],
     } = body;
 
     logAPIEndpoint({
@@ -293,8 +294,19 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ grou
         });
       }
 
-      // ファイルは既にアップロードAPIで登録済みなので、ここでは何もしない
-      // controlSpecFileIds, dataFlowFileIds は確認用に保持
+      // アップロード済みファイルの削除フラグを解除（is_deleted: true → false）
+      // アップロード時にis_deleted=trueで登録し、更新成功時にfalseへ変更する
+      if (confirmedFileNos.length > 0) {
+        await tx.tt_test_case_files.updateMany({
+          where: {
+            test_group_id: testGroupId,
+            tid: tid,
+            file_no: { in: confirmedFileNos },
+            is_deleted: true,
+          },
+          data: { is_deleted: false },
+        });
+      }
 
       // 使用可能なtest_case_noをtestContentIdsに格納済み
       let testCaseNo = 0;

@@ -94,39 +94,10 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
   // 初期エビデンスID記録済みフラグ
   const initialEvidenceIdsRecorded = useRef(false);
 
-  // セッションストレージキー（認証切れ時の孤立エビデンスクリーンアップ用）
-  // アップロード時に削除フラグ=true として登録し、登録成功時に削除フラグ=false（クリア）する
-  const pendingEvidenceKey = `pending_evidence_cleanup:${groupId}:${encodeURIComponent(tid)}`;
-
   const router = useRouter();
   const { data: session } = useSession();
   const user = session?.user;
   if (apiError) throw apiError;
-
-  // マウント時: 前セッションで認証切れにより確定できなかった孤立エビデンスをクリーンアップ
-  useEffect(() => {
-    let pending: Array<{ fileNo: number; testCaseNo: number; historyCount: number }>;
-    try {
-      pending = JSON.parse(sessionStorage.getItem(pendingEvidenceKey) ?? '[]');
-    } catch {
-      return;
-    }
-    if (!pending.length) return;
-
-    const cleanup = async () => {
-      await Promise.allSettled(
-        pending.map(({ fileNo, testCaseNo, historyCount }) =>
-          fetch('/api/files/evidences', {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ testGroupId: groupId, tid, testCaseNo, historyCount, fileNo }),
-          }).catch(() => {})
-        )
-      );
-      sessionStorage.removeItem(pendingEvidenceKey);
-    };
-    cleanup();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     // ユーザー情報がない場合は処理をスキップ
@@ -589,10 +560,30 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
           note: item.note || '',
         }))
       }));
+      // 現在フォームにあるエビデンスの情報を収集（is_deleted=trueを解除する対象）
+      const confirmedEvidences: Array<{ testCaseNo: number; historyCount: number; evidenceNo: number }> = [];
+      initialTestCaseData.forEach(item => {
+        (item.evidence || []).forEach(e => {
+          if (e.fileNo !== undefined) {
+            confirmedEvidences.push({ testCaseNo: item.test_case_no, historyCount: item.historyCount ?? 0, evidenceNo: e.fileNo });
+          }
+        });
+      });
+      pastTestCaseData.forEach(historyData => {
+        historyData.forEach(item => {
+          (item.evidence || []).forEach(e => {
+            if (e.fileNo !== undefined) {
+              confirmedEvidences.push({ testCaseNo: item.test_case_no, historyCount: item.historyCount ?? 0, evidenceNo: e.fileNo });
+            }
+          });
+        });
+      });
+
       // 整形した新規入力の結果と履歴の結果からAPIリクエストを作成。
       const combinedFormData = {
         newTestResultData,
-        historyDataList
+        historyDataList,
+        confirmedEvidences,
       }
 
       clientLogger.info('テストケース結果登録画面', 'テストケース結果登録開始', { combinedFormData });
@@ -603,8 +594,6 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
       if (response.success) {
         // 登録成功フラグを設定（タブクローズ時のクリーンアップをスキップ）
         isRegistrationSuccessful.current = true;
-        // 削除フラグを解除（エビデンスが確定済みのためセッションストレージをクリア）
-        try { sessionStorage.removeItem(pendingEvidenceKey); } catch { /* ignore */ }
         clientLogger.info('テストケース結果登録画面', 'テストケース結果登録成功', { testGroupId: groupId, tid });
         setModalMessage('テストケース結果を登録しました');
         setIsApiSuccess(true);
