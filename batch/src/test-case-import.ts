@@ -359,9 +359,10 @@ async function main(): Promise<void> {
     }
 
     // 実行開始をDBに記録（import_status=0: 実施中）
+    const fileName = process.env.FILE_NAME || inputKey;
     const importRecord = await prisma.tt_import_results.create({
       data: {
-        file_name: inputKey,
+        file_name: fileName,
         import_status: 0, // 0: 実施中
         executor_name: executorName,
         import_type: 1, // 1: テストケースインポート
@@ -589,7 +590,7 @@ async function main(): Promise<void> {
         // インポートレコード作成前のエラー
         await prisma.tt_import_results.create({
           data: {
-            file_name: process.env.INPUT_S3_KEY || 'unknown',
+            file_name: process.env.FILE_NAME || process.env.INPUT_S3_KEY || 'unknown',
             import_status: 2, // 2: エラー
             executor_name: process.env.EXECUTOR_NAME || 'system',
             import_type: 1, // 1: テストケースインポート

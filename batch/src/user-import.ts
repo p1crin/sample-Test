@@ -277,9 +277,10 @@ async function main(): Promise<void> {
     logger.info('バッチ設定', { storageMode, inputSource, outputLocation });
 
     // 実行開始をDBに記録（import_status=0: 実施中）
-    const fileName = storageMode === 's3'
-      ? process.env.INPUT_S3_KEY!
-      : path.basename(process.env.INPUT_FILE_PATH!);
+    const fileName = process.env.FILE_NAME ||
+      (storageMode === 's3'
+        ? process.env.INPUT_S3_KEY!
+        : path.basename(process.env.INPUT_FILE_PATH!));
 
     const importRecord = await prisma.tt_import_results.create({
       data: {
@@ -478,9 +479,10 @@ async function main(): Promise<void> {
       } else {
         // インポートレコード作成前のエラー
         const storageMode = process.env.STORAGE_MODE || 's3';
-        const fileName = storageMode === 's3'
-          ? (process.env.INPUT_S3_KEY || 'unknown')
-          : (process.env.INPUT_FILE_PATH ? path.basename(process.env.INPUT_FILE_PATH) : 'unknown');
+        const fileName = process.env.FILE_NAME ||
+          (storageMode === 's3'
+            ? (process.env.INPUT_S3_KEY || 'unknown')
+            : (process.env.INPUT_FILE_PATH ? path.basename(process.env.INPUT_FILE_PATH) : 'unknown'));
 
         await prisma.tt_import_results.create({
           data: {

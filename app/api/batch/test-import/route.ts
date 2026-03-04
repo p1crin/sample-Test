@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { s3Key, testGroupId } = body;
+    const { s3Key, testGroupId, fileName } = body;
 
     // テストマネージャー・管理者、またはテストグループの設計者のみ許可
     if (!isAdmin(user) && !isTestManager(user)) {
@@ -107,6 +107,10 @@ export async function POST(req: NextRequest) {
           {
             name: 'EXECUTOR_NAME',
             value: user.name,
+          },
+          {
+            name: 'FILE_NAME',
+            value: (fileName && typeof fileName === 'string') ? fileName : s3Key,
           },
           {
             name: 'AWS_REGION',
