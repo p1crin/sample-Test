@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import ButtonGroup from '@/components/ui/buttonGroup';
 import { Modal } from '@/components/ui/modal';
 import { VerticalForm } from '@/components/ui/verticalForm';
-import { apiFetch, apiGet, apiPost } from '@/utils/apiClient';
+import { apiDelete, apiFetch, apiGet, apiPost } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { FileInfo } from '@/utils/fileUtils';
 import { useParams, useRouter } from 'next/navigation';
@@ -293,6 +293,9 @@ const TestCaseRegistrantion: React.FC = () => {
       dataFlowFile: [],
     };
 
+    // DBへの登録が成功したかどうかを追跡（S3失敗時のロールバック用）
+    let testCaseCreated = false;
+
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await apiPost<any>(`/api/test-groups/${groupId}/cases`, payload);
@@ -301,6 +304,8 @@ const TestCaseRegistrantion: React.FC = () => {
         throw new Error(result.error || 'テストケースの作成に失敗しました');
       }
 
+      // DBへの登録成功
+      testCaseCreated = true;
       clientLogger.info('テストケース新規登録画面', 'テストケース作成成功、ファイルアップロード開始', { groupId, tid: formData.tid });
 
       // ファイルアップロード
@@ -348,6 +353,15 @@ const TestCaseRegistrantion: React.FC = () => {
       }, 1500);
 
     } catch (error) {
+      // DBに登録済みでS3アップロードが失敗した場合、DBのレコードを削除してロールバック
+      if (testCaseCreated) {
+        try {
+          await apiDelete(`/api/test-groups/${groupId}/cases/${encodeURIComponent(formData.tid)}`);
+          clientLogger.info('テストケース新規登録画面', 'S3アップロード失敗のためDBロールバック成功', { groupId, tid: formData.tid });
+        } catch (deleteError) {
+          clientLogger.error('テストケース新規登録画面', 'DBロールバック失敗', { error: deleteError instanceof Error ? deleteError.message : String(deleteError) });
+        }
+      }
       const errorMessage = error instanceof Error ? error.message : String(error);
       clientLogger.error('テストケース新規登録画面', 'テストケース登録エラー', { error: errorMessage });
       setModalMessage(`テストケースの登録に失敗しました。`);

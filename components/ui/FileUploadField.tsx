@@ -121,6 +121,7 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
       } catch (err) {
         setUploading(false);
         clientLogger.error('FileUploadField', 'ファイルのアップロードに失敗しました', { error: err instanceof Error ? err.message : String(err) });
+        return;
       }
       setUploading(false);
     }
@@ -160,6 +161,11 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
       } catch (err) {
         setUploading(false);
         clientLogger.error('FileUploadField', 'ファイルのアップロードに失敗しました', { error: err instanceof Error ? err.message : String(err) });
+        // inputをリセットして同じファイルを再度選択できるようにする
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+        return;
       }
       setUploading(false);
     }
