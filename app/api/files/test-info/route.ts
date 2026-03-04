@@ -21,6 +21,9 @@ export async function POST(req: NextRequest) {
     const testGroupId = formData.get('testGroupId') as string;
     const tid = formData.get('tid') as string;
     const fileType = parseInt(formData.get('fileType') as string, 10); // 0: controlSpec, 1: dataFlow
+    // isDynamic=true の場合は is_deleted=true（動的アップロード＝更新成功時に確定する）
+    // isDynamic=false/省略 の場合は is_deleted=false（送信時アップロード＝即確定）
+    const isDynamic = formData.get('isDynamic') === 'true';
 
     if (!file || !testGroupId || !tid || isNaN(fileType)) {
       return handleError(
@@ -77,7 +80,7 @@ export async function POST(req: NextRequest) {
       }
     );
 
-    // データベースに記録（is_deleted=true: 更新成功時にfalseへ変更する削除フラグ）
+    // データベースに記録
     const fileRecord = await prisma.tt_test_case_files.create({
       data: {
         test_group_id: parseInt(testGroupId, 10),
@@ -86,7 +89,7 @@ export async function POST(req: NextRequest) {
         file_no: newFileNo,
         file_name: file.name,
         file_path: uploadResult.filePath,
-        is_deleted: true,
+        is_deleted: isDynamic,
       },
     });
 

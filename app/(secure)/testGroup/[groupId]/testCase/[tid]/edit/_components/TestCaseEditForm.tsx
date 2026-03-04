@@ -264,6 +264,7 @@ export function TestCaseEditForm({
       formDataObj.append('testGroupId', String(groupId));
       formDataObj.append('tid', formData.tid);
       formDataObj.append('fileType', String(fileType));
+      formDataObj.append('isDynamic', 'true'); // 動的アップロード：更新成功時にis_deletedをfalseに確定
 
       const response = await apiFetch('/api/files/test-info', {
         method: 'POST',
