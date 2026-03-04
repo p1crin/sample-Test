@@ -93,6 +93,10 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
   const initialEvidenceIds = useRef<Map<string, Set<number>>>(new Map());
   // 初期エビデンスID記録済みフラグ
   const initialEvidenceIdsRecorded = useRef(false);
+  // 今セッションでアップロードしたエビデンスを追跡するRef
+  // formDataには以前のセッション（認証切れ前）のエビデンスが残留する場合があるため、
+  // confirmedEvidencesはformData全体ではなくこのRefから構築する
+  const uploadedEvidencesRef = useRef<Array<{ testCaseNo: number; historyCount: number; evidenceNo: number }>>([]);
 
   const router = useRouter();
   const { data: session } = useSession();
@@ -560,24 +564,10 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
           note: item.note || '',
         }))
       }));
-      // 現在フォームにあるエビデンスの情報を収集（is_deleted=trueを解除する対象）
-      const confirmedEvidences: Array<{ testCaseNo: number; historyCount: number; evidenceNo: number }> = [];
-      initialTestCaseData.forEach(item => {
-        (item.evidence || []).forEach(e => {
-          if (e.fileNo !== undefined) {
-            confirmedEvidences.push({ testCaseNo: item.test_case_no, historyCount: item.historyCount ?? 0, evidenceNo: e.fileNo });
-          }
-        });
-      });
-      pastTestCaseData.forEach(historyData => {
-        historyData.forEach(item => {
-          (item.evidence || []).forEach(e => {
-            if (e.fileNo !== undefined) {
-              confirmedEvidences.push({ testCaseNo: item.test_case_no, historyCount: item.historyCount ?? 0, evidenceNo: e.fileNo });
-            }
-          });
-        });
-      });
+      // 今セッションでアップロードしたエビデンスのみを確定対象とする
+      // （formData全体から取ると、認証切れ後にコンポーネントが再マウントされなかった場合に
+      //   旧セッションでアップロードしたエビデンスが誤って確定されてしまうため）
+      const confirmedEvidences = [...uploadedEvidencesRef.current];
 
       // 整形した新規入力の結果と履歴の結果からAPIリクエストを作成。
       const combinedFormData = {
@@ -683,6 +673,9 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
                     userName={user.name || ''}
                     executorsList={executorsList}
                     executorsPerRow={executorsPerRow}
+                    onEvidenceUploadedToSession={(evidenceNo, testCaseNo, historyCount) => {
+                      uploadedEvidencesRef.current.push({ testCaseNo, historyCount, evidenceNo });
+                    }}
                   />}
                 {Object.entries(pastTestCaseData).length > 0 &&
                   (() => {
@@ -722,7 +715,10 @@ export function TestCaseConductContainer({ groupId, tid }: { groupId: number; ti
                                   })}
                                   userName={user?.name || ''}
                                   executorsList={executorsList}
-                                  executorsPerRow={executorsPerRow} />
+                                  executorsPerRow={executorsPerRow}
+                                  onEvidenceUploadedToSession={(evidenceNo, testCaseNo, historyCount) => {
+                                    uploadedEvidencesRef.current.push({ testCaseNo, historyCount, evidenceNo });
+                                  }} />
                               </div>
                             )}
                           </div>

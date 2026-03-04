@@ -17,6 +17,7 @@ interface TestTableProps {
   userName?: string;
   executorsList?: Array<{ id: number; name: string; }>;
   executorsPerRow?: Record<string, Array<{ id: number; name: string }>>;
+  onEvidenceUploadedToSession?: (evidenceNo: number, testCaseNo: number, historyCount: number) => void;
 }
 
 // 行が編集不可かどうかを判定するヘルパー関数
@@ -24,7 +25,7 @@ const isRowDisabled = (row: TestCaseResultRow): boolean => {
   return row.judgment === JUDGMENT_OPTIONS.EXCLUDED || row.is_target === false;
 };
 
-const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, userName = '', executorsList = [], executorsPerRow = {} as Record<string, Array<{ id: number; name: string }>> }) => {
+const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, userName = '', executorsList = [], executorsPerRow = {} as Record<string, Array<{ id: number; name: string }>>, onEvidenceUploadedToSession }) => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [currentColumn, setCurrentColumn] = useState<string | null>(null);
   const [sortConfig, setSortConfig] = useState<SortConfig<TestCaseResultRow>>(null);
@@ -173,6 +174,9 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
           fileType: file.type
         });
 
+        // 今セッションでアップロードしたエビデンスを親コンポーネントに通知（確定対象の追跡用）
+        onEvidenceUploadedToSession?.(response.data.fileNo, row.test_case_no, historyCount);
+
         // アップロード成功時、pathとfileNoを含むFileInfoを返す
         return {
           ...file,
@@ -191,7 +195,7 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
       });
       throw err;
     }
-  }, [groupId, tid, data]);
+  }, [groupId, tid, data, onEvidenceUploadedToSession]);
 
   // ペーストイベントハンドラー
   const handlePaste = useCallback(async (pasteEvent: React.ClipboardEvent, rowIndex: number) => {

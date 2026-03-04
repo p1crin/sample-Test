@@ -67,6 +67,11 @@ export function TestCaseEditForm({
   const [deletedFiles, setDeletedFiles] = useState<DeletedFile[]>([]);
   const [deletedContents, setDeletedContents] = useState<DeletedContent[]>([]);
 
+  // 今セッションでアップロードしたファイルのfileNoを追跡するRef
+  // formDataには以前のセッション（認証切れ前）のファイルが残留する場合があるため、
+  // confirmedFileNosはformData全体ではなくこのRefから構築する
+  const uploadedInSessionRef = useRef<Set<number>>(new Set());
+
   // 初期ファイルIDを保存（編集開始時に存在していたファイル）
   const initialFileIds = useRef({
     controlSpec: [] as number[],
@@ -234,6 +239,8 @@ export function TestCaseEditForm({
     if (deletedFile && typeof deletedFile.fileNo === 'number') {
       const fileType = fieldName === 'controlSpecFile' ? FILE_TYPE.CONTROL_SPEC : FILE_TYPE.DATA_FLOW;
       setDeletedFiles(prev => [...prev, { fileNo: deletedFile.fileNo as number, fileType, isNewlyUploaded: !!deletedFile.rawFile }]);
+      // 今セッションでのアップロード追跡からも除去
+      uploadedInSessionRef.current.delete(deletedFile.fileNo);
     }
 
     setFormData(prev => ({
@@ -266,6 +273,9 @@ export function TestCaseEditForm({
       if (response.ok) {
         const result = await response.json();
         clientLogger.info('テストケース編集画面', 'ファイルアップロード成功', { fileNo: result.data.fileNo, path: result.data.filePath, fileType: result.data.fileType });
+
+        // 今セッションでアップロードしたfileNoとして記録（確定対象の追跡用）
+        uploadedInSessionRef.current.add(result.data.fileNo as number);
 
         return {
           ...file,
@@ -413,11 +423,10 @@ export function TestCaseEditForm({
     const { controlSpecFile, dataFlowFile, ...formDataForLog } = formData;
     clientLogger.info('テストケース編集画面', 'テストケース更新開始', { formData: formDataForLog, testContents, deletedFiles, deletedContents });
     try {
-      // 現在フォームにあるファイルのfileNoを収集（is_deleted=trueを解除する対象）
-      const confirmedFileNos = [
-        ...formData.controlSpecFile.filter(f => f.fileNo !== undefined).map(f => f.fileNo as number),
-        ...formData.dataFlowFile.filter(f => f.fileNo !== undefined).map(f => f.fileNo as number),
-      ];
+      // 今セッションでアップロードしたファイルのfileNoのみを確定対象とする
+      // （formData全体から取ると、認証切れ後にコンポーネントが再マウントされなかった場合に
+      //   旧セッションでアップロードしたファイルが誤って確定されてしまうため）
+      const confirmedFileNos = Array.from(uploadedInSessionRef.current);
 
       // JSONペイロードを作成
       const payload = {
