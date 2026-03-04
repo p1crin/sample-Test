@@ -4,8 +4,13 @@ info:
   description: |
     テストケースDBアプリのREST API仕様
 
+    ## 認証方式
+    NextAuth.jsによるCookieベースのJWT認証を使用。
+    ログイン後、`next-auth.session-token` Cookieが自動的にセットされ、
+    以降のAPIリクエストにはこのCookieが自動的に付与される。
+
     ## 権限
-    - user_role: 
+    - user_role:
       - 0=管理者, 1=テスト管理者, 2=一般
     - test_role:
       - 1=テスト設計者, 2=テスト実施者, 3=テスト閲覧者
@@ -21,6 +26,8 @@ tags:
     description: 認証関連
   - name: Users
     description: ユーザ管理（管理者のみ）
+  - name: Tags
+    description: タグ管理
   - name: Test Groups
     description: テストグループ管理
   - name: Test Cases
@@ -31,29 +38,29 @@ tags:
     description: 集計レポート
   - name: Files
     description: ファイル管理
-  - name: Import
-    description: インポート機能
-  - name: S3
-    description: ファイルアップロード
+  - name: Batch
+    description: バッチ処理（インポート）
+  - name: Import Results
+    description: インポート結果
+  - name: Logs
+    description: クライアントログ
+  - name: Health
+    description: ヘルスチェック
 
 components:
   securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-      description: NextAuth.jsが発行するJWTトークン
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: next-auth.session-token
+      description: NextAuth.jsが発行するJWTセッションCookie
 
   schemas:
     Error:
       type: object
       required:
-        - success
         - error
       properties:
-        success:
-          type: boolean
-          example: false
         error:
           type: object
           required:
@@ -61,14 +68,12 @@ components:
             - message
           properties:
             code:
-              type: string
-              example: "VALIDATION_ERROR"
+              type: integer
+              description: HTTPステータスコード
+              example: 400
             message:
               type: string
               example: "入力内容に誤りがあります"
-            details:
-              type: object
-              description: エラーの詳細情報
 
     User:
       type: object
@@ -113,21 +118,6 @@ components:
         name:
           type: string
           example: "テストタグ"
-
-    S3FileDownload:
-      type: object
-      properties:
-        file_name:
-          type: string
-          example: "evidence_001.png"
-        file_url:
-          type: string
-          description: 署名付きダウンロードURL（有効期限付き）
-          example: "https://bucket.s3.amazonaws.com/evidences/evidence_001.png?X-Amz-..."
-        expires_in:
-          type: integer
-          description: URLの有効期限（秒）
-          example: 3600
 
     TestGroup:
       type: object
@@ -238,68 +228,6 @@ components:
           type: string
           format: date-time
 
-    TestCaseWithFiles:
-      type: object
-      properties:
-        test_group_id:
-          type: integer
-          example: 1
-        tid:
-          type: string
-          example: "1-1-1-1"
-        first_layer:
-          type: string
-          example: "第1層-1"
-        second_layer:
-          type: string
-          example: "第2層-1"
-        third_layer:
-          type: string
-          example: "第3層-1"
-        fourth_layer:
-          type: string
-          example: "第4層-1"
-        purpose:
-          type: string
-          example: "目的1"
-        request_id:
-          type: string
-          example: "要求ID1"
-        check_items:
-          type: string
-          example: "確認観点1\n確認観点2"
-        test_procedure:
-          type: string
-          example: "テスト手順1\nテスト手順2"
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-        control_spec:
-          type: array
-          items:
-            type: object
-            properties:
-              file_name:
-                type: string
-                example: 制御仕様名.png
-              file_path:
-                type: string
-                example: /制御仕様名.png
-        data_flow:
-          type: array
-          items:
-            type: object
-            properties:
-              file_name:
-                type: string
-                example: データフロー.png
-              file_path:
-                type: string
-                example: /データフロー.png
-
     TestContent:
       type: object
       properties:
@@ -322,231 +250,6 @@ components:
           type: boolean
           example: true
 
-    TestResult:
-      type: object
-      properties:
-        test_group_id:
-          type: integer
-          example: 1
-        tid:
-          type: string
-          example: "1-1-1-1"
-        test_case_no:
-          type: integer
-          example: 1
-        test_case:
-          type: string
-          example: "テストケース1"
-        expected_value:
-          type: string
-          example: "期待値1"
-        result:
-          type: string
-          example: "結果1"
-        judgment:
-          type: string
-          enum:
-            [
-              "OK",
-              "NG",
-              "保留",
-              "未着手",
-              "対象外",
-              "QA中",
-              "参照OK",
-              "再実施対象外",
-            ]
-          example: "OK"
-        software_version:
-          type: string
-          example: "1.2.3"
-        hardware_version:
-          type: string
-          example: "1.2.3"
-        comparator_version:
-          type: string
-          example: "1.2.3"
-        execution_date:
-          type: string
-          format: date
-        executor:
-          type: string
-          example: "実施者1"
-        note:
-          type: string
-          example: "https://redminesample.com/issues/123"
-        created_at:
-          type: string
-          format: date-time
-        updated_at:
-          type: string
-          format: date-time
-
-    TestResultWithHistory:
-      allOf:
-        - $ref: "#/components/schemas/TestResult"
-        - type: object
-          properties:
-            history_count:
-              type: integer
-              example: 3
-            evidences:
-              type: array
-              items:
-                type: object
-                properties:
-                  evidence_no:
-                    type: integer
-                    example: 1
-                  evidence_name:
-                    type: string
-                    example: "エビデンス.png"
-                  evidence_path:
-                    type: string
-                    example: "./エビデンス.png"
-    FinalResult:
-      type: object
-      properties:
-        tid:
-          type: string
-          example: "1-1-1-1"
-        test_case_no:
-          type: integer
-          example: 1
-        result:
-          type: string
-          example: "期待値1"
-        judgment:
-          type: string
-          example: "OK"
-        software_version:
-          type: string
-          example: "1.0.0"
-        hardware_version:
-          type: string
-          example: "1.0.0"
-        comparator_version:
-          type: string
-          example: "1.0.0"
-        execution_date:
-          type: string
-          format: date
-        executor:
-          type: string
-          example: "テスト 太郎"
-        note:
-          type: string
-          example: "19630"
-        version:
-          type: integer
-          example: 1
-        created_at:
-          type: string
-          format: date-time
-          example: "2025-09-29T10:00:00"
-        updated_at:
-          type: string
-          format: date-time
-          example: "2025-09-29T10:00:00"
-
-    History:
-      type: object
-      properties:
-        history_count:
-          type: integer
-          example: 2
-        history_details:
-          type: array
-          items:
-            $ref: "#/components/schemas/FinalResult"
-
-    ReportDataResponse:
-      type: object
-      properties:
-        success:
-          type: boolean
-          example: true
-        data:
-          type: object
-          properties:
-            summary:
-              type: array
-              items:
-                type: object
-                properties:
-                  first_layer:
-                    type: string
-                    example: "第1層-1"
-                  second_layer:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        second_layer_name:
-                          type: string
-                          example: "第2層-1"
-                        total_items:
-                          type: integer
-                          example: 100
-                        target_items:
-                          type: integer
-                          example: 90
-                        completed_items:
-                          type: integer
-                          example: 80
-                        not_started_items:
-                          type: integer
-                          example: 10
-                        in_progress_items:
-                          type: integer
-                          example: 5
-                        ok_items:
-                          type: integer
-                          example: 75
-                        ng_items:
-                          type: integer
-                          example: 5
-                        excluded_items:
-                          type: integer
-                          example: 10
-                        ok_rate:
-                          type: number
-                          format: float
-                          example: 0.8333
-                        progress_rate:
-                          type: number
-                          format: float
-                          example: 0.8889
-    ReportGraphResponse:
-      type: object
-      properties:
-        daily_results:
-          type: array
-          items:
-            type: object
-            properties:
-              date:
-                type: string
-                format: date
-                example: "2025-11-01"
-              ng_count:
-                type: integer
-                example: 2
-              remaining_predicted:
-                type: integer
-                example: 5
-              remaining_actual:
-                type: integer
-                example: 4
-              defects_found_actual:
-                type: integer
-                example: 3
-              unresolved_defects:
-                type: integer
-                example: 1
-              defects_found_predicted:
-                type: integer
-                example: 2
     ImportResult:
       type: object
       properties:
@@ -595,19 +298,10 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
-          examples:
-            no_token:
-              value:
-                success: false
-                error:
-                  code: "UNAUTHORIZED"
-                  message: "認証が必要です"
-            invalid_token:
-              value:
-                success: false
-                error:
-                  code: "INVALID_TOKEN"
-                  message: "無効なトークンです"
+          example:
+            error:
+              code: 401
+              message: "認証が必要です"
 
     Forbidden:
       description: 権限不足
@@ -616,10 +310,9 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
           example:
-            success: false
             error:
-              code: "FORBIDDEN"
-              message: "この操作を実行する権限がありません"
+              code: 403
+              message: "権限がありません"
 
     BadRequest:
       description: リクエストエラー
@@ -628,10 +321,9 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
           example:
-            success: false
             error:
-              code: "VALIDATION_ERROR"
-              message: "入力内容に誤りがあります"
+              code: 400
+              message: "リクエストが不正です"
 
     NotFound:
       description: リソースが見つからない
@@ -640,10 +332,9 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
           example:
-            success: false
             error:
-              code: "NOT_FOUND"
-              message: "指定されたリソースが見つかりません"
+              code: 404
+              message: "該当するデータがありません"
 
     InternalServerError:
       description: サーバーエラー
@@ -652,106 +343,79 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
           example:
-            success: false
             error:
-              code: "INTERNAL_SERVER_ERROR"
-              message: "サーバー内部でエラーが発生しました。しばらく時間をおいてから再度お試しください"
-              details:
-                error_id: "err_20251118_103045_xyz789"
-                timestamp: "2025-11-18T10:30:45.123Z"
+              code: 500
+              message: "リクエストの処理に失敗しました"
 
 paths:
-  /auth/login:
-    post:
+  /health:
+    get:
       tags:
-        - Auth
-      summary: ログイン
-      description: メールアドレスとパスワードでログインし、JWTトークンを取得
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - email
-                - password
-              properties:
-                email:
-                  type: string
-                  format: email
-                  example: "admin@example.com"
-                password:
-                  type: string
-                  format: password
-                  example: "p@ssword123"
+        - Health
+      summary: ヘルスチェック
+      description: アプリケーションとデータベースの稼働状態を確認
       responses:
         "200":
-          description: ログイン成功
+          description: 正常稼働
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  success:
-                    type: boolean
-                    example: true
-                  data:
-                    type: object
-                    properties:
-                      user:
-                        $ref: "#/components/schemas/User"
-                      token:
-                        type: string
-                        example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-        "401":
-          description: 認証失敗
+                  status:
+                    type: string
+                    example: "ok"
+                  timestamp:
+                    type: string
+                    format: date-time
+                  service:
+                    type: string
+                    example: "testcasedb"
+        "503":
+          description: サービス異常
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                success: false
-                error:
-                  code: "INVALID_CREDENTIALS"
-                  message: "メールアドレスまたはパスワードが正しくありません"
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "error"
+                  timestamp:
+                    type: string
+                    format: date-time
+                  service:
+                    type: string
+                    example: "testcasedb"
 
-  /auth/logout:
-    post:
+  /auth/[...nextauth]:
+    get:
       tags:
         - Auth
-      summary: ログアウト
-      description: JWTトークンを無効化してログアウトを実行
+      summary: NextAuth.js認証エンドポイント
+      description: |
+        NextAuth.jsが提供する認証エンドポイント群。
+        以下のパスが自動的に提供される:
+        - GET /api/auth/signin - ログインページ
+        - POST /api/auth/signin/credentials - クレデンシャル認証
+        - POST /api/auth/signout - ログアウト
+        - GET /api/auth/session - セッション情報取得
+        - GET /api/auth/csrf - CSRFトークン取得
       responses:
         "200":
-          description: ログアウト成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  success:
-                    type: boolean
-                    example: true
-        "401":
-          description: 認証失敗
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                success: false
-                error:
-                  code: "INVALID_TOKEN"
-                  message: "トークンが無効です"
+          description: NextAuth.jsによるレスポンス
 
   /auth/change-password:
-    post:
+    put:
       tags:
         - Auth
       summary: パスワード変更
       description: |
         ログイン中のユーザが自分のパスワードを変更。
+        パスワード要件:
+        - 8文字以上64文字以下
+        - 大文字、小文字、数字、記号をそれぞれ1文字以上含む
+        - 現在のパスワードと異なること
       security:
         - cookieAuth: []
       requestBody:
@@ -763,6 +427,7 @@ paths:
               required:
                 - current_password
                 - new_password
+                - new_password_confirmation
               properties:
                 current_password:
                   type: string
@@ -790,9 +455,6 @@ paths:
                   success:
                     type: boolean
                     example: true
-                  message:
-                    type: string
-                    example: "パスワードを変更しました"
         "400":
           description: バリデーションエラー
           content:
@@ -800,31 +462,42 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
               examples:
-                password_mismatch:
-                  summary: パスワード不一致
+                required_fields:
+                  summary: 必須フィールド不足
                   value:
-                    success: false
                     error:
-                      code: "PASSWORD_MISMATCH"
-                      message: "新しいパスワードと新しいパスワード(再確認)が一致しません。"
-                weak_password:
-                  summary: パスワード強度不足
+                      code: 400
+                      message: "すべての必須フィールドを入力してください"
+                password_length:
+                  summary: パスワード長エラー
                   value:
-                    success: false
                     error:
-                      code: "WEAK_PASSWORD"
-                      message: "パスワードは8文字以上で入力してください。"
+                      code: 400
+                      message: "新しいパスワードは8文字以上64文字以下です"
+                password_content:
+                  summary: パスワード文字種エラー
+                  value:
+                    error:
+                      code: 400
+                      message: "新しいパスワードは、大文字、小文字、数字、記号をそれぞれ1つ以上含む必要があります"
+                same_password:
+                  summary: 同一パスワード
+                  value:
+                    error:
+                      code: 400
+                      message: "現在のパスワードと新しいパスワードが同じです"
         "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
           description: 現在のパスワードが正しくない
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
               example:
-                success: false
                 error:
-                  code: "INVALID_CURRENT_PASSWORD"
-                  message: "現在のパスワードが正しくありません。"
+                  code: 404
+                  message: "現在のパスワードが正しくありません"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -835,7 +508,7 @@ paths:
       summary: ユーザ一覧取得
       description: 全ユーザの一覧を取得（管理者のみ）
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - name: email
           in: query
@@ -924,7 +597,7 @@ paths:
       summary: ユーザ作成
       description: 新しいユーザを作成（管理者のみ）
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       requestBody:
         required: true
         content:
@@ -972,9 +645,6 @@ paths:
                     example: true
                   data:
                     $ref: "#/components/schemas/User"
-                  message:
-                    type: string
-                    example: "ユーザを作成しました"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -989,7 +659,7 @@ paths:
       summary: ユーザ詳細取得
       description: 指定されたユーザの詳細を取得（管理者のみ）
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - name: userId
           in: path
@@ -1029,7 +699,7 @@ paths:
       summary: ユーザ更新
       description: ユーザ情報を更新（管理者のみ）
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - name: userId
           in: path
@@ -1106,7 +776,7 @@ paths:
       summary: ユーザ削除
       description: ユーザを論理削除（管理者のみ）
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - name: userId
           in: path
@@ -1134,13 +804,74 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /users/check-email:
+    get:
+      tags:
+        - Users
+      summary: メールアドレス重複チェック
+      description: 指定されたメールアドレスが既に登録されているかチェック（認証不要）
+      parameters:
+        - name: email
+          in: query
+          required: true
+          schema:
+            type: string
+            format: email
+          description: チェックするメールアドレス
+        - name: id
+          in: query
+          schema:
+            type: string
+          description: 除外するユーザID（更新時の自身を除外）
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  isDuplicate:
+                    type: boolean
+                    description: 重複している場合true
+                    example: false
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /users/export:
+    get:
+      tags:
+        - Users
+      summary: ユーザ一覧CSV出力
+      description: ユーザ一覧をCSVファイルとしてダウンロード（管理者のみ）
+      security:
+        - cookieAuth: []
+      responses:
+        "200":
+          description: CSVファイル
+          content:
+            text/csv:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
   /tags:
     get:
       tags:
         - Tags
       summary: タグ一覧取得
-      description: |
-        全タグの一覧を取得
+      description: 全タグの一覧を取得
       security:
         - cookieAuth: []
       responses:
@@ -1177,7 +908,7 @@ paths:
         - テスト管理者: 自分が作成 or 割り当てられたグループ
         - 一般: 割り当てられたグループのみ
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - name: oem
           in: query
@@ -1246,7 +977,7 @@ paths:
       summary: テストグループ作成
       description: 新しいテストグループを作成（管理者・テスト管理者のみ）
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       requestBody:
         required: true
         content:
@@ -1319,61 +1050,12 @@ paths:
                     example: true
                   data:
                     $ref: "#/components/schemas/TestGroup"
-                  message:
-                    type: string
-                    example: "テストグループを作成しました"
         "400":
-          description: バリデーションエラー
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              examples:
-                validation_error:
-                  value:
-                    success: false
-                    error:
-                      code: "VALIDATION_ERROR"
-                      message: "入力内容に誤りがあります"
-                      details:
-                        fields:
-                          - field: "oem"
-                            message: "OEMは必須項目です"
-                          - field: "model"
-                            message: "モデルは必須項目です"
-                invalid_tag:
-                  value:
-                    success: false
-                    error:
-                      code: "INVALID_TAG"
-                      message: "指定されたタグが存在しません"
-                      details:
-                        invalid_tag_ids: [999]
-                invalid_test_role:
-                  value:
-                    success: false
-                    error:
-                      code: "INVALID_TEST_ROLE"
-                      message: "test_roleの値が不正です"
-                      details:
-                        allowed_values: [1, 2, 3]
-                        received_value: 5
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: 権限不足
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                success: false
-                error:
-                  code: "FORBIDDEN"
-                  message: "テストグループを作成する権限がありません。管理者またはテスト管理者のみが作成できます"
-                  details:
-                    required_roles: [0, 1]
-                    current_role: 2
+          $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -1383,7 +1065,7 @@ paths:
         - Test Groups
       summary: テストグループ詳細取得
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - name: groupId
           in: path
@@ -1429,9 +1111,9 @@ paths:
       tags:
         - Test Groups
       summary: テストグループ更新
-      description: テストグループ情報を更新（管理者 or 設計者権限が必要）
+      description: テストグループ情報を更新（管理者 or 作成者/更新者のみ）
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - name: groupId
           in: path
@@ -1498,7 +1180,7 @@ paths:
                         type: integer
                         enum: [1, 2, 3]
       responses:
-        "200":
+        "201":
           description: 更新成功
           content:
             application/json:
@@ -1510,25 +1192,22 @@ paths:
                     example: true
                   data:
                     $ref: "#/components/schemas/TestGroup"
-                  message:
-                    type: string
-                    example: "テストグループを更新しました"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
-        "404":
-          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
 
     delete:
       tags:
         - Test Groups
       summary: テストグループ削除
-      description: テストグループを論理削除（管理者 or 設計者権限が必要）
+      description: テストグループを論理削除（管理者 or 作成者/更新者のみ）
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - name: groupId
           in: path
@@ -1546,9 +1225,10 @@ paths:
                   success:
                     type: boolean
                     example: true
-                  message:
-                    type: string
-                    example: "テストグループを削除しました"
+                  data:
+                    description: "常にnull"
+                    nullable: true
+                    example: null
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1562,7 +1242,7 @@ paths:
       summary: テストグループ複製
       description: 既存のテストグループを複製して新しいテストグループを作成（管理者・テスト管理者のみ）
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - name: groupId
           in: path
@@ -1651,6 +1331,50 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /test-groups/{groupId}/permitted-users:
+    get:
+      tags:
+        - Test Groups
+      summary: テストグループ許可ユーザ一覧
+      description: テストグループにアクセス可能なユーザ一覧を取得
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: groupId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: integer
+                        name:
+                          type: string
+                        email:
+                          type: string
+                          format: email
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /test-groups/{groupId}/cases:
     get:
       tags:
@@ -1658,7 +1382,7 @@ paths:
       summary: テストケース一覧取得
       description: 指定されたテストグループのテストケース一覧を取得
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - name: groupId
           in: path
@@ -1747,6 +1471,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
     post:
       tags:
@@ -1754,7 +1480,7 @@ paths:
       summary: テストケース作成
       description: 新しいテストケースを作成（管理者 or 設計者権限が必要）
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - name: groupId
           in: path
@@ -1832,15 +1558,22 @@ paths:
                               type: array
                               items:
                                 $ref: "#/components/schemas/TestContent"
-                  message:
-                    type: string
-                    example: "テストケースを作成しました"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          description: TID重複
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: 409
+                  message: "指定されたTIDは既に登録されています"
 
   /test-groups/{groupId}/cases/{tid}:
     get:
@@ -1849,7 +1582,7 @@ paths:
       summary: テストケース詳細取得
       description: 指定されたテストグループのテストケース詳細を取得
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - name: groupId
           in: path
@@ -1958,7 +1691,7 @@ paths:
       summary: テストケース更新
       description: テストケースを更新（管理者 or 設計者権限が必要）
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - name: groupId
           in: path
@@ -2058,9 +1791,6 @@ paths:
                               type: array
                               items:
                                 $ref: "#/components/schemas/TestContent"
-                  message:
-                    type: string
-                    example: "テストケースを更新しました"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -2076,7 +1806,7 @@ paths:
       summary: テストケース削除
       description: テストケースを論理削除（管理者 or 設計者権限が必要）
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - name: groupId
           in: path
@@ -2099,15 +1829,59 @@ paths:
                   success:
                     type: boolean
                     example: true
-                  message:
-                    type: string
-                    example: "テストケースを削除しました"
+                  data:
+                    description: "常にnull"
+                    nullable: true
+                    example: null
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /test-cases/check-tid:
+    get:
+      tags:
+        - Test Cases
+      summary: TID重複チェック
+      description: 指定されたテストグループ内でTIDが既に登録されているかチェック
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: groupId
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: テストグループID
+        - name: tid
+          in: query
+          required: true
+          schema:
+            type: string
+          description: チェックするTID
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  isDuplicate:
+                    type: boolean
+                    description: 重複している場合true
+                    example: false
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
 
   /test-groups/{groupId}/cases/{tid}/results:
     get:
@@ -2116,7 +1890,7 @@ paths:
       summary: テスト結果取得
       description: 指定されたテストケースのテスト結果を取得
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - name: groupId
           in: path
@@ -2265,9 +2039,9 @@ paths:
       tags:
         - Test Results
       summary: テスト結果登録・更新
-      description: テスト結果を登録または更新（管理者 or 実施者権限が必要）
+      description: テスト結果を登録または更新（閲覧権限以上が必要）
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - name: groupId
           in: path
@@ -2381,6 +2155,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /test-groups/{groupId}/report-data:
     get:
@@ -2389,7 +2165,7 @@ paths:
       summary: 集計レポートデータ取得
       description: テストグループの集計データを取得
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - name: groupId
           in: path
@@ -2466,7 +2242,7 @@ paths:
         日次のレポートグラフデータを取得
         テスト進捗の予測値と実績値、NG数の推移などを計算して返却
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - name: groupId
           in: path
@@ -2545,7 +2321,7 @@ paths:
       summary: ファイルの署名付きURL取得
       description: S3またはローカルストレージに保存されたファイルのアクセス可能なURLを取得
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       requestBody:
         required: true
         content:
@@ -2584,6 +2360,125 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /files/test-info:
+    post:
+      tags:
+        - Files
+      summary: テスト情報ファイルアップロード
+      description: テストケースに紐づく制御仕様またはデータフローファイルをアップロード
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+                - testGroupId
+                - tid
+                - fileType
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: アップロードするファイル
+                testGroupId:
+                  type: string
+                  description: テストグループID
+                tid:
+                  type: string
+                  description: TID
+                fileType:
+                  type: string
+                  enum: ["0", "1"]
+                  description: "ファイル種別（0: 制御仕様, 1: データフロー）"
+      responses:
+        "201":
+          description: アップロード成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      fileNo:
+                        type: integer
+                      fileName:
+                        type: string
+                      filePath:
+                        type: string
+                      fileType:
+                        type: integer
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      tags:
+        - Files
+      summary: テスト情報ファイル削除
+      description: テストケースに紐づく制御仕様またはデータフローファイルを削除
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - testGroupId
+                - tid
+                - fileNo
+                - fileType
+              properties:
+                testGroupId:
+                  type: integer
+                  description: テストグループID
+                tid:
+                  type: string
+                  description: TID
+                fileNo:
+                  type: integer
+                  description: ファイル番号
+                fileType:
+                  type: integer
+                  description: "ファイル種別（0: 制御仕様, 1: データフロー）"
+      responses:
+        "200":
+          description: 削除成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "File deleted successfully"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
   /files/evidences:
     post:
       tags:
@@ -2591,7 +2486,7 @@ paths:
       summary: エビデンスファイルアップロード
       description: エビデンスファイルをアップロード
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       requestBody:
         required: true
         content:
@@ -2665,7 +2560,7 @@ paths:
       summary: エビデンスファイル削除
       description: エビデンスファイルを削除
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       requestBody:
         required: true
         content:
@@ -2717,14 +2612,14 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
-  /s3-presigned-url:
+  /batch/upload-url:
     post:
       tags:
-        - S3
-      summary: S3署名付きURL発行
-      description: ファイルアップロード用の署名付きURLを発行
+        - Batch
+      summary: インポート用S3アップロードURL取得
+      description: CSVファイルアップロード用の署名付きURLを取得（管理者のみ）
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       requestBody:
         required: true
         content:
@@ -2732,19 +2627,17 @@ paths:
             schema:
               type: object
               required:
-                - file_name
-                - file_type
+                - fileName
+                - importType
               properties:
-                file_name:
+                fileName:
                   type: string
-                  example: "evidence_001.png"
-                file_type:
+                  description: アップロードするファイル名
+                  example: "users.csv"
+                importType:
                   type: string
-                  enum: ["evidence", "test_procedure"]
-                  example: "evidence"
-                content_type:
-                  type: string
-                  example: "image/png"
+                  enum: ["user", "test"]
+                  description: "インポート種別"
       responses:
         "200":
           description: 成功
@@ -2759,125 +2652,51 @@ paths:
                   data:
                     type: object
                     properties:
-                      upload_url:
+                      uploadUrl:
                         type: string
-                        example: "https://bucket.s3.amazonaws.com/..."
-                      file_path:
+                        description: 署名付きアップロードURL
+                      key:
                         type: string
-                        example: "evidences/20251118/evidence_001.png"
-                      fields:
-                        type: object
-                        description: アップロードに必要なフィールド
+                        description: S3キー
+                      bucket:
+                        type: string
+                        description: S3バケット名
+                      expiresIn:
+                        type: integer
+                        description: URLの有効期限（秒）
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
-
-  /s3/download:
-    get:
-      tags:
-        - S3
-      summary: S3ファイルダウンロードURL取得
-      description: |
-        S3に保存されたファイルの署名付きダウンロードURLを取得
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: file_path
-          in: query
-          required: true
-          schema:
-            type: string
-          description: S3ファイルパス（DB保存値）
-          example: "evidences/20251118/evidence_001.png"
-        - name: test_group_id
-          in: query
-          required: true
-          schema:
-            type: integer
-          description: テストグループID（権限チェック用）
-          example: 123
-      responses:
-        "200":
-          description: 署名付きURL取得成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  success:
-                    type: boolean
-                    example: true
-                  data:
-                    $ref: "#/components/schemas/S3FileDownload"
-              example:
-                success: true
-                data:
-                  file_name: "evidence_001.png"
-                  file_url: "https://bucket.s3.amazonaws.com/evidences/20251118/evidence_001.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=..."
-                  expires_in: 3600
-        "400":
-          description: パラメータエラー
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                success: false
-                error:
-                  code: "VALIDATION_ERROR"
-                  message: "file_path と test_group_id は必須です"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
         "403":
-          description: 権限不足
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                success: false
-                error:
-                  code: "FORBIDDEN"
-                  message: "このファイルにアクセスする権限がありません"
-        "404":
-          description: ファイルが見つからない
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                success: false
-                error:
-                  code: "FILE_NOT_FOUND"
-                  message: "指定されたファイルが見つかりません"
+          $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
-  /import-users:
+  /batch/user-import:
     post:
       tags:
-        - Import
-      summary: ユーザインポート
-      description: CSVファイルからユーザを一括登録（管理者のみ、非同期処理）
+        - Batch
+      summary: ユーザインポート実行
+      description: S3にアップロード済みのCSVからユーザを一括登録（管理者のみ、AWS Batchで非同期処理）
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       requestBody:
         required: true
         content:
-          multipart/form-data:
+          application/json:
             schema:
               type: object
               required:
-                - file
+                - s3Key
               properties:
-                file:
+                s3Key:
                   type: string
-                  format: binary
-                  description: CSVファイル
+                  description: S3にアップロードしたCSVファイルのキー
+                  example: "imports/user/users.csv"
       responses:
-        "202":
-          description: 受付成功（非同期処理開始）
+        "200":
+          description: ジョブ投入成功
           content:
             application/json:
               schema:
@@ -2889,48 +2708,100 @@ paths:
                   data:
                     type: object
                     properties:
-                      import_result_id:
-                        type: integer
-                        example: 1
-                  message:
-                    type: string
-                    example: "インポート処理を開始しました"
+                      jobId:
+                        type: string
+                        description: AWS BatchジョブID
+                      jobName:
+                        type: string
+                        description: ジョブ名
+                      s3Key:
+                        type: string
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
 
-  /import-cases:
+  /batch/test-import:
     post:
       tags:
-        - Import
-      summary: テストケースインポート
-      description: CSVファイルからテストケースを一括登録（非同期処理）
+        - Batch
+      summary: テストケースインポート実行
+      description: S3にアップロード済みのCSVからテストケースを一括登録（管理者・テスト管理者・設計者権限）
       security:
-        - bearerAuth: []
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - s3Key
+                - testGroupId
+              properties:
+                s3Key:
+                  type: string
+                  description: S3にアップロードしたCSVファイルのキー
+                  example: "imports/test/test-cases.csv"
+                testGroupId:
+                  type: string
+                  description: インポート先のテストグループID
+                  example: "123"
+      responses:
+        "200":
+          description: ジョブ投入成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    properties:
+                      jobId:
+                        type: string
+                        description: AWS BatchジョブID
+                      jobName:
+                        type: string
+                        description: ジョブ名
+                      s3Key:
+                        type: string
+                      testGroupId:
+                        type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /batch/status/{jobId}:
+    get:
+      tags:
+        - Batch
+      summary: バッチジョブステータス取得
+      description: AWS Batchジョブの実行状態を取得（管理者のみ）
+      security:
+        - cookieAuth: []
       parameters:
-        - name: test_group_id
-          in: query
+        - name: jobId
+          in: path
           required: true
           schema:
-            type: integer
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              required:
-                - file
-              properties:
-                file:
-                  type: string
-                  format: binary
+            type: string
+          description: AWS BatchジョブID
       responses:
-        "202":
-          description: 受付成功
+        "200":
+          description: 成功
           content:
             application/json:
               schema:
@@ -2942,27 +2813,56 @@ paths:
                   data:
                     type: object
                     properties:
-                      import_result_id:
+                      jobId:
+                        type: string
+                      jobName:
+                        type: string
+                      status:
+                        type: string
+                        enum: ["SUBMITTED", "PENDING", "RUNNABLE", "STARTING", "RUNNING", "SUCCEEDED", "FAILED"]
+                      statusReason:
+                        type: string
+                        nullable: true
+                      createdAt:
                         type: integer
-                        example: 1
-                  message:
-                    type: string
-                    example: "インポート処理を開始しました"
+                        description: ジョブ作成日時（Unix timestamp ms）
+                      startedAt:
+                        type: integer
+                        description: ジョブ開始日時（Unix timestamp ms）
+                        nullable: true
+                      stoppedAt:
+                        type: integer
+                        description: ジョブ停止日時（Unix timestamp ms）
+                        nullable: true
+                      container:
+                        type: object
+                        nullable: true
+                        properties:
+                          exitCode:
+                            type: integer
+                            nullable: true
+                          reason:
+                            type: string
+                            nullable: true
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
 
   /import-results:
     get:
       tags:
-        - Import
+        - Import Results
       summary: インポート結果一覧取得
-      description: インポート処理の実行履歴を取得
+      description: インポート処理の実行履歴を取得（管理者・テスト管理者・テスト設計者）
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - name: page
           in: query
@@ -2991,17 +2891,22 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/ImportResult"
+                  totalCount:
+                    type: integer
+                    description: 総件数
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
 
   /import-results/{importResultId}:
     get:
       tags:
-        - Import
+        - Import Results
       summary: インポート結果詳細取得
-      description: 指定されたインポートジョブの詳細とエラー内容を取得
+      description: 指定されたインポートジョブの詳細とエラー内容を取得（管理者・テスト管理者・テスト設計者）
       security:
-        - bearerAuth: []
+        - cookieAuth: []
       parameters:
         - name: importResultId
           in: path
@@ -3031,5 +2936,135 @@ paths:
                               $ref: "#/components/schemas/ImportError"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /logs:
+    post:
+      tags:
+        - Logs
+      summary: クライアントログ送信
+      description: |
+        クライアント側のログをサーバーに送信。
+        単一ログまたはバッチ（複数ログ一括）送信に対応。
+        ユーザIDはセッションから自動設定される（クライアント送信値は無視）。
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  description: 単一ログ
+                  required:
+                    - level
+                    - screenName
+                    - message
+                    - metadata
+                  properties:
+                    level:
+                      type: string
+                      enum: ["debug", "info", "warn", "error"]
+                    screenName:
+                      type: string
+                      example: "TestGroupList"
+                    message:
+                      type: string
+                      example: "テストグループ一覧を取得"
+                    params:
+                      type: array
+                      items: {}
+                    metadata:
+                      type: object
+                      required:
+                        - timestamp
+                        - userAgent
+                        - url
+                      properties:
+                        timestamp:
+                          type: string
+                          format: date-time
+                        userAgent:
+                          type: string
+                        url:
+                          type: string
+                - type: object
+                  description: バッチログ
+                  required:
+                    - logs
+                  properties:
+                    logs:
+                      type: array
+                      items:
+                        type: object
+                        required:
+                          - level
+                          - screenName
+                          - message
+                          - metadata
+                        properties:
+                          level:
+                            type: string
+                            enum: ["debug", "info", "warn", "error"]
+                          screenName:
+                            type: string
+                          message:
+                            type: string
+                          params:
+                            type: array
+                            items: {}
+                          metadata:
+                            type: object
+                            required:
+                              - timestamp
+                              - userAgent
+                              - url
+                            properties:
+                              timestamp:
+                                type: string
+                                format: date-time
+                              userAgent:
+                                type: string
+                              url:
+                                type: string
+      responses:
+        "200":
+          description: ログ送信成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+        "401":
+          description: 認証エラー
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: "Unauthorized"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                    example: "Failed to process log"
