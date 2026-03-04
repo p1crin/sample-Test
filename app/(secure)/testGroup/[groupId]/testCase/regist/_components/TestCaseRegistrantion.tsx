@@ -9,7 +9,7 @@ import { apiFetch, apiGet, apiPost } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { FileInfo } from '@/utils/fileUtils';
 import { useParams, useRouter } from 'next/navigation';
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { CreateTestCaseListRow } from '../../../_components/types/testCase-list-row';
 import TestCaseForm from '../../[tid]/_components/testCaseForm';
 import { testCaseRegistSchema } from '../schemas/testCase-regist-schema';
@@ -53,6 +53,8 @@ const TestCaseRegistrantion: React.FC = () => {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isTidChecking, setIsTidChecking] = useState(false);
   const [isApiSuccess, setIsApiSuccess] = useState(false);
+  // 今セッションでアップロードしたファイルのfileNoを追跡するRef（確定対象）
+  const uploadedFileNosRef = useRef<number[]>([]);
 
   const handleFileChange = (fieldName: string, files: FileInfo[]) => {
     // ファイル選択時はbase64データをstateに保持するのみ
@@ -276,39 +278,15 @@ const TestCaseRegistrantion: React.FC = () => {
     const { controlSpecFile, dataFlowFile, ...formDataForLog } = formData;
     clientLogger.info('テストケース新規登録画面', 'テストケース登録開始', { formData: formDataForLog, testContents });
 
-    // ファイル情報を除いてテストケースを登録
-    const payload = {
-      tid: formData.tid,
-      first_layer: formData.first_layer,
-      second_layer: formData.second_layer,
-      third_layer: formData.third_layer,
-      fourth_layer: formData.fourth_layer,
-      purpose: formData.purpose,
-      request_id: formData.request_id,
-      checkItems: formData.checkItems,
-      testProcedure: formData.testProcedure,
-      testContents: testContents,
-      // ファイル情報はここでは含めない
-      controlSpecFile: [],
-      dataFlowFile: [],
-    };
-
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const result = await apiPost<any>(`/api/test-groups/${groupId}/cases`, payload);
-
-      if (!result.success) {
-        throw new Error(result.error || 'テストケースの作成に失敗しました');
-      }
-
-      clientLogger.info('テストケース新規登録画面', 'テストケース作成成功、ファイルアップロード開始', { groupId, tid: formData.tid });
-
-      // ファイルアップロード
+      // ファイルを先にアップロードし、fileNoを収集する
+      // （アップロードAPIはis_deleted=trueで登録するため、POSTペイロードで確定させる）
       const allFiles = [
         ...formData.controlSpecFile.map(file => ({ file, type: FILE_TYPE.CONTROL_SPEC, name: '制御仕様書' })),
         ...formData.dataFlowFile.map(file => ({ file, type: FILE_TYPE.DATA_FLOW, name: 'データフロー' }))
       ];
 
+      uploadedFileNosRef.current = [];
       for (const { file, type, name } of allFiles) {
         if (file.rawFile) {
           const formDataObj = new FormData();
@@ -325,8 +303,34 @@ const TestCaseRegistrantion: React.FC = () => {
           if (!response.ok) {
             throw new Error(`${name}「${file.name}」のアップロードに失敗しました`);
           }
-          clientLogger.info('テストケース新規登録画面', `${name}アップロード成功`, { fileName: file.name });
+          const uploadResult = await response.json();
+          if (uploadResult.data?.fileNo) {
+            uploadedFileNosRef.current.push(uploadResult.data.fileNo);
+          }
+          clientLogger.info('テストケース新規登録画面', `${name}アップロード成功`, { fileName: file.name, fileNo: uploadResult.data?.fileNo });
         }
+      }
+
+      // テストケースを登録（confirmedFileNosでファイルのis_deletedをfalseに確定）
+      const payload = {
+        tid: formData.tid,
+        first_layer: formData.first_layer,
+        second_layer: formData.second_layer,
+        third_layer: formData.third_layer,
+        fourth_layer: formData.fourth_layer,
+        purpose: formData.purpose,
+        request_id: formData.request_id,
+        checkItems: formData.checkItems,
+        testProcedure: formData.testProcedure,
+        testContents: testContents,
+        confirmedFileNos: uploadedFileNosRef.current,
+      };
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await apiPost<any>(`/api/test-groups/${groupId}/cases`, payload);
+
+      if (!result.success) {
+        throw new Error(result.error || 'テストケースの作成に失敗しました');
       }
 
       // 全て成功

@@ -220,6 +220,7 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
       checkItems,
       testProcedure,
       testContents = [],
+      confirmedFileNos = [],
     } = body;
 
     // TIDの重複チェック
@@ -288,6 +289,19 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
             testCaseNo++;
           }
         }
+      }
+
+      // アップロード済みファイルのis_deletedをfalseに確定（削除フラグ解除）
+      if (confirmedFileNos.length > 0) {
+        await tx.tt_test_case_files.updateMany({
+          where: {
+            test_group_id: testGroupId,
+            tid,
+            file_no: { in: confirmedFileNos },
+            is_deleted: true,
+          },
+          data: { is_deleted: false },
+        });
       }
 
       return testCase;
