@@ -193,6 +193,40 @@ export function getStorageType(): 'S3' | 'Local' {
 }
 
 /**
+ * ファイルアップロード用の署名付きURLを生成
+ * S3が有効な場合はPUT用の署名付きURLを返し、クライアントから直接S3にアップロード可能にする
+ * ローカル環境の場合はnullを返す（従来のFormDataアップロードを使用）
+ */
+export async function generateUploadUrl(
+  directory: string,
+  fileName: string,
+  contentType: string,
+  metadata?: Record<string, string>
+): Promise<{ uploadUrl: string; s3Key: string } | null> {
+  if (useS3 && s3Client) {
+    const s3Key = `${directory}/${fileName}`;
+
+    const command = new PutObjectCommand({
+      Bucket: process.env.AWS_S3_BUCKET_NAME!,
+      Key: s3Key,
+      ContentType: contentType,
+      ContentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      Metadata: metadata,
+    });
+
+    try {
+      const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 900 });
+      return { uploadUrl, s3Key };
+    } catch (error) {
+      clientLogger.error('generateUploadUrl', '署名付きURL生成失敗', { error });
+      throw new Error('Failed to generate upload URL');
+    }
+  }
+
+  return null;
+}
+
+/**
  * ファイルの署名付きURLを生成
  * S3の場合は署名付きURL、ローカルの場合はそのままのパスを返す
  */

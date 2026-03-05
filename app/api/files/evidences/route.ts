@@ -8,14 +8,134 @@ import { formatDateTimeToTimestamp } from '@/utils/date-formatter';
 import { handleError } from '@/utils/errorHandler';
 import { NextRequest, NextResponse } from 'next/server';
 
+/**
+ * エビデンスのDB登録共通処理
+ */
+async function registerEvidence(
+  parsedTestGroupId: number,
+  tid: string,
+  parsedTestCaseNo: number,
+  parsedHistoryCount: number,
+  originalFileName: string,
+  filePath: string,
+) {
+  // テストグループの存在確認
+  const testGroup = await prisma.tt_test_groups.findUnique({
+    where: { id: parsedTestGroupId, is_deleted: false },
+  });
+
+  if (!testGroup) {
+    return null;
+  }
+
+  // 最大evidence_noを取得（全history_count対象）
+  const maxEvidence = await prisma.tt_test_evidences.findFirst({
+    where: {
+      test_group_id: parsedTestGroupId,
+      tid: tid,
+      test_case_no: parsedTestCaseNo,
+    },
+    orderBy: {
+      evidence_no: 'desc',
+    },
+  });
+
+  const newfileNo = (maxEvidence?.evidence_no ?? 0) + 1;
+
+  // エビデンスをデータベースに記録（is_deleted=true: 登録成功時にfalseへ変更する削除フラグ）
+  const evidenceRecord = await prisma.tt_test_evidences.create({
+    data: {
+      test_group_id: parsedTestGroupId,
+      tid: tid,
+      test_case_no: parsedTestCaseNo,
+      history_count: parsedHistoryCount,
+      evidence_no: newfileNo,
+      evidence_name: originalFileName,
+      evidence_path: filePath,
+      is_deleted: true,
+    },
+  });
+
+  return {
+    evidenceId: evidenceRecord.evidence_no,
+    fileNo: newfileNo,
+    evidenceName: originalFileName,
+    evidencePath: filePath,
+    testCaseNo: parsedTestCaseNo,
+    historyCount: parsedHistoryCount,
+  };
+}
+
 // POST /api/files/evidences - エビデンスファイルアップロード
+// JSON (s3Key指定) または FormData (ローカルアップロード) の両方をサポート
 export async function POST(req: NextRequest) {
   const apiTimer = new QueryTimer();
 
   try {
     const user = await requireAuth(req);
 
-    // FormDataからファイルとメタデータを取得
+    const contentType = req.headers.get('content-type') || '';
+
+    if (contentType.includes('application/json')) {
+      // === Presigned URLフロー: S3に直接アップロード済み、DB登録のみ ===
+      const body = await req.json();
+      const { s3Key, originalFileName, testGroupId, tid, testCaseNo, historyCount } = body;
+
+      if (!s3Key || !originalFileName || !testGroupId || !tid || testCaseNo === undefined || historyCount === undefined) {
+        return handleError(
+          new Error(ERROR_MESSAGES.BAD_REQUEST),
+          STATUS_CODES.BAD_REQUEST,
+          apiTimer,
+          'POST',
+          '/api/files/evidences'
+        );
+      }
+
+      const parsedTestGroupId = parseInt(String(testGroupId), 10);
+      const parsedTestCaseNo = parseInt(String(testCaseNo), 10);
+      const parsedHistoryCount = parseInt(String(historyCount), 10);
+
+      if (isNaN(parsedTestGroupId) || isNaN(parsedTestCaseNo) || isNaN(parsedHistoryCount)) {
+        return handleError(
+          new Error(ERROR_MESSAGES.BAD_REQUEST),
+          STATUS_CODES.BAD_REQUEST,
+          apiTimer,
+          'POST',
+          '/api/files/evidences'
+        );
+      }
+
+      const result = await registerEvidence(
+        parsedTestGroupId, tid, parsedTestCaseNo, parsedHistoryCount,
+        originalFileName, s3Key
+      );
+
+      if (!result) {
+        return handleError(
+          new Error(ERROR_MESSAGES.NOT_FOUND),
+          STATUS_CODES.NOT_FOUND,
+          apiTimer,
+          'POST',
+          '/api/files/evidences'
+        );
+      }
+
+      logAPIEndpoint({
+        method: 'POST',
+        endpoint: '/api/files/evidences',
+        userId: user.id,
+        statusCode: STATUS_CODES.CREATED,
+        executionTime: apiTimer.elapsed(),
+        dataSize: 1,
+      });
+
+      return NextResponse.json(
+        { success: true, data: result },
+        { status: STATUS_CODES.CREATED }
+      );
+    }
+
+    // === 従来のFormDataフロー（ローカル開発環境用） ===
     const formData = await req.formData();
     const file = formData.get('file') as File | null;
     const testGroupId = formData.get('testGroupId') as string;
@@ -47,35 +167,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // テストグループの存在確認
-    const testGroup = await prisma.tt_test_groups.findUnique({
-      where: { id: parsedTestGroupId, is_deleted: false },
-    });
-
-    if (!testGroup) {
-      return handleError(
-        new Error(ERROR_MESSAGES.NOT_FOUND),
-        STATUS_CODES.NOT_FOUND,
-        apiTimer,
-        'POST',
-        '/api/files/evidences'
-      );
-    }
-
-    // 最大evidence_noを取得（全history_count対象）
-    const maxEvidence = await prisma.tt_test_evidences.findFirst({
-      where: {
-        test_group_id: parsedTestGroupId,
-        tid: tid,
-        test_case_no: parsedTestCaseNo,
-      },
-      orderBy: {
-        evidence_no: 'desc',
-      },
-    });
-
-    const newfileNo = (maxEvidence?.evidence_no ?? 0) + 1;
-
     // ファイル名生成
     const fileName = `evidence_${testCaseNo}_${historyCount}_${formatDateTimeToTimestamp(new Date().toISOString())}_${file.name}`;
 
@@ -92,19 +183,20 @@ export async function POST(req: NextRequest) {
       }
     );
 
-    // エビデンスをデータベースに記録（is_deleted=true: 登録成功時にfalseへ変更する削除フラグ）
-    const evidenceRecord = await prisma.tt_test_evidences.create({
-      data: {
-        test_group_id: parsedTestGroupId,
-        tid: tid,
-        test_case_no: parsedTestCaseNo,
-        history_count: parsedHistoryCount,
-        evidence_no: newfileNo,
-        evidence_name: file.name,
-        evidence_path: uploadResult.filePath,
-        is_deleted: true,
-      },
-    });
+    const result = await registerEvidence(
+      parsedTestGroupId, tid, parsedTestCaseNo, parsedHistoryCount,
+      file.name, uploadResult.filePath
+    );
+
+    if (!result) {
+      return handleError(
+        new Error(ERROR_MESSAGES.NOT_FOUND),
+        STATUS_CODES.NOT_FOUND,
+        apiTimer,
+        'POST',
+        '/api/files/evidences'
+      );
+    }
 
     logAPIEndpoint({
       method: 'POST',
@@ -116,17 +208,7 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json(
-      {
-        success: true,
-        data: {
-          evidenceId: evidenceRecord.evidence_no,
-          fileNo: newfileNo,
-          evidenceName: file.name,
-          evidencePath: uploadResult.filePath,
-          testCaseNo: parsedTestCaseNo,
-          historyCount: parsedHistoryCount,
-        },
-      },
+      { success: true, data: result },
       { status: STATUS_CODES.CREATED }
     );
   } catch (error) {

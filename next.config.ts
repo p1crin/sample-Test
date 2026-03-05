@@ -5,6 +5,11 @@ const nextConfig: NextConfig = {
   devIndicators: false,
   serverExternalPackages: ['pino'],
   output: 'standalone',
+  experimental: {
+    serverActions: {
+      bodySizeLimit: '10mb',
+    },
+  },
   async redirects() {
     return [
       {
