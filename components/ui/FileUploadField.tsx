@@ -26,6 +26,10 @@ export interface FileUploadFieldProps {
   error?: string;
   /** 複数指定可能（オプション) */
   isMultiple?: boolean;
+  /** ファイルサイズ上限（バイト）(オプション) */
+  maxFileSizeBytes?: number;
+  /** ファイルサイズ超過時に呼び出される関数 (オプション) */
+  onFileSizeExceeded?: () => void;
 }
 
 const LABLE_STYLE = "flex items-center text-sm";
@@ -43,7 +47,9 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
   placeholder,
   isCopyable = true,
   error,
-  isMultiple = true
+  isMultiple = true,
+  maxFileSizeBytes,
+  onFileSizeExceeded,
 }) => {
   const [files, setFiles] = useState<FileInfo[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -100,6 +106,16 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
     const items = pasteEvent.clipboardData.items;
     if (items.length === 0 || items[0].kind !== 'file') return;
 
+    if (maxFileSizeBytes !== undefined) {
+      for (const item of Array.from(items)) {
+        const file = item.getAsFile();
+        if (file && file.size > maxFileSizeBytes) {
+          onFileSizeExceeded?.();
+          return;
+        }
+      }
+    }
+
     let newFiles = await processClipboardItems(items);
 
     // isMultipleがfalseの場合、最初のファイルのみを処理する
@@ -138,6 +154,16 @@ export const FileUploadField: React.FC<FileUploadFieldProps> = ({
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const fileList = e.target.files;
     if (!fileList || fileList.length === 0) return;
+
+    if (maxFileSizeBytes !== undefined) {
+      for (const file of Array.from(fileList)) {
+        if (file.size > maxFileSizeBytes) {
+          onFileSizeExceeded?.();
+          if (fileInputRef.current) fileInputRef.current.value = '';
+          return;
+        }
+      }
+    }
 
     let newFiles = await processFileList(fileList);
 

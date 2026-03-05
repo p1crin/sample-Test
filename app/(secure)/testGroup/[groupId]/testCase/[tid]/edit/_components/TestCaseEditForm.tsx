@@ -19,6 +19,8 @@ const FILE_TYPE = {
   DATA_FLOW: 1,
 } as const;
 
+const FILE_SIZE_LIMIT_100MB = 100 * 1024 * 1024;
+
 export type TestCaseEditChangeData = {
   target: {
     id: string;
@@ -227,6 +229,11 @@ export function TestCaseEditForm({
         [name]: value
       }));
     }
+  };
+
+  const handleFileSizeExceeded = () => {
+    setEditModalMessage('ファイルサイズが上限（100MB）を超えています');
+    setIsEditModalOpen(true);
   };
 
   const handleFileChange = (fieldName: string, files: FileInfo[], deletedFile?: FileInfo) => {
@@ -591,6 +598,8 @@ export function TestCaseEditForm({
           onFileUpload={(file) => handleFileUpload(file, FILE_TYPE.CONTROL_SPEC)}
           error={editError.controlSpecFile}
           isCopyable={true}
+          maxFileSizeBytes={FILE_SIZE_LIMIT_100MB}
+          onFileSizeExceeded={handleFileSizeExceeded}
         />
         <FileUploadField
           label="データフロー"
@@ -600,6 +609,8 @@ export function TestCaseEditForm({
           onFileUpload={(file) => handleFileUpload(file, FILE_TYPE.DATA_FLOW)}
           error={editError.dataFlowFile}
           isCopyable={true}
+          maxFileSizeBytes={FILE_SIZE_LIMIT_100MB}
+          onFileSizeExceeded={handleFileSizeExceeded}
         />
       </div>
       {/* テスト内容セクション */}

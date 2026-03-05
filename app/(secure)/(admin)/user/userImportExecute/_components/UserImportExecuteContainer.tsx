@@ -11,6 +11,8 @@ import clientLogger from '@/utils/client-logger';
 import { apiPost } from '@/utils/apiClient';
 import Loading from '@/components/ui/loading';
 
+const FILE_SIZE_LIMIT_1GB = 1 * 1024 * 1024 * 1024;
+
 export function UserImportExecuteContainer() {
   const router = useRouter();
   const [files, setFiles] = useState<FileInfo[]>([]);
@@ -106,9 +108,15 @@ export function UserImportExecuteContainer() {
     },
   ];
 
+  const handleFileSizeExceeded = () => {
+    setModalMessage('ファイルサイズが上限（1GB）を超えています');
+    setIsModalOpen(true);
+  };
+
   return (
     <>
       <div className="pb-2 w-4/5 grid gap-4 grid-cols-1">
+        <p className="text-sm text-gray-500">※ファイルサイズの上限は1GBです</p>
         <FileUploadField
           label="ユーザファイル（csv形式）"
           name="userFile"
@@ -117,6 +125,8 @@ export function UserImportExecuteContainer() {
           isCopyable={false}
           isMultiple={false}
           error={errors}
+          maxFileSizeBytes={FILE_SIZE_LIMIT_1GB}
+          onFileSizeExceeded={handleFileSizeExceeded}
         />
       </div>
       <div className="mt-4 w-12/13">
