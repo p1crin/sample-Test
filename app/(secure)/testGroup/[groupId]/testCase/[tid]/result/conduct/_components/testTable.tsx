@@ -19,6 +19,8 @@ interface TestTableProps {
   executorsPerRow?: Record<string, Array<{ id: number; name: string }>>;
 }
 
+const FILE_SIZE_LIMIT_100MB = 100 * 1024 * 1024;
+
 // 行が編集不可かどうかを判定するヘルパー関数
 const isRowDisabled = (row: TestCaseResultRow): boolean => {
   return row.judgment === JUDGMENT_OPTIONS.EXCLUDED || row.is_target === false;
@@ -34,6 +36,7 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
   const [isInitialRender, setIsInitialRender] = useState(true);
   const fileInputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const [fileUrls, setFileUrls] = useState<Record<string, string>>({});
+  const [isSizeErrorModalOpen, setIsSizeErrorModalOpen] = useState(false);
 
   useEffect(() => {
     if (isInitialRender && data) {
@@ -210,6 +213,14 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
     const items = pasteEvent.clipboardData.items;
     if (items.length === 0 || items[0].kind !== 'file') return;
 
+    for (const item of Array.from(items)) {
+      const file = item.getAsFile();
+      if (file && file.size > FILE_SIZE_LIMIT_100MB) {
+        setIsSizeErrorModalOpen(true);
+        return;
+      }
+    }
+
     const newFiles = await processClipboardItems(items);
 
     // 各ファイルを順次アップロード
@@ -243,6 +254,14 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
   const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>, rowIndex: number) => {
     const fileList = e.target.files;
     if (!fileList || fileList.length === 0) return;
+
+    for (const file of Array.from(fileList)) {
+      if (file.size > FILE_SIZE_LIMIT_100MB) {
+        setIsSizeErrorModalOpen(true);
+        if (fileInputRefs.current[rowIndex]) fileInputRefs.current[rowIndex]!.value = '';
+        return;
+      }
+    }
 
     const newFiles = await processFileList(fileList);
 
@@ -654,6 +673,12 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
               setIsDialogOpen(false);
               setInputValue('');
             }} className="bg-gray-500 hover:bg-gray-400">閉じる</Button>
+          </div>
+        </Modal>
+        <Modal open={isSizeErrorModalOpen} onClose={() => setIsSizeErrorModalOpen(false)}>
+          <p className="mb-8">ファイルサイズが上限（100MB）を超えています</p>
+          <div className="flex justify-center">
+            <Button className="w-24" onClick={() => setIsSizeErrorModalOpen(false)}>閉じる</Button>
           </div>
         </Modal>
       </div>

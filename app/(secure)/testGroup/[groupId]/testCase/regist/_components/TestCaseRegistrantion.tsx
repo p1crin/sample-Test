@@ -21,6 +21,8 @@ const FILE_TYPE = {
   DATA_FLOW: 1,
 } as const;
 
+const FILE_SIZE_LIMIT_100MB = 100 * 1024 * 1024;
+
 type TestCase = {
   id: number;
   testCase: string;
@@ -60,6 +62,11 @@ const TestCaseRegistrantion: React.FC = () => {
       ...prev,
       [fieldName]: files
     }));
+  };
+
+  const handleFileSizeExceeded = () => {
+    setModalMessage('ファイルサイズが上限（100MB）を超えています');
+    setIsModalOpen(true);
   };
 
   const handleTestContentsChange = (contents: { testCase: string; expectedValue: string; is_target: boolean }[]) => {
@@ -403,6 +410,8 @@ const TestCaseRegistrantion: React.FC = () => {
           onChange={(e, deletedFile) => handleFileChange('controlSpecFile', e.target.value)}
           error={errors.controlSpecFile}
           isCopyable={true}
+          maxFileSizeBytes={FILE_SIZE_LIMIT_100MB}
+          onFileSizeExceeded={handleFileSizeExceeded}
         />
         <FileUploadField
           label="データフロー"
@@ -411,6 +420,8 @@ const TestCaseRegistrantion: React.FC = () => {
           onChange={(e, deletedFile) => handleFileChange('dataFlowFile', e.target.value)}
           error={errors.dataFlowFile}
           isCopyable={true}
+          maxFileSizeBytes={FILE_SIZE_LIMIT_100MB}
+          onFileSizeExceeded={handleFileSizeExceeded}
         />
       </div>
       {/* テスト内容セクション */}
