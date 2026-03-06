@@ -201,17 +201,19 @@ export async function generateUploadUrl(
   directory: string,
   fileName: string,
   contentType: string,
-  metadata?: Record<string, string>
+  _metadata?: Record<string, string>
 ): Promise<{ uploadUrl: string; s3Key: string } | null> {
   if (useS3 && s3Client) {
     const s3Key = `${directory}/${fileName}`;
 
+    // Note: ContentDisposition and Metadata are intentionally omitted.
+    // Including them would add signed headers that the browser must also send
+    // in the PUT request, causing a 403 SignatureDoesNotMatch error.
+    // File metadata is tracked in the database instead.
     const command = new PutObjectCommand({
       Bucket: process.env.AWS_S3_BUCKET_NAME!,
       Key: s3Key,
       ContentType: contentType,
-      ContentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
-      Metadata: metadata,
     });
 
     try {
