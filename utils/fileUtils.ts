@@ -10,7 +10,7 @@ export interface FileInfo {
   name: string;
   /** ユニークID */
   id: string;
-  /** Base64エンコードされた画像データ (オプション) */
+  /** Base64エンコードされた画像データ (オプション、画像ファイルのみ) */
   base64?: string;
   /** ファイルのMIMEタイプ (オプション) */
   type?: string;
@@ -20,6 +20,8 @@ export interface FileInfo {
   fileNo?: number;
   /** ファイル種別（1: 制御仕様書, 2: データフロー） */
   fileType?: number;
+  /** 生のFileオブジェクト（大容量ファイルのアップロードに使用） */
+  rawFile?: File;
 }
 
 /**
@@ -83,8 +85,10 @@ export const getUniqueFileNames = (fileList: FileInfo[]): FileInfo[] => {
 export const processFileList = async (fileList: FileList): Promise<FileInfo[]> => {
   return Promise.all(
     Array.from(fileList).map(async (file) => {
-      const base64 = await fileToBase64(file);
-      return { name: file.name, id: generateUniqueId(), base64, type: file.type };
+      const isImageFile = file.type.startsWith('image/');
+      // 画像ファイルのみBase64変換する（非画像の大容量ファイルでメモリ枯渇を防ぐ）
+      const base64 = isImageFile ? await fileToBase64(file) : undefined;
+      return { name: file.name, id: generateUniqueId(), base64, type: file.type, rawFile: file };
     })
   );
 };
@@ -99,8 +103,9 @@ export const processClipboardItems = async (items: DataTransferItemList): Promis
     Array.from(items).map(async (item) => {
       const file = item.getAsFile();
       if (file) {
-        const base64 = await fileToBase64(file);
-        return { name: file.name, id: generateUniqueId(), base64, type: file.type };
+        const isImageFile = file.type.startsWith('image/');
+        const base64 = isImageFile ? await fileToBase64(file) : undefined;
+        return { name: file.name, id: generateUniqueId(), base64, type: file.type, rawFile: file };
       }
       return null;
     })

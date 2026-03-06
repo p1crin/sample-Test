@@ -17,6 +17,7 @@ interface TestTableProps {
   userName?: string;
   executorsList?: Array<{ id: number; name: string; }>;
   executorsPerRow?: Record<string, Array<{ id: number; name: string }>>;
+  onEvidenceUploadedToSession?: (evidenceNo: number, testCaseNo: number, historyCount: number) => void;
 }
 
 // 行が編集不可かどうかを判定するヘルパー関数
@@ -24,7 +25,7 @@ const isRowDisabled = (row: TestCaseResultRow): boolean => {
   return row.judgment === JUDGMENT_OPTIONS.EXCLUDED || row.is_target === false;
 };
 
-const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, userName = '', executorsList = [], executorsPerRow = {} as Record<string, Array<{ id: number; name: string }>> }) => {
+const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, userName = '', executorsList = [], executorsPerRow = {} as Record<string, Array<{ id: number; name: string }>>, onEvidenceUploadedToSession }) => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [currentColumn, setCurrentColumn] = useState<string | null>(null);
   const [sortConfig, setSortConfig] = useState<SortConfig<TestCaseResultRow>>(null);
@@ -141,22 +142,10 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
       const historyCount = row.historyCount ?? 0;
       const formData = new FormData();
 
-      // Base64からBlobを作成してFormDataに追加
-      if (!file.base64) {
-        throw new Error(`ファイルデータが不正です: ${file.name} (base64データがありません)`);
+      if (!file.rawFile) {
+        throw new Error(`ファイルデータが不正です: ${file.name} (ファイルが見つかりません)`);
       }
-
-      // file.typeが空の場合はデフォルトのMIMEタイプを使用
-      const fileType = file.type || 'application/octet-stream';
-      const byteString = atob(file.base64);
-      const arrayBuffer = new ArrayBuffer(byteString.length);
-      const uint8Array = new Uint8Array(arrayBuffer);
-      for (let i = 0; i < byteString.length; i++) {
-        uint8Array[i] = byteString.charCodeAt(i);
-      }
-      const blob = new Blob([uint8Array], { type: fileType });
-      const fileObject = new File([blob], file.name, { type: fileType });
-      formData.append('file', fileObject);
+      formData.append('file', file.rawFile);
 
       formData.append('testGroupId', String(groupId));
       formData.append('tid', tid);
@@ -185,6 +174,9 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
           fileType: file.type
         });
 
+        // 今セッションでアップロードしたエビデンスを親コンポーネントに通知（確定対象の追跡用）
+        onEvidenceUploadedToSession?.(response.data.fileNo, row.test_case_no, historyCount);
+
         // アップロード成功時、pathとfileNoを含むFileInfoを返す
         return {
           ...file,
@@ -199,11 +191,11 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
         error: err instanceof Error ? err.message : String(err),
         fileName: file.name,
         fileType: file.type,
-        hasBase64: !!file.base64
+        hasRawFile: !!file.rawFile
       });
       throw err;
     }
-  }, [groupId, tid, data]);
+  }, [groupId, tid, data, onEvidenceUploadedToSession]);
 
   // ペーストイベントハンドラー
   const handlePaste = useCallback(async (pasteEvent: React.ClipboardEvent, rowIndex: number) => {

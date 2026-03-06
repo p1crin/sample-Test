@@ -276,24 +276,21 @@ const TestCaseRegistrantion: React.FC = () => {
     const { controlSpecFile, dataFlowFile, ...formDataForLog } = formData;
     clientLogger.info('テストケース新規登録画面', 'テストケース登録開始', { formData: formDataForLog, testContents });
 
-    // ファイル情報を除いてテストケースを登録
-    const payload = {
-      tid: formData.tid,
-      first_layer: formData.first_layer,
-      second_layer: formData.second_layer,
-      third_layer: formData.third_layer,
-      fourth_layer: formData.fourth_layer,
-      purpose: formData.purpose,
-      request_id: formData.request_id,
-      checkItems: formData.checkItems,
-      testProcedure: formData.testProcedure,
-      testContents: testContents,
-      // ファイル情報はここでは含めない
-      controlSpecFile: [],
-      dataFlowFile: [],
-    };
-
     try {
+      // テストケースを登録
+      const payload = {
+        tid: formData.tid,
+        first_layer: formData.first_layer,
+        second_layer: formData.second_layer,
+        third_layer: formData.third_layer,
+        fourth_layer: formData.fourth_layer,
+        purpose: formData.purpose,
+        request_id: formData.request_id,
+        checkItems: formData.checkItems,
+        testProcedure: formData.testProcedure,
+        testContents: testContents,
+      };
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const result = await apiPost<any>(`/api/test-groups/${groupId}/cases`, payload);
 
@@ -303,25 +300,16 @@ const TestCaseRegistrantion: React.FC = () => {
 
       clientLogger.info('テストケース新規登録画面', 'テストケース作成成功、ファイルアップロード開始', { groupId, tid: formData.tid });
 
-      // ファイルアップロード
+      // テストケース作成後にファイルをアップロード（isDynamic省略=false: is_deleted=falseで即確定）
       const allFiles = [
         ...formData.controlSpecFile.map(file => ({ file, type: FILE_TYPE.CONTROL_SPEC, name: '制御仕様書' })),
         ...formData.dataFlowFile.map(file => ({ file, type: FILE_TYPE.DATA_FLOW, name: 'データフロー' }))
       ];
 
       for (const { file, type, name } of allFiles) {
-        if (file.base64 && file.type) {
+        if (file.rawFile) {
           const formDataObj = new FormData();
-          const byteString = atob(file.base64);
-          const arrayBuffer = new ArrayBuffer(byteString.length);
-          const uint8Array = new Uint8Array(arrayBuffer);
-          for (let i = 0; i < byteString.length; i++) {
-            uint8Array[i] = byteString.charCodeAt(i);
-          }
-          const blob = new Blob([uint8Array], { type: file.type });
-          const fileObj = new File([blob], file.name, { type: file.type });
-
-          formDataObj.append('file', fileObj);
+          formDataObj.append('file', file.rawFile);
           formDataObj.append('testGroupId', String(groupId));
           formDataObj.append('tid', formData.tid);
           formDataObj.append('fileType', String(type));
