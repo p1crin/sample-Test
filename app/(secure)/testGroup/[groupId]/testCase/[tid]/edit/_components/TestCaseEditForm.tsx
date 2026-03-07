@@ -4,9 +4,10 @@ import ButtonGroup from '@/components/ui/buttonGroup';
 import FileUploadField from '@/components/ui/FileUploadField';
 import { Modal } from '@/components/ui/modal';
 import { VerticalForm } from '@/components/ui/verticalForm';
-import { apiDelete, apiFetch, apiPut } from '@/utils/apiClient';
+import { apiDelete, apiPut } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { FileInfo } from '@/utils/fileUtils';
+import { uploadFileToStorage } from '@/utils/uploadToStorage';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { UpdateTestCaseListRow } from '../../../../_components/types/testCase-list-row';
@@ -255,41 +256,34 @@ export function TestCaseEditForm({
     setDeletedContents(prev => [...prev, { testCaseNo: deletedDbId }]);
   };
 
-  // ファイルアップロード処理
+  // ファイルアップロード処理（Presigned URL経由でS3に直接アップロード）
   const handleFileUpload = async (file: FileInfo, fileType: number): Promise<FileInfo> => {
-    const formDataObj = new FormData();
-
-    if (file.rawFile) {
-      formDataObj.append('file', file.rawFile);
-      formDataObj.append('testGroupId', String(groupId));
-      formDataObj.append('tid', formData.tid);
-      formDataObj.append('fileType', String(fileType));
-      formDataObj.append('isDynamic', 'true'); // 動的アップロード：更新成功時にis_deletedをfalseに確定
-
-      const response = await apiFetch('/api/files/test-info', {
-        method: 'POST',
-        body: formDataObj,
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        clientLogger.info('テストケース編集画面', 'ファイルアップロード成功', { fileNo: result.data.fileNo, path: result.data.filePath, fileType: result.data.fileType });
-
-        // 今セッションでアップロードしたfileNoとして記録（確定対象の追跡用）
-        uploadedInSessionRef.current.add(result.data.fileNo as number);
-
-        return {
-          ...file,
-          fileNo: result.data.fileNo,
-          path: result.data.filePath,
-          fileType: result.data.fileType,
-        };
-      } else {
-        clientLogger.error('テストケース編集画面', 'ファイルアップロード失敗');
-      }
+    if (!file.base64 && !file.rawFile) {
+      return file;
     }
 
-    return file;
+    try {
+      const result = await uploadFileToStorage({
+        uploadType: 'test-info',
+        file,
+        testGroupId: groupId!,
+        tid: formData.tid,
+        fileType,
+        isDynamic: true, // 動的アップロード：更新成功時にis_deletedをfalseに確定
+      });
+
+      clientLogger.info('テストケース編集画面', 'ファイルアップロード成功', { fileNo: result.fileNo, path: result.path, fileType: result.fileType });
+
+      // 今セッションでアップロードしたfileNoとして記録（確定対象の追跡用）
+      if (result.fileNo !== undefined) {
+        uploadedInSessionRef.current.add(result.fileNo);
+      }
+
+      return result;
+    } catch (err) {
+      clientLogger.error('テストケース編集画面', 'ファイルアップロード失敗', { error: err instanceof Error ? err.message : String(err) });
+      return file;
+    }
   };
 
   const fields = [

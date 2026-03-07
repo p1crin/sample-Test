@@ -3,10 +3,10 @@ import { Column, DataGrid, SortConfig } from '@/components/datagrid/DataGrid';
 import { Button } from '@/components/ui/button';
 import { Modal } from '@/components/ui/modal';
 import { JUDGMENT_OPTIONS, JudgmentOption } from '@/constants/constants';
-import { apiPost } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { formatDateWithHyphen } from '@/utils/date-formatter';
 import { FileInfo, getUniqueFileNames, isImage, processClipboardItems, processFileList } from '@/utils/fileUtils';
+import { uploadFileToStorage } from '@/utils/uploadToStorage';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 interface TestTableProps {
@@ -135,57 +135,38 @@ const TestTable: React.FC<TestTableProps> = ({ groupId, tid, data, setData, user
     setSortConfig({ key, direction });
   };
 
-  // エビデンスファイルをS3にアップロード
+  // エビデンスファイルをアップロード（Presigned URL経由でS3に直接アップロード）
   const uploadEvidenceFile = useCallback(async (file: FileInfo, rowIndex: number): Promise<FileInfo> => {
     try {
       const row = data[rowIndex];
       const historyCount = row.historyCount ?? 0;
-      const formData = new FormData();
 
-      if (!file.rawFile) {
-        throw new Error(`ファイルデータが不正です: ${file.name} (ファイルが見つかりません)`);
+      if (!file.base64 && !file.rawFile) {
+        throw new Error(`ファイルデータが不正です: ${file.name} (ファイルデータがありません)`);
       }
-      formData.append('file', file.rawFile);
 
-      formData.append('testGroupId', String(groupId));
-      formData.append('tid', tid);
-      formData.append('testCaseNo', String(row.test_case_no));
-      formData.append('historyCount', String(historyCount));
-
-      // FormDataの場合はfetchを直接使用（Content-Typeは自動設定される）
-      const fetchResponse = await fetch('/api/files/evidences', {
-        method: 'POST',
-        body: formData,
+      const result = await uploadFileToStorage({
+        uploadType: 'evidence',
+        file,
+        testGroupId: groupId,
+        tid,
+        testCaseNo: row.test_case_no,
+        historyCount,
       });
 
-      if (!fetchResponse.ok) {
-        const responseText = await fetchResponse.text();
-        throw new Error(`エビデンスのアップロードに失敗しました (status: ${fetchResponse.status}, response: ${responseText})`);
+      clientLogger.info('TestTable', 'エビデンスアップロード成功', {
+        fileNo: result.fileNo,
+        evidencePath: result.path,
+        fileName: file.name,
+        fileType: file.type
+      });
+
+      // 今セッションでアップロードしたエビデンスを親コンポーネントに通知（確定対象の追跡用）
+      if (result.fileNo !== undefined) {
+        onEvidenceUploadedToSession?.(result.fileNo, row.test_case_no, historyCount);
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const response = await fetchResponse.json() as any;
-
-      if (response.success) {
-        clientLogger.info('TestTable', 'エビデンスアップロード成功', {
-          fileNo: response.data.fileNo,
-          evidencePath: response.data.evidencePath,
-          fileName: file.name,
-          fileType: file.type
-        });
-
-        // 今セッションでアップロードしたエビデンスを親コンポーネントに通知（確定対象の追跡用）
-        onEvidenceUploadedToSession?.(response.data.fileNo, row.test_case_no, historyCount);
-
-        // アップロード成功時、pathとfileNoを含むFileInfoを返す
-        return {
-          ...file,
-          path: response.data.evidencePath,
-          fileNo: response.data.fileNo,
-        };
-      } else {
-        throw new Error(`エビデンスのアップロードに失敗しました: ${response.error || 'unknown error'}`);
-      }
+      return result;
     } catch (err) {
       clientLogger.error('TestTable', 'エビデンスアップロード失敗', {
         error: err instanceof Error ? err.message : String(err),

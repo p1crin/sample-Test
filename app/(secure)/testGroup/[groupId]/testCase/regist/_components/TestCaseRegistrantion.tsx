@@ -5,9 +5,10 @@ import { Button } from '@/components/ui/button';
 import ButtonGroup from '@/components/ui/buttonGroup';
 import { Modal } from '@/components/ui/modal';
 import { VerticalForm } from '@/components/ui/verticalForm';
-import { apiFetch, apiGet, apiPost } from '@/utils/apiClient';
+import { apiGet, apiPost } from '@/utils/apiClient';
 import clientLogger from '@/utils/client-logger';
 import { FileInfo } from '@/utils/fileUtils';
+import { uploadFileToStorage } from '@/utils/uploadToStorage';
 import { useParams, useRouter } from 'next/navigation';
 import React, { useState } from 'react';
 import { CreateTestCaseListRow } from '../../../_components/types/testCase-list-row';
@@ -307,21 +308,14 @@ const TestCaseRegistrantion: React.FC = () => {
       ];
 
       for (const { file, type, name } of allFiles) {
-        if (file.rawFile) {
-          const formDataObj = new FormData();
-          formDataObj.append('file', file.rawFile);
-          formDataObj.append('testGroupId', String(groupId));
-          formDataObj.append('tid', formData.tid);
-          formDataObj.append('fileType', String(type));
-
-          const response = await apiFetch('/api/files/test-info', {
-            method: 'POST',
-            body: formDataObj,
+        if (file.base64 || file.rawFile) {
+          await uploadFileToStorage({
+            uploadType: 'test-info',
+            file,
+            testGroupId: groupId,
+            tid: formData.tid,
+            fileType: type,
           });
-
-          if (!response.ok) {
-            throw new Error(`${name}「${file.name}」のアップロードに失敗しました`);
-          }
           clientLogger.info('テストケース新規登録画面', `${name}アップロード成功`, { fileName: file.name });
         }
       }
