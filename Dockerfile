@@ -32,11 +32,15 @@ RUN apt-get update -y && \
 # Stage 1 から依存関係をコピー
 COPY --from=deps /app/node_modules ./node_modules
 
-# アプリケーションコードをコピー
-COPY . .
+# PrismaスキーマのみをコピーしてDockerレイヤーキャッシュを最大活用
+# → アプリコードのみ変更時に prisma generate がキャッシュヒットする
+COPY prisma ./prisma
 
-# Prisma schemaから型定義を生成
+# Prisma Clientを生成（スキーマが変わらない限りキャッシュが有効）
 RUN npx prisma generate
+
+# アプリケーションコードをコピー（コード変更時も上記レイヤーはキャッシュ済み）
+COPY . .
 
 # Next.jsアプリケーションをビルド
 ENV NEXT_TELEMETRY_DISABLED=1
