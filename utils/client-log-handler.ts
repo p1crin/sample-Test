@@ -19,8 +19,8 @@ class ClientLogHandler {
     const isDevelopment = process.env.NODE_ENV !== 'production';
     const isCloudWatchEnabled = process.env.ENABLE_CLOUDWATCH_LOGS === 'true';
 
-    // 本番環境でCloudWatchが有効な場合は直接CloudWatchに送信
-    const shouldUseCloudWatch = !isDevelopment && isCloudWatchEnabled;
+    // ENABLE_CLOUDWATCH_LOGS=true の場合はCloudWatchに送信（結合テスト向けに環境制限を撤廃）
+    const shouldUseCloudWatch = isCloudWatchEnabled;
 
     let stream;
     if (shouldUseCloudWatch) {
