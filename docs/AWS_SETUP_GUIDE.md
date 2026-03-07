@@ -21,6 +21,7 @@
    - [Step 12: WAF設定](#step-12-waf設定)
    - [Step 13: Route 53 DNS設定](#step-13-route-53-dns設定)
    - [Step 14: CloudWatch設定・証明書失効通知](#step-14-cloudwatch設定証明書失効通知)
+   - [Step 15: CloudFront設定（testgenアプリ統合）](#step-15-cloudfront設定testgenアプリ統合)
 6. [コスト最適化設定（開発環境）](#6-コスト最適化設定開発環境)
 7. [トラブルシューティング](#7-トラブルシューティング)
 
@@ -37,7 +38,14 @@
 - **開発環境**: コストを抑えた小規模構成
 - **本番環境**: 可用性とセキュリティを重視した構成
 
-### 主な変更点（2026-03-02）
+### 主な変更点（2026-03-07）
+
+- ✅ **CloudFront設定を追加（Step 15）**: testgenアプリ（htmx + Lambda）をtestcasedbと同一ドメインで統合配信
+- ✅ **アーキテクチャ図を更新**: CloudFront + Lambda構成を反映
+- ✅ **WAF設定をCloudFront対応に拡張**: us-east-1（Global）スコープのIP Set・Web ACL追加
+- ✅ **ALBへの直接アクセス制限手順を追加**: CloudFront経由のみに制限
+
+### 以前の変更点（2026-03-02）
 
 - ✅ **NATゲートウェイを廃止**: VPCエンドポイントのみで構成（コスト削減・セキュリティ強化）
 - ✅ **開発・本番のリソース共用方針を明記**: IAMロール等の共用可能なリソースを整理
@@ -94,48 +102,55 @@
 ### 3.2 アーキテクチャ図
 
 ```
-┌────────────────────────────────────────────────────────────────┐
-│                         AWS Cloud                              │
-│                                                                │
-│  ┌─────────────┐  ┌─────────────┐                             │
-│  │    WAF      │  │ Secrets Mgr │                             │
-│  │ （IP制限）   │  │ （RDS認証）  │                             │
-│  └──────┬──────┘  └─────────────┘                             │
-│         │                                                      │
-│  ┌──────▼──────────────────────────────────────────────────┐  │
-│  │           VPC (10.0.0.0/16)                              │  │
-│  │                                                          │  │
-│  │  ┌────────────────────────────────────────────────────┐ │  │
-│  │  │        Public Subnet (10.0.1.0/24, 10.0.2.0/24)    │ │  │
-│  │  │                                                    │ │  │
-│  │  │  ┌──────────────┐                                  │ │  │
-│  │  │  │     ALB      │                                  │ │  │
-│  │  │  │ (Internet-   │                                  │ │  │
-│  │  │  │  facing)     │                                  │ │  │
-│  │  │  └──────┬───────┘                                  │ │  │
-│  │  └─────────┼──────────────────────────────────────────┘ │  │
-│  │            │                                            │  │
-│  │  ┌─────────▼──────────────────────────────────────────┐ │  │
-│  │  │      Private Subnet (10.0.11.0/24, 10.0.12.0/24)  │ │  │
-│  │  │                                                    │ │  │
-│  │  │  ┌──────────────────┐  ┌──────────────────┐       │ │  │
-│  │  │  │  ECS Fargate     │  │ RDS PostgreSQL   │       │ │  │
-│  │  │  │ （プライベート）   │─▶│ （Multi-AZ）     │       │ │  │
-│  │  │  └──────────────────┘  └──────────────────┘       │ │  │
-│  │  │                                                    │ │  │
-│  │  │  ┌──────────────────────────────────────────────┐ │ │  │
-│  │  │  │  VPCエンドポイント                             │ │ │  │
-│  │  │  │  (S3, ECR API/DKR, Secrets Mgr, CW Logs)    │ │ │  │
-│  │  │  └──────────────────────────────────────────────┘ │ │  │
-│  │  └────────────────────────────────────────────────────┘ │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                │
-│  ┌────────────┐  ┌──────────────┐  ┌────────────────┐        │
-│  │    S3      │  │     ECR      │  │  CloudWatch    │        │
-│  │（ストレージ）│  │（コンテナ     │  │ （ログ・監視）  │        │
-│  │            │  │ レジストリ）  │  │                │        │
-│  └────────────┘  └──────────────┘  └────────────────┘        │
-└────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                              AWS Cloud                                    │
+│                                                                          │
+│  ┌────────────────────┐  ┌─────────────┐                                │
+│  │  WAF（CloudFront用）│  │ Secrets Mgr │                                │
+│  │  （IP制限, us-east-1）│  │ （RDS認証）  │                                │
+│  └─────────┬──────────┘  └─────────────┘                                │
+│            │                                                             │
+│  ┌─────────▼──────────────────────────────────────────┐                 │
+│  │        CloudFront (prooflink.example.com)           │                 │
+│  │                                                     │                 │
+│  │   /testgen*  ──→ Lambda Function URL (htmxアプリ)   │                 │
+│  │   /* (default) ──→ ALB (testcasedb)                 │                 │
+│  └──────────────────────┬──────────────────────────────┘                 │
+│                         │                                                │
+│  ┌──────────────────────▼─────────────────────────────────────────────┐ │
+│  │           VPC (10.0.0.0/16)                                         │ │
+│  │                                                                     │ │
+│  │  ┌───────────────────────────────────────────────────────────────┐ │ │
+│  │  │        Public Subnet (10.0.1.0/24, 10.0.2.0/24)              │ │ │
+│  │  │                                                               │ │ │
+│  │  │  ┌──────────────┐                                             │ │ │
+│  │  │  │     ALB      │                                             │ │ │
+│  │  │  │ (Internet-   │                                             │ │ │
+│  │  │  │  facing)     │                                             │ │ │
+│  │  │  └──────┬───────┘                                             │ │ │
+│  │  └─────────┼─────────────────────────────────────────────────────┘ │ │
+│  │            │                                                       │ │
+│  │  ┌─────────▼─────────────────────────────────────────────────────┐ │ │
+│  │  │      Private Subnet (10.0.11.0/24, 10.0.12.0/24)             │ │ │
+│  │  │                                                               │ │ │
+│  │  │  ┌──────────────────┐  ┌──────────────────┐                  │ │ │
+│  │  │  │  ECS Fargate     │  │ RDS PostgreSQL   │                  │ │ │
+│  │  │  │ （プライベート）   │─▶│ （Multi-AZ）     │                  │ │ │
+│  │  │  └──────────────────┘  └──────────────────┘                  │ │ │
+│  │  │                                                               │ │ │
+│  │  │  ┌──────────────────────────────────────────────────────────┐│ │ │
+│  │  │  │  VPCエンドポイント                                        ││ │ │
+│  │  │  │  (S3, ECR API/DKR, Secrets Mgr, CW Logs)               ││ │ │
+│  │  │  └──────────────────────────────────────────────────────────┘│ │ │
+│  │  └─────────────────────────────────────────────────────────────┘ │ │
+│  └─────────────────────────────────────────────────────────────────┘ │
+│                                                                      │
+│  ┌────────────┐  ┌──────────────┐  ┌────────────────┐  ┌─────────┐ │
+│  │    S3      │  │     ECR      │  │  CloudWatch    │  │ Lambda  │ │
+│  │（ストレージ）│  │（コンテナ     │  │ （ログ・監視）  │  │(testgen)│ │
+│  │            │  │ レジストリ）  │  │                │  │         │ │
+│  └────────────┘  └──────────────┘  └────────────────┘  └─────────┘ │
+└──────────────────────────────────────────────────────────────────────────┘
                          ▲
                          │ HTTPS（許可IPのみ）
                          │
@@ -148,9 +163,11 @@
 
 | コンポーネント | 用途 | 配置場所 |
 |--------------|------|---------|
-| **WAF** | IP制限によるアクセス制御 | ALBに関連付け |
-| **ALB** | HTTPS終端、負荷分散 | パブリックサブネット |
-| **ECS Fargate** | アプリケーション実行 | **プライベートサブネット** |
+| **CloudFront** | CDN・パスベースルーティング（testcasedb / testgen振り分け） | エッジロケーション |
+| **WAF** | IP制限によるアクセス制御 | CloudFrontに関連付け（us-east-1） |
+| **ALB** | アプリケーションへの負荷分散 | パブリックサブネット |
+| **ECS Fargate** | testcasedbアプリケーション実行 | **プライベートサブネット** |
+| **Lambda** | testgenアプリケーション実行（htmx） | マネージドサービス |
 | **RDS PostgreSQL** | データベース | プライベートサブネット |
 | **Secrets Manager** | RDS認証情報の管理 | マネージドサービス |
 | **S3** | ファイルストレージ（インポート用・エビデンス用） | マネージドサービス |
@@ -173,7 +190,8 @@
 |---------|------|------|
 | **IAMロール** | `prooflink-ecs-task-execution-role`<br>`prooflink-ecs-task-role` | S3ポリシーがワイルドカード（`prooflink-*`）で両環境のバケットをカバー |
 | **Route 53 ホストゾーン** | `example.com` のホストゾーン | 同一ドメイン内に開発・本番のレコードを追加可能 |
-| **WAF IPセット** | `prooflink-allowed-ips` | 同じ許可IPアドレスリストを使用する場合 |
+| **WAF IPセット** | `prooflink-allowed-ips`（Regional）<br>`prooflink-allowed-ips-global`（CloudFront用） | 同じ許可IPアドレスリストを使用する場合 |
+| **CloudFrontディストリビューション** | `prooflink.example.com` | testcasedb・testgenの両アプリを統合配信 |
 | **SNSトピック** | `prooflink-cert-expiry-alert` | 証明書失効通知は環境を問わず同じ通知先でよい |
 
 ### 4.2 本番環境用に新規作成が必要なリソース
@@ -189,8 +207,11 @@
 | ECRリポジトリ | `prooflink-dev-app` | `prooflink-prod-app` |
 | ECSクラスター | `prooflink-dev-cluster` | `prooflink-prod-cluster` |
 | ALB | `prooflink-dev-alb` | `prooflink-prod-alb` |
-| ACM証明書 | 不要（HTTP） | 本番ドメイン用に新規取得 |
-| WAF Web ACL | `prooflink-dev-waf-acl` | `prooflink-prod-waf-acl`（本番ALBに関連付け） |
+| ACM証明書（東京） | 不要（HTTP） | 本番ドメイン用に新規取得 |
+| ACM証明書（us-east-1） | 不要 | CloudFront用に新規取得 |
+| WAF Web ACL（Regional） | `prooflink-dev-waf-acl` | `prooflink-prod-waf-acl`（本番ALBに関連付け） |
+| WAF Web ACL（Global） | 不要 | `prooflink-prod-cf-waf-acl`（CloudFrontに関連付け） |
+| CloudFront | 不要 | `prooflink-prod-cf`（本番のみ） |
 | CloudWatch ロググループ | `/ecs/prooflink-dev-*` | `/ecs/prooflink-prod-*` |
 
 > **ポイント**: 本番環境の構築手順は開発環境と同じです。各Stepで「本番環境」の設定値を選択してください。
@@ -1177,6 +1198,8 @@ HTTPS リスナーの追加設定:
 
 #### 13-1. Aレコードの作成（本番ドメイン用）
 
+> **注意**: CloudFront（Step 15）を設定する場合は、ここではALBへのAレコードを作成し、Step 15-4でCloudFrontに切り替えます。
+
 1. 「**Route 53**」→「**ホストゾーン**」→ドメイン（例: `example.com`）を選択
 2. 「**レコードを作成**」をクリック
 
@@ -1194,6 +1217,8 @@ HTTPS リスナーの追加設定:
 数分後、`https://prooflink.example.com` でアクセスできるようになります。
 
 > **注意**: `prooflink.example.com` は実際に使用するドメイン名に置き換えてください。
+>
+> **次のステップ**: testgenアプリを統合する場合は、Step 15に進んでCloudFrontを設定してください。Step 15-4でこのAレコードのルーティング先をCloudFrontに変更します。
 
 ---
 
@@ -1342,6 +1367,240 @@ fields @timestamp
 | stats count() as logCount by bin(1h)
 | sort @timestamp desc
 ```
+
+---
+
+### Step 15: CloudFront設定（testgenアプリ統合）
+
+> **注意**: このステップは本番環境でのみ実施します。CloudFrontを使用して `prooflink.example.com` 配下で testcasedb（`/`）と testgen（`/testgen`）の2つのアプリケーションを統合配信します。
+
+#### 構成概要
+
+```
+ユーザー
+  │
+  ▼
+CloudFront (prooflink.example.com)
+  ├── /testgen*   ──→ Lambda Function URL（htmxアプリ）
+  └── /* (default) ──→ ALB（testcasedb ECS）
+```
+
+- testcasedb: 既存のALB → ECS Fargate構成をCloudFrontのデフォルトオリジンとして利用
+- testgen: 既存のCloudFront + Lambda構成のLambda Function URLをCloudFrontの追加オリジンとして利用
+- WAFによるIP制限はCloudFrontに関連付け（既存ALBのWAFと同じIPセットを使用）
+
+#### 15-1. ACM証明書の取得（us-east-1）
+
+CloudFrontで使用するACM証明書は **us-east-1（バージニア北部）** で取得する必要があります。
+
+1. **リージョンを「米国東部（バージニア北部）us-east-1」に切り替え**
+2. 「**Certificate Manager**」→「**証明書をリクエスト**」
+
+| 項目 | 値 |
+|------|-----|
+| 証明書タイプ | パブリック証明書をリクエスト |
+| ドメイン名 | `prooflink.example.com` |
+| 検証方法 | **DNS検証**（推奨） |
+
+3. 「**リクエスト**」をクリック
+4. 作成した証明書をクリック → 「**Route 53でレコードを作成**」
+5. 証明書のステータスが「**発行済み**」になるまで待機（5〜30分）
+
+> **ヒント**: Step 10で取得した東京リージョンの証明書とは**別に**、us-east-1でも証明書が必要です。ワイルドカード証明書（`*.example.com`）を取得済みの場合でも、us-east-1に同じドメインの証明書が必要です。DNS検証用のCNAMEレコードは東京リージョンの証明書と同じ値になるため、Route 53に既にレコードがあれば自動的に検証されます。
+
+#### 15-2. WAF設定（CloudFront用・us-east-1）
+
+CloudFrontに関連付けるWAFは **us-east-1（Global）** スコープで作成する必要があります。
+
+##### IP Setの作成（Global）
+
+1. **リージョンを「米国東部（バージニア北部）us-east-1」のまま操作**
+2. 「**WAF & Shield**」→「**IP sets**」→「**Create IP set**」
+
+| 項目 | 値 |
+|------|-----|
+| IP set name | `prooflink-allowed-ips-global` |
+| Region | **Global (CloudFront)** |
+| IP version | IPv4 |
+| IP addresses | Step 12で設定したものと同じIPアドレスを入力 |
+
+3. 「**Create IP set**」をクリック
+
+> **重要**: 東京リージョンで作成した `prooflink-allowed-ips` はCloudFrontには使用できません。CloudFront用にGlobalスコープのIP Setを別途作成する必要があります。IPアドレスの追加・変更時は両方のIP Setを更新してください。
+
+##### Web ACLの作成（CloudFront用）
+
+1. 「**WAF & Shield**」→「**Web ACLs**」→「**Create web ACL**」
+
+| 項目 | 値 |
+|------|-----|
+| Name | `prooflink-prod-cf-waf-acl` |
+| Resource type | **CloudFront distributions** |
+
+2. 「**Next**」をクリック
+
+##### ルールの追加
+
+1. 「**Add rules**」→「**Add my own rules and rule groups**」
+2. Rule type: **IP set**
+
+| 項目 | 値 |
+|------|-----|
+| Name | `allow-specific-ips` |
+| IP set | `prooflink-allowed-ips-global` |
+| IP address to use | Source IP address |
+| Action | **Allow** |
+
+3. 「**Add rule**」をクリック
+4. **Default action**: **Block**
+5. 「**Next**」→「**Next**」→「**Create web ACL**」をクリック
+
+> **注意**: CloudFrontへのWAF関連付けは、Step 15-3でCloudFrontディストリビューション作成時に行います。
+
+#### 15-3. CloudFrontディストリビューションの作成
+
+1. **リージョンを「米国東部（バージニア北部）us-east-1」のまま操作**（CloudFrontはグローバルサービスですが、コンソールはus-east-1で操作します）
+2. 「**CloudFront**」→「**ディストリビューションを作成**」
+
+##### オリジン1の設定（ALB - testcasedb）
+
+| 項目 | 値 |
+|------|-----|
+| オリジンドメイン | `prooflink-prod-alb-XXXXXXXXX.ap-northeast-1.elb.amazonaws.com`（ALBのDNS名） |
+| プロトコル | HTTPS only |
+| HTTPSポート | 443 |
+| オリジン名 | `prooflink-alb` |
+
+> **注意**: ALBのDNS名はStep 11-3で確認した値を入力してください。
+
+**「ディストリビューションを作成」ボタンはまだクリックしない**でください。先にデフォルトビヘイビアを設定します。
+
+##### デフォルトビヘイビアの設定（testcasedb用）
+
+| 項目 | 値 |
+|------|-----|
+| パスパターン | Default (*) |
+| オリジン | `prooflink-alb` |
+| ビューワープロトコルポリシー | Redirect HTTP to HTTPS |
+| 許可されたHTTPメソッド | GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE |
+| キャッシュポリシー | CachingDisabled |
+| オリジンリクエストポリシー | AllViewerExceptHostHeader |
+
+> **重要**: testcasedbはNext.jsの動的アプリケーションのため、キャッシュは無効にします。`AllViewerExceptHostHeader` を選択することで、CloudFrontがALBにリクエストを転送する際にHostヘッダーをALBのドメインに書き換えます。
+
+##### ディストリビューション設定
+
+| 項目 | 値 |
+|------|-----|
+| 代替ドメイン名（CNAME） | `prooflink.example.com` |
+| カスタムSSL証明書 | Step 15-1で取得したus-east-1の証明書を選択 |
+| セキュリティポリシー | TLSv1.2_2021（推奨） |
+| デフォルトルートオブジェクト | 空欄のまま |
+| AWS WAF ウェブACL | `prooflink-prod-cf-waf-acl`（Step 15-2で作成） |
+| 説明 | ProofLink Production Distribution |
+
+3. 「**ディストリビューションを作成**」をクリック
+
+ディストリビューションのデプロイには数分〜15分程度かかります。ステータスが「**有効**」になるまで待ちます。
+
+4. 作成されたディストリビューションの「**ドメイン名**」をメモ（例: `d1234567890.cloudfront.net`）
+
+##### オリジン2の追加（Lambda Function URL - testgen）
+
+1. 作成したディストリビューションをクリック
+2. 「**オリジン**」タブ → 「**オリジンを作成**」
+
+| 項目 | 値 |
+|------|-----|
+| オリジンドメイン | Lambda Function URLのドメイン部分（例: `xxxxxxxxxx.lambda-url.ap-northeast-1.on.aws`） |
+| プロトコル | HTTPS only |
+| オリジン名 | `prooflink-testgen-lambda` |
+
+3. 「**オリジンを作成**」をクリック
+
+> **確認**: Lambda Function URLは、Lambda関数の「設定」→「関数URL」で確認できます。`https://` は除いたドメイン部分のみを入力してください。
+
+##### ビヘイビアの追加（testgen用）
+
+1. 「**ビヘイビア**」タブ → 「**ビヘイビアを作成**」
+
+| 項目 | 値 |
+|------|-----|
+| パスパターン | `/testgen*` |
+| オリジン | `prooflink-testgen-lambda` |
+| ビューワープロトコルポリシー | Redirect HTTP to HTTPS |
+| 許可されたHTTPメソッド | GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE |
+| キャッシュポリシー | CachingDisabled |
+| オリジンリクエストポリシー | AllViewerExceptHostHeader |
+
+2. 「**ビヘイビアを作成**」をクリック
+
+> **ビヘイビアの優先順位**: CloudFrontは上から順にパスパターンをマッチさせます。`/testgen*` が `Default (*)` より上にあることを確認してください。「**ビヘイビア**」タブで順序を確認・変更できます。
+
+#### 15-4. Route 53の更新（ALB → CloudFrontに変更）
+
+既存のRoute 53 Aレコードを、ALBからCloudFrontディストリビューションに変更します。
+
+1. 「**Route 53**」→「**ホストゾーン**」→ ドメイン（例: `example.com`）を選択
+2. `prooflink.example.com` のAレコードを選択 → 「**レコードを編集**」
+
+| 項目 | 変更前 | 変更後 |
+|------|--------|--------|
+| レコードタイプ | A - IPv4アドレス | A - IPv4アドレス（変更なし） |
+| エイリアス | はい | はい（変更なし） |
+| トラフィックのルーティング先 | Application Load Balancerへのエイリアス | **CloudFrontディストリビューションへのエイリアス** |
+| ディストリビューション | - | Step 15-3で作成したディストリビューションを選択 |
+
+3. 「**保存**」をクリック
+
+> **注意**: DNS伝搬に数分かかる場合があります。切り替え後、`https://prooflink.example.com` と `https://prooflink.example.com/testgen` の両方でアクセスできることを確認してください。
+
+#### 15-5. ALBへの直接アクセスを制限
+
+CloudFront経由のアクセスのみを許可するため、ALBへの直接アクセスを制限します。
+
+##### 方法: ALBセキュリティグループの修正
+
+ALBのセキュリティグループのインバウンドルールを、CloudFrontのIPレンジのみに制限します。
+
+1. 「**EC2**」→「**セキュリティグループ**」→ `prooflink-prod-alb-sg` を選択
+2. 「**インバウンドルール**」→「**インバウンドルールを編集**」
+
+既存のルール（`0.0.0.0/0` からの80/443）を削除し、以下に置き換えます:
+
+| タイプ | ポート | ソース | 説明 |
+|--------|--------|--------|------|
+| HTTPS | 443 | **AWSプレフィックスリスト** `com.amazonaws.global.cloudfront.origin-facing` | CloudFrontからのアクセスのみ許可 |
+
+3. 「**ルールを保存**」をクリック
+
+> **注意**: AWSマネージドプレフィックスリスト `com.amazonaws.global.cloudfront.origin-facing` を使用すると、CloudFrontのIPレンジが自動的に管理されます。セキュリティグループのソース入力欄で「pl-」と入力すると、プレフィックスリストが候補に表示されます。
+
+> **重要**: この設定により、ALBのDNS名に直接アクセスしてもブロックされます。全てのアクセスは `prooflink.example.com`（CloudFront経由）で行ってください。
+
+#### 15-6. 動作確認
+
+以下のURLにアクセスして動作を確認します:
+
+| URL | 期待される動作 |
+|-----|--------------|
+| `https://prooflink.example.com` | testcasedbアプリが表示される |
+| `https://prooflink.example.com/testgen` | testgenアプリ（htmx）が表示される |
+| `https://prooflink.example.com/api/health` | `{"status":"ok"}` が返る |
+| ALBのDNS名に直接アクセス | アクセスがブロックされる |
+| 許可IP以外からのアクセス | WAFによりブロックされる（403 Forbidden） |
+
+> **トラブルシューティング**: testgenアプリが正しく表示されない場合は、Lambda Function URL側のアプリケーションが `/testgen` プレフィックス付きのパスを処理できるか確認してください。CloudFrontはパスパターンをそのまま（`/testgen/xxx`）オリジンに転送します。Lambda側のルーティング設定の調整が必要な場合があります。
+
+#### 15-7. 既存testgen用CloudFrontディストリビューションの整理
+
+testgenアプリが `prooflink.example.com/testgen` 経由でアクセスできることを確認した後、既存のtestgen用CloudFrontディストリビューション（`xxx.cloudfront.net`）は不要になります。
+
+1. 「**CloudFront**」→ 既存のtestgen用ディストリビューションを選択
+2. 「**無効化**」をクリック（即時削除ではなく、まず無効化して一定期間様子を見ることを推奨）
+3. 問題がないことを確認後、「**削除**」をクリック
+
+> **注意**: 無効化後も数日間は既存のURLでアクセスが試みられる可能性があります。関係者にURLの変更を周知してから無効化してください。
 
 ---
 
@@ -1547,5 +1806,5 @@ ECSタスクのログでAWSサービスへの接続エラーを確認
 ---
 
 **作成日**: 2026-01-23
-**最終更新**: 2026-03-02
+**最終更新**: 2026-03-07
 **対象環境**: 開発・本番共通
